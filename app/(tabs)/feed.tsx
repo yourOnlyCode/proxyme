@@ -5,10 +5,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, FlatList, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
+import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
 const { width, height } = Dimensions.get('window');
-const ITEM_HEIGHT = height - 90; // Adjust for tab bar height
+const ITEM_HEIGHT = height - 90; 
 
 type Photo = {
   url: string;
@@ -23,7 +24,8 @@ type FeedProfile = {
   avatar_url: string | null;
   dist_meters: number;
   photos: Photo[] | null;
-  interests: string[] | null;
+  detailed_interests: Record<string, string[]> | null; 
+  relationship_goals: string[] | null; 
   shared_interests_count: number;
 };
 
@@ -41,7 +43,7 @@ export default function FeedScreen() {
     const { data, error } = await supabase.rpc('get_feed_users', {
       lat: location.coords.latitude,
       long: location.coords.longitude,
-      range_meters: 30000 // 30km City Range
+      range_meters: 30000 
     });
 
     if (!error) {
@@ -78,8 +80,16 @@ export default function FeedScreen() {
       }
   };
 
+  const handleSafety = (targetUserId: string) => {
+      if (user) {
+          showSafetyOptions(user.id, targetUserId, () => {
+              // Remove blocked user from feed immediately
+              setFeed(prev => prev.filter(p => p.id !== targetUserId));
+          });
+      }
+  };
+
   const renderItem = ({ item }: { item: FeedProfile }) => {
-     // Prepare photos array
      let displayPhotos: string[] = [];
      if (item.photos && item.photos.length > 0) {
          displayPhotos = item.photos.map(p => p.url);
@@ -89,7 +99,6 @@ export default function FeedScreen() {
 
      return (
          <View style={{ width, height: ITEM_HEIGHT }} className="bg-black relative">
-             {/* Photo Carousel */}
              <FlatList
                 data={displayPhotos}
                 horizontal
@@ -101,7 +110,6 @@ export default function FeedScreen() {
                 )}
              />
              
-             {/* Pagination Dots */}
              {displayPhotos.length > 1 && (
                  <View className="absolute top-10 left-0 right-0 flex-row justify-center space-x-2">
                      {displayPhotos.map((_, i) => (
@@ -110,36 +118,59 @@ export default function FeedScreen() {
                  </View>
              )}
 
-             {/* Gradient Overlay */}
-             <View className="absolute bottom-0 left-0 right-0 h-1/2 bg-black/40" pointerEvents="none" />
+             {/* Safety Button */}
+             <TouchableOpacity 
+                className="absolute top-12 right-4 bg-black/40 p-2 rounded-full backdrop-blur-md z-10"
+                onPress={() => handleSafety(item.id)}
+             >
+                 <IconSymbol name="ellipsis" size={24} color="white" />
+             </TouchableOpacity>
 
-             {/* Content Overlay */}
+             <View className="absolute bottom-0 left-0 right-0 h-3/4 bg-black/40" pointerEvents="none" />
+
              <View className="absolute bottom-10 left-4 right-4">
-                 <View className="flex-row items-center mb-2">
-                     <Text className="text-white text-3xl font-bold mr-2">{item.full_name}</Text>
-                     <Text className="text-gray-300 text-xl">@{item.username}</Text>
+                 <View className="flex-row items-center mb-1">
+                     <Text className="text-white text-3xl font-bold mr-2 shadow-sm">{item.full_name}</Text>
                  </View>
+                 <Text className="text-gray-300 text-xl mb-3 shadow-sm">@{item.username}</Text>
 
-                 {/* Interests Tags */}
-                 <View className="flex-row flex-wrap mb-3">
-                     {item.interests?.map((tag) => (
-                         <View key={tag} className="bg-white/20 px-3 py-1 rounded-full mr-2 mb-2">
-                             <Text className="text-white text-sm font-semibold">{tag}</Text>
+                 {/* Relationship Goals */}
+                 {item.relationship_goals && item.relationship_goals.length > 0 && (
+                     <View className="flex-row flex-wrap mb-3">
+                         {item.relationship_goals.map((goal, idx) => (
+                             <View key={idx} className="bg-white/20 px-2 py-1 rounded mr-2 mb-1 backdrop-blur-sm">
+                                 <Text className="text-white text-xs font-bold uppercase">{goal}</Text>
+                             </View>
+                         ))}
+                     </View>
+                 )}
+
+                 {/* Detailed Interests */}
+                 <View className="mb-4">
+                     {item.detailed_interests && Object.keys(item.detailed_interests).length > 0 ? (
+                         <View className="flex-row flex-wrap">
+                             {Object.entries(item.detailed_interests).map(([category, details]) => (
+                                 <View key={category} className="bg-white/10 px-3 py-1.5 rounded-lg mr-2 mb-2 border border-white/20">
+                                     <Text className="text-white text-xs font-bold mb-0.5 opacity-70 uppercase">{category}</Text>
+                                     {details && details.length > 0 ? (
+                                         <Text className="text-white text-sm font-semibold">{details.join(', ')}</Text>
+                                     ) : null}
+                                 </View>
+                             ))}
                          </View>
-                     ))}
+                     ) : null}
                  </View>
 
-                 <Text className="text-white text-base mb-6 shadow-sm" numberOfLines={3}>{item.bio}</Text>
+                 <Text className="text-white text-base mb-6 shadow-sm font-medium" numberOfLines={3}>{item.bio}</Text>
 
-                 {/* Action Buttons */}
                  <View className="flex-row justify-between items-center">
-                     <View className="flex-row items-center bg-black/50 px-3 py-1 rounded-lg">
+                     <View className="flex-row items-center bg-black/60 px-3 py-2 rounded-lg backdrop-blur-md">
                          <IconSymbol name="location.fill" size={16} color="white" />
-                         <Text className="text-white ml-1">{Math.round(item.dist_meters)}m away</Text>
+                         <Text className="text-white ml-2 font-bold">{Math.round(item.dist_meters)}m away</Text>
                      </View>
 
                      <TouchableOpacity 
-                        className="bg-white px-6 py-3 rounded-full"
+                        className="bg-white px-8 py-3 rounded-full shadow-lg"
                         onPress={() => sendInterest(item.id)}
                      >
                          <Text className="text-black font-bold text-lg">Connect</Text>
@@ -184,8 +215,6 @@ function FeedImage({ path, style }: { path: string | null, style: any }) {
     useEffect(() => {
       if (!path) return;
       
-      // Get a signed URL or public URL from Supabase
-      // For public buckets, we can construct the URL directly for caching
       const { data } = supabase.storage.from('avatars').getPublicUrl(path);
       setUrl(data.publicUrl);
       

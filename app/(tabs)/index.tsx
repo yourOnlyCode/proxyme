@@ -1,9 +1,10 @@
-import { Image } from 'expo-image';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, RefreshControl, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Image, RefreshControl, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
+import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
 type Photo = {
@@ -19,7 +20,8 @@ type FeedProfile = {
   avatar_url: string | null;
   dist_meters: number;
   photos: Photo[] | null;
-  interests: string[] | null;
+  detailed_interests: Record<string, string[]> | null; 
+  relationship_goals: string[] | null; 
   shared_interests_count: number;
 };
 
@@ -55,17 +57,12 @@ export default function HomeScreen() {
     if (isProxyActive && location) {
       fetchProxyFeed();
 
-      // Subscribe to Realtime Updates on Profiles
       const subscription = supabase
         .channel('public:profiles')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'profiles' },
           (payload) => {
-            // When ANY profile changes (someone updates loc, turns proxy on/off)
-            // Re-run our geospatial query to see if they are now relevant to us.
-            // (We can't filter complex GIS in the subscription itself easily)
-            console.log('Realtime update received:', payload.eventType);
             fetchProxyFeed(); 
           }
         )
@@ -95,33 +92,98 @@ export default function HomeScreen() {
       }
   };
 
+  const handleSafety = (targetUserId: string) => {
+      if (user) {
+          showSafetyOptions(user.id, targetUserId, () => {
+              setFeed(prev => prev.filter(p => p.id !== targetUserId));
+          });
+      }
+  };
+
   const renderCard = ({ item }: { item: FeedProfile }) => {
+    const topInterests: string[] = [];
+    if (item.detailed_interests) {
+        Object.entries(item.detailed_interests).forEach(([cat, details]) => {
+            if (details.length > 0) {
+                topInterests.push(`${cat}: ${details[0]}`); 
+            } else {
+                topInterests.push(cat);
+            }
+        });
+    }
+
     return (
-      <View className="bg-white rounded-xl mb-3 shadow-sm p-4 border border-gray-100 flex-row items-center">
-        <View className="h-16 w-16 bg-gray-200 rounded-full overflow-hidden mr-4">
-            <FeedImage path={item.avatar_url} style={{ width: '100%', height: '100%' }} />
+      <View className="bg-white rounded-xl mb-3 shadow-sm p-4 border border-gray-100 flex-row items-start relative">
+        {/* Safety Options */}
+        <TouchableOpacity 
+            className="absolute top-2 right-2 p-2 z-10"
+            onPress={() => handleSafety(item.id)}
+        >
+            <IconSymbol name="ellipsis" size={20} color="#9CA3AF" />
+        </TouchableOpacity>
+
+        <View className="h-16 w-16 bg-gray-200 rounded-full overflow-hidden mr-4 mt-1">
+            <FeedImage path={item.avatar_url} />
         </View>
 
-        <View className="flex-1">
-            <Text className="text-lg font-bold">{item.full_name || item.username}</Text>
-            <View className="flex-row items-center">
+        <View className="flex-1 pr-6">
+            <View className="flex-row justify-between items-start">
+                <Text className="text-lg font-bold">{item.full_name || item.username}</Text>
+            </View>
+            {item.shared_interests_count > 0 && (
+                <View className="bg-blue-100 px-2 py-0.5 rounded self-start mb-1">
+                    <Text className="text-blue-700 text-xs font-bold">
+                        {item.shared_interests_count} Matches
+                    </Text>
+                </View>
+            )}
+            
+            {/* Relationship Goals Badges */}
+            {item.relationship_goals && item.relationship_goals.length > 0 && (
+                <View className="flex-row flex-wrap mt-1 mb-1">
+                    {item.relationship_goals.map((goal, idx) => (
+                        <View key={idx} className="bg-purple-100 px-1.5 py-0.5 rounded mr-1 mb-1">
+                            <Text className="text-purple-700 text-[10px] font-bold uppercase">{goal}</Text>
+                        </View>
+                    ))}
+                </View>
+            )}
+
+            <View className="flex-row items-center mb-2">
                  <View className="bg-green-100 px-2 py-0.5 rounded mr-2">
                      <Text className="text-green-700 text-xs font-bold">HERE</Text>
                  </View>
                  <Text className="text-gray-500 text-xs">{Math.round(item.dist_meters)}m away</Text>
             </View>
-            {item.interests && item.interests.length > 0 && (
-                <Text className="text-gray-400 text-xs mt-1" numberOfLines={1}>
-                    {item.interests.join(' • ')}
+
+            {/* Dynamic Prompt based on Looking For */}
+            {item.relationship_goals && item.relationship_goals.length > 0 && (
+                <Text className="text-gray-800 text-xs italic font-semibold mb-2">
+                    {item.relationship_goals[0] === 'Romance' && "Break the ice! Send an interest."}
+                    {item.relationship_goals[0] === 'Friendship' && "You have a lot in common!"}
+                    {item.relationship_goals[0] === 'Business' && "Find fellow experts at the event!"}
                 </Text>
+            )}
+
+            {topInterests.length > 0 && (
+                <View className="flex-row flex-wrap">
+                    {topInterests.slice(0, 3).map((tag, idx) => (
+                        <View key={idx} className="bg-gray-100 px-2 py-1 rounded mr-1 mb-1 border border-gray-200">
+                            <Text className="text-gray-600 text-xs">{tag}</Text>
+                        </View>
+                    ))}
+                    {topInterests.length > 3 && (
+                        <Text className="text-gray-400 text-xs mt-1">+{topInterests.length - 3} more</Text>
+                    )}
+                </View>
             )}
         </View>
 
         <TouchableOpacity 
-            className="bg-black px-4 py-2 rounded-lg"
+            className="bg-black px-3 py-2 rounded-lg ml-2 self-center"
             onPress={() => sendInterest(item.id)}
         >
-            <Text className="text-white font-bold">Connect</Text>
+            <Text className="text-white font-bold text-xs">Connect</Text>
         </TouchableOpacity>
       </View>
     );
@@ -181,7 +243,7 @@ export default function HomeScreen() {
   );
 }
 
-function FeedImage({ path, style }: { path: string | null, style: any }) {
+function FeedImage({ path }: { path: string | null }) {
     const [url, setUrl] = useState<string | null>(null);
   
     useEffect(() => {
@@ -190,15 +252,13 @@ function FeedImage({ path, style }: { path: string | null, style: any }) {
       setUrl(data.publicUrl);
     }, [path]);
   
-    if (!url) return <View style={style} className="bg-gray-200" />;
+    if (!url) return <View className="w-full h-full bg-gray-200" />;
   
     return (
       <Image 
-        source={url} 
-        style={style} 
-        contentFit="cover"
-        transition={200}
-        cachePolicy="memory-disk" 
+        source={{ uri: url }} 
+        style={{ width: '100%', height: '100%' }}
+        resizeMode="cover"
       />
     );
 }
