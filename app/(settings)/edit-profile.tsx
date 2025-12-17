@@ -1,7 +1,7 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Button, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import Avatar from '../../components/profile/Avatar';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
@@ -102,34 +102,38 @@ export default function EditProfileScreen() {
       }
 
       const updates = {
-        id: user.id,
         username,
         full_name: fullName,
         bio,
         avatar_url: cleanAvatarPath,
         relationship_goals: relationshipGoals,
-        // Socials are auto-saved now, but no harm including them to be safe
         social_links: socials,
         updated_at: new Date(),
       };
 
       console.log('Sending update to Supabase:', updates);
 
-      const { data, error } = await supabase
+      // Use Update instead of Upsert to avoid RLS confusion if row exists
+      const { error } = await supabase
         .from('profiles')
-        .upsert(updates)
-        .select();
+        .update(updates)
+        .eq('id', user.id);
 
       if (error) {
+        console.error('Supabase Update Error:', error);
         throw error;
       }
 
-      Alert.alert('Success', 'Profile updated successfully!');
-      router.back();
-    } catch (error) {
-      if (error instanceof Error) {
-        Alert.alert('Error', error.message);
-      }
+      console.log('Update successful, navigating back...');
+      
+      // Navigate back immediately, then show a toast or small alert if needed
+      // Or just go back. Standard iOS pattern is just to go back.
+      router.back(); 
+      // Optional: Alert.alert('Success', 'Profile updated');
+
+    } catch (error: any) {
+      console.error('Catch Error:', error);
+      Alert.alert('Error Updating Profile', error.message || 'An unexpected error occurred.');
     } finally {
       setSaving(false);
     }
@@ -137,6 +141,25 @@ export default function EditProfileScreen() {
 
   const selectGoal = (goal: string) => {
     setRelationshipGoals([goal]);
+  };
+
+  const getGoalStyle = (goal: string, isSelected: boolean) => {
+      switch(goal) {
+          case 'Romance': return isSelected ? 'bg-romance border-romance' : 'border-romance/30 bg-white';
+          case 'Friendship': return isSelected ? 'bg-friendship border-friendship' : 'border-friendship/30 bg-white';
+          case 'Business': return isSelected ? 'bg-business border-business' : 'border-business/30 bg-white';
+          default: return isSelected ? 'bg-black border-black' : 'border-gray-300 bg-white';
+      }
+  };
+
+  const getGoalTextStyle = (goal: string, isSelected: boolean) => {
+      if (isSelected) return 'text-white';
+      switch(goal) {
+          case 'Romance': return 'text-romance';
+          case 'Friendship': return 'text-friendship';
+          case 'Business': return 'text-business';
+          default: return 'text-gray-700';
+      }
   };
 
   const handleSetCover = async (path: string) => {
@@ -236,22 +259,27 @@ export default function EditProfileScreen() {
 
   return (
     <View className="flex-1 bg-white">
-      <ScrollView className="flex-1 p-4">
+      {/* Modal Grabber Indicator */}
+      <View className="items-center pt-2 pb-2 bg-white">
+          <View className="w-12 h-1.5 bg-gray-300 rounded-full" />
+      </View>
+
+      <ScrollView className="flex-1 px-4">
         {/* Verification Banner */}
         <TouchableOpacity 
             onPress={() => router.push('/(settings)/get-verified')}
-            className={`mb-6 p-4 rounded-xl flex-row items-center justify-between ${
-                isVerified ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50 border border-gray-100'
+            className={`mb-6 p-4 rounded-2xl flex-row items-center justify-between ${
+                isVerified ? 'bg-business/10 border border-business/20' : 'bg-gray-50 border border-gray-100 shadow-sm'
             }`}
         >
             <View className="flex-row items-center">
                 <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${
-                    isVerified ? 'bg-blue-500' : 'bg-gray-200'
+                    isVerified ? 'bg-business' : 'bg-gray-200'
                 }`}>
                     <IconSymbol name="checkmark.seal.fill" size={20} color="white" />
                 </View>
                 <View>
-                    <Text className="font-bold text-base">
+                    <Text className="font-bold text-base text-ink">
                         {isVerified ? 'You are Verified' : 'Get Verified'}
                     </Text>
                     <Text className="text-gray-500 text-xs">
@@ -272,31 +300,31 @@ export default function EditProfileScreen() {
         </View>
 
         <View className="mb-4">
-          <Text className="text-gray-500 mb-1 ml-1">Username</Text>
+          <Text className="text-gray-500 mb-1 ml-1 font-medium">Username</Text>
           <TextInput
               value={username}
               onChangeText={setUsername}
-              className="border border-gray-300 rounded-lg p-3 text-base"
+              className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
           />
         </View>
 
         <View className="mb-4">
-          <Text className="text-gray-500 mb-1 ml-1">Full Name</Text>
+          <Text className="text-gray-500 mb-1 ml-1 font-medium">Full Name</Text>
           <TextInput
               value={fullName}
               onChangeText={setFullName}
-              className="border border-gray-300 rounded-lg p-3 text-base"
+              className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
           />
         </View>
 
         <View className="mb-6">
-          <Text className="text-gray-500 mb-1 ml-1">Bio</Text>
+          <Text className="text-gray-500 mb-1 ml-1 font-medium">Bio</Text>
           <TextInput
               value={bio}
               onChangeText={setBio}
               multiline
               numberOfLines={4}
-              className="border border-gray-300 rounded-lg p-3 text-base h-24"
+              className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base h-24 text-ink"
               style={{ textAlignVertical: 'top' }}
           />
         </View>
@@ -310,11 +338,9 @@ export default function EditProfileScreen() {
                       <TouchableOpacity 
                           key={opt}
                           onPress={() => selectGoal(opt)}
-                          className={`w-[32%] py-3 rounded-lg border items-center justify-center ${
-                              isSelected ? 'bg-black border-black' : 'bg-white border-gray-300'
-                          }`}
+                          className={`w-[32%] py-3 rounded-lg border items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
                       >
-                          <Text className={`font-bold ${isSelected ? 'text-white' : 'text-gray-700'}`}>
+                          <Text className={`font-bold ${getGoalTextStyle(opt, isSelected)}`}>
                               {opt}
                           </Text>
                       </TouchableOpacity>
@@ -327,30 +353,30 @@ export default function EditProfileScreen() {
             <Text className="text-gray-500 mb-2 ml-1 font-bold">Interests</Text>
             <TouchableOpacity 
               onPress={() => router.push('/(settings)/edit-interests')}
-              className="flex-row items-center justify-between bg-gray-50 p-4 rounded-xl border border-gray-200"
+              className="flex-row items-center justify-between bg-gray-50 p-4 rounded-xl border border-gray-200 shadow-sm"
             >
                 <View className="flex-row items-center">
                     <IconSymbol name="star.fill" size={20} color="#F59E0B" />
-                    <Text className="ml-3 font-semibold text-lg">Manage Detailed Interests</Text>
+                    <Text className="ml-3 font-semibold text-lg text-ink">Manage Detailed Interests</Text>
                 </View>
                 <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
             </TouchableOpacity>
         </View>
 
         {/* Dynamic Social Links List */}
-        <View className="mb-8 bg-gray-50 p-4 rounded-xl border border-gray-100">
-            <Text className="text-lg font-bold mb-4">Social Links</Text>
+        <View className="mb-8 bg-gray-50 p-4 rounded-xl border border-gray-200">
+            <Text className="text-lg font-bold mb-1 text-ink">Social Links</Text>
             <Text className="text-gray-400 text-xs mb-4">Added links are saved automatically.</Text>
             
             {Object.entries(socials).map(([key, value]) => {
                 const config = SOCIAL_PLATFORMS.find(p => p.id === key);
                 if (!config) return null;
                 return (
-                    <View key={key} className="flex-row items-center justify-between bg-white p-3 rounded-lg mb-2 border border-gray-200">
+                    <View key={key} className="flex-row items-center justify-between bg-white p-3 rounded-lg mb-2 border border-gray-200 shadow-sm">
                         <View className="flex-row items-center flex-1">
                             <IconSymbol name={config.icon as any} size={20} color={config.color} />
-                            <Text className="ml-3 font-semibold text-gray-700 capitalize">{config.name}</Text>
-                            <Text className="ml-2 text-gray-400 text-xs flex-1" numberOfLines={1}>{value}</Text>
+                            <Text className="ml-3 font-semibold text-ink capitalize">{config.name}</Text>
+                            <Text className="ml-2 text-gray-500 text-xs flex-1" numberOfLines={1}>{value}</Text>
                         </View>
                         <TouchableOpacity onPress={() => removeSocial(key)} className="p-1">
                             <IconSymbol name="xmark.circle.fill" size={20} color="#EF4444" />
@@ -361,7 +387,7 @@ export default function EditProfileScreen() {
 
             <TouchableOpacity 
               onPress={openSocialModal}
-              className="flex-row items-center justify-center bg-black py-3 rounded-lg mt-2"
+              className="flex-row items-center justify-center bg-black py-3 rounded-lg mt-2 shadow-md"
             >
                 <IconSymbol name="plus" size={16} color="white" />
                 <Text className="text-white font-bold ml-2">Add Link</Text>
@@ -377,19 +403,25 @@ export default function EditProfileScreen() {
 
         <View className="h-8" />
 
-        <Button title={saving ? 'Saving...' : 'Save Profile'} onPress={updateProfile} disabled={saving} color="#000" />
+        <TouchableOpacity 
+            onPress={updateProfile}
+            disabled={saving}
+            className="bg-black py-4 rounded-xl items-center shadow-lg mb-4"
+        >
+            {saving ? (
+                <ActivityIndicator color="white" />
+            ) : (
+                <Text className="text-white font-bold text-lg">Save Profile</Text>
+            )}
+        </TouchableOpacity>
         
-        <View className="h-12" />
-
         {/* Delete Account Button */}
         <TouchableOpacity 
             onPress={handleDeleteAccount}
-            className="items-center py-4"
+            className="items-center py-4 mb-10"
         >
-            <Text className="text-red-500 font-bold">Delete Account</Text>
+            <Text className="text-romance font-bold">Delete Account</Text>
         </TouchableOpacity>
-        
-        <View className="h-10" />
       </ScrollView>
 
       {/* Social Modal - Full Height Keyboard Avoiding */}
@@ -399,10 +431,15 @@ export default function EditProfileScreen() {
             className="flex-1 justify-end bg-black/50"
           >
               <View className="bg-white rounded-t-3xl p-6 h-[85%] pb-10">
+                  {/* Modal Grabber */}
+                  <View className="items-center mb-6">
+                      <View className="w-12 h-1.5 bg-gray-300 rounded-full" />
+                  </View>
+
                   <View className="flex-row justify-between items-center mb-6">
-                      <Text className="text-xl font-bold">Add Social Link</Text>
-                      <TouchableOpacity onPress={() => setShowSocialModal(false)}>
-                          <IconSymbol name="xmark" size={24} color="black" />
+                      <Text className="text-2xl font-bold text-ink">Add Social Link</Text>
+                      <TouchableOpacity onPress={() => setShowSocialModal(false)} className="p-2 bg-gray-100 rounded-full">
+                          <IconSymbol name="xmark" size={20} color="#1A1A1A" />
                       </TouchableOpacity>
                   </View>
 
@@ -415,10 +452,10 @@ export default function EditProfileScreen() {
                                     <TouchableOpacity 
                                       key={p.id}
                                       onPress={() => setSelectedPlatform(p.id)}
-                                      className="w-[30%] aspect-square bg-gray-50 rounded-xl items-center justify-center mb-4 border border-gray-200"
+                                      className="w-[30%] aspect-square bg-gray-50 rounded-2xl items-center justify-center mb-4 border border-gray-200 shadow-sm"
                                     >
                                         <IconSymbol name={p.icon as any} size={32} color={p.color} />
-                                        <Text className="text-xs font-bold mt-2">{p.name}</Text>
+                                        <Text className="text-xs font-bold mt-2 text-ink">{p.name}</Text>
                                     </TouchableOpacity>
                                 );
                             })}
@@ -426,29 +463,29 @@ export default function EditProfileScreen() {
                     ) : (
                         <View>
                             <View className="flex-row items-center mb-6">
-                                <TouchableOpacity onPress={() => setSelectedPlatform(null)} className="mr-3 p-2 bg-gray-100 rounded-full">
-                                    <IconSymbol name="chevron.left" size={24} color="black" />
+                                <TouchableOpacity onPress={() => setSelectedPlatform(null)} className="mr-3 p-2 bg-gray-100 rounded-full border border-gray-200">
+                                    <IconSymbol name="chevron.left" size={24} color="#1A1A1A" />
                                 </TouchableOpacity>
                                 <View className="flex-row items-center">
                                     <IconSymbol name={currentPlatformConfig?.icon as any} size={28} color={currentPlatformConfig?.color} />
-                                    <Text className="text-xl font-bold ml-3">{currentPlatformConfig?.name}</Text>
+                                    <Text className="text-xl font-bold ml-3 text-ink">{currentPlatformConfig?.name}</Text>
                                 </View>
                             </View>
                             
-                            <Text className="text-gray-500 mb-2 font-semibold">Enter your handle or URL:</Text>
+                            <Text className="text-gray-500 mb-2 font-semibold ml-1">Enter your handle or URL:</Text>
                             <TextInput
                                 placeholder={currentPlatformConfig?.placeholder}
                                 value={tempLink}
                                 onChangeText={setTempLink}
                                 autoCapitalize="none"
-                                className="bg-gray-100 p-5 rounded-2xl text-lg mb-6 border border-gray-200"
+                                className="bg-gray-50 p-5 rounded-2xl text-lg mb-6 border border-gray-200 text-ink"
                                 autoFocus
                             />
 
                             <TouchableOpacity 
                                 onPress={handleAddSocial}
                                 disabled={!tempLink.trim() || savingSocial}
-                                className={`py-4 rounded-xl items-center flex-row justify-center ${!tempLink.trim() ? 'bg-gray-200' : 'bg-black'}`}
+                                className={`py-4 rounded-xl items-center flex-row justify-center shadow-lg ${!tempLink.trim() ? 'bg-gray-200' : 'bg-black'}`}
                             >
                                 {savingSocial ? (
                                     <ActivityIndicator color="white" />

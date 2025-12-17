@@ -126,6 +126,17 @@ export default function ChatScreen() {
       }
   };
 
+  const getSocialIcon = (platform: string) => {
+      switch (platform) {
+          case 'instagram': return { name: 'camera.fill', color: '#E1306C' };
+          case 'tiktok': return { name: 'music.note', color: '#000000' };
+          case 'facebook': return { name: 'hand.thumbsup.fill', color: '#1877F2' };
+          case 'linkedin': return { name: 'briefcase.fill', color: '#0077B5' };
+          case 'x': return { name: 'bubble.left.fill', color: '#1DA1F2' }; // Using generic bubble for X if logo unavailable
+          default: return { name: 'link', color: '#718096' };
+      }
+  };
+
   return (
     <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -134,7 +145,7 @@ export default function ChatScreen() {
       {/* Header */}
       <View className="px-4 pt-12 pb-4 border-b border-gray-100 flex-row items-center bg-white shadow-sm z-10">
           <TouchableOpacity onPress={() => router.back()} className="mr-4">
-              <IconSymbol name="chevron.left" size={24} color="black" />
+              <IconSymbol name="chevron.left" size={24} color="#1A1A1A" />
           </TouchableOpacity>
           
           {partner && (
@@ -144,20 +155,21 @@ export default function ChatScreen() {
                         <ChatAvatar path={partner.avatar_url} />
                     </View>
                     <View>
-                        <Text className="font-bold text-lg">{partner.full_name}</Text>
+                        <Text className="font-bold text-lg text-ink">{partner.full_name}</Text>
                         
-                        {/* Social Links Mini-Bar */}
+                        {/* Social Links Mini-Bar with Icons */}
                         {partner.social_links && Object.keys(partner.social_links).length > 0 && (
                             <View className="flex-row mt-1 space-x-2">
                                 {Object.entries(partner.social_links).map(([platform, handle]) => {
                                     if (!handle) return null;
+                                    const iconConfig = getSocialIcon(platform);
                                     return (
                                         <TouchableOpacity 
                                             key={platform} 
                                             onPress={() => openLink(getSocialUrl(platform, handle))}
-                                            className="bg-gray-100 px-1.5 py-0.5 rounded"
+                                            className="bg-gray-50 p-1.5 rounded-full border border-gray-100"
                                         >
-                                            <Text className="text-[10px] font-bold uppercase text-gray-600">{platform.substring(0, 2)}</Text>
+                                            <IconSymbol name={iconConfig.name as any} size={12} color={iconConfig.color} />
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -171,7 +183,7 @@ export default function ChatScreen() {
 
       <ScrollView 
         ref={scrollViewRef}
-        className="flex-1 px-4"
+        className="flex-1 px-4 bg-white"
         contentContainerStyle={{ paddingVertical: 20 }}
         onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
       >
@@ -181,26 +193,26 @@ export default function ChatScreen() {
                 <View 
                     key={msg.id} 
                     className={`mb-4 max-w-[80%] p-3 rounded-2xl ${
-                        isMe ? 'bg-black self-end rounded-br-none' : 'bg-gray-100 self-start rounded-bl-none'
+                        isMe ? 'bg-business self-end rounded-br-none shadow-sm' : 'bg-gray-100 self-start rounded-bl-none'
                     }`}
                 >
-                    <Text className={isMe ? 'text-white' : 'text-black'}>{msg.content}</Text>
+                    <Text className={isMe ? 'text-white font-medium' : 'text-ink'}>{msg.content}</Text>
                 </View>
             );
         })}
       </ScrollView>
 
-      <View className="p-4 border-t border-gray-100 pb-8">
+      <View className="p-4 border-t border-gray-100 pb-8 bg-white">
           <View className="flex-row items-center bg-gray-50 rounded-full px-4 border border-gray-200">
               <TextInput
                   value={newMessage}
                   onChangeText={setNewMessage}
                   placeholder="Type a message..."
-                  className="flex-1 py-3 text-base"
+                  className="flex-1 py-3 text-base text-ink"
                   onSubmitEditing={sendMessage}
               />
               <TouchableOpacity onPress={sendMessage} disabled={!newMessage.trim()}>
-                  <Text className={`font-bold ${newMessage.trim() ? 'text-blue-600' : 'text-gray-400'}`}>Send</Text>
+                  <Text className={`font-bold ${newMessage.trim() ? 'text-business' : 'text-gray-400'}`}>Send</Text>
               </TouchableOpacity>
           </View>
       </View>

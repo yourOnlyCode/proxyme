@@ -1,7 +1,7 @@
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Dimensions, FlatList, RefreshControl, Text, TouchableOpacity, View, Image } from 'react-native';
-import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Dimensions, FlatList, Image, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { showSafetyOptions } from '../../lib/safety';
@@ -73,39 +73,50 @@ export default function CityFeedScreen() {
     fetchFeed();
   }, [location]);
 
+  const getTheme = (goal?: string) => {
+      switch(goal) {
+          case 'Romance': return { button: 'bg-romance', badge: 'bg-romance/20', text: 'text-romance', border: 'border-romance/50' };
+          case 'Friendship': return { button: 'bg-friendship', badge: 'bg-friendship/20', text: 'text-friendship', border: 'border-friendship/50' };
+          case 'Business': return { button: 'bg-business', badge: 'bg-business/20', text: 'text-business', border: 'border-business/50' };
+          default: return { button: 'bg-white', badge: 'bg-white/20', text: 'text-white', border: 'border-white/20' };
+      }
+  };
+
   const renderItem = ({ item }: { item: FeedProfile }) => {
     // If no photos, use avatar. If no avatar, placeholder.
     const hasPhotos = item.photos && item.photos.length > 0;
+    const primaryGoal = item.relationship_goals?.[0];
+    const theme = getTheme(primaryGoal);
     
     return (
       <View style={{ height: CARD_HEIGHT }} className="w-full mb-8 relative">
         {/* Image Carousel (Simplified as single image for MVP, swipeable later) */}
-        <View className="w-full h-full bg-gray-200">
+        <View className="w-full h-full bg-ink">
              <FeedImage path={hasPhotos ? item.photos![0].url : item.avatar_url} />
         </View>
         
         {/* Overlay Content */}
-        <View className="absolute bottom-0 left-0 right-0 bg-black/40 p-4 pt-12">
-            <View className="flex-row justify-between items-end mb-2">
+        <View className="absolute bottom-0 left-0 right-0 bg-ink/60 p-5 pt-16">
+            <View className="flex-row justify-between items-end mb-3">
                 <View>
                     <View className="flex-row items-center">
-                         <Text className="text-white text-3xl font-bold shadow-sm">{item.full_name}</Text>
+                         <Text className="text-paper text-3xl font-extrabold shadow-sm tracking-tight">{item.full_name}</Text>
                          {item.is_verified && (
                              <View className="ml-2 bg-white rounded-full">
                                 <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" />
                              </View>
                          )}
                     </View>
-                    <Text className="text-gray-200 text-lg font-medium">@{item.username}</Text>
+                    <Text className="text-gray-300 text-lg font-medium">@{item.username}</Text>
                 </View>
                 
                 <View className="items-end">
-                    <View className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full mb-2">
-                         <Text className="text-white font-bold">{Math.round(item.dist_meters / 1000)}km away</Text>
+                    <View className="bg-ink/40 backdrop-blur-md px-3 py-1 rounded-full mb-2 border border-white/10">
+                         <Text className="text-gray-300 font-bold text-xs">{Math.round(item.dist_meters / 1000)}km away</Text>
                     </View>
                     {item.shared_interests_count > 0 && (
-                        <View className="bg-blue-500 px-3 py-1 rounded-full">
-                            <Text className="text-white font-bold">
+                        <View className={`${theme.button} px-3 py-1 rounded-full shadow-lg`}>
+                            <Text className="text-white font-bold text-xs uppercase tracking-wide">
                                 {item.shared_interests_count} Matches
                             </Text>
                         </View>
@@ -115,25 +126,28 @@ export default function CityFeedScreen() {
 
             {/* Relationship Goals */}
             {item.relationship_goals && item.relationship_goals.length > 0 && (
-                <View className="flex-row mb-2">
-                    {item.relationship_goals.map((goal, idx) => (
-                        <View key={idx} className="bg-white/20 px-2 py-1 rounded mr-2">
-                             <Text className="text-white text-xs font-bold uppercase">{goal}</Text>
-                        </View>
-                    ))}
+                <View className="flex-row mb-3">
+                    {item.relationship_goals.map((goal, idx) => {
+                        const goalTheme = getTheme(goal);
+                        return (
+                            <View key={idx} className={`px-2 py-1 rounded mr-2 border ${goalTheme.border} ${goalTheme.badge}`}>
+                                <Text className={`${goalTheme.text} text-xs font-bold uppercase tracking-wider`}>{goal}</Text>
+                            </View>
+                        );
+                    })}
                 </View>
             )}
 
-            <Text className="text-white text-base leading-5 mb-3" numberOfLines={2}>
+            <Text className="text-paper text-base leading-6 mb-4 font-medium" numberOfLines={3}>
                 {item.bio}
             </Text>
 
             {/* Detailed Interests Preview */}
             {item.detailed_interests && (
-                <View className="flex-row flex-wrap mb-4">
+                <View className="flex-row flex-wrap mb-6">
                     {Object.entries(item.detailed_interests).slice(0, 3).map(([cat, details], i) => (
-                        <View key={i} className="bg-white/10 px-2 py-1 rounded-lg mr-2 mb-1 border border-white/20">
-                            <Text className="text-white text-xs">
+                        <View key={i} className="bg-paper/10 px-3 py-1.5 rounded-lg mr-2 mb-2 border border-paper/20">
+                            <Text className="text-paper text-xs font-semibold">
                                 {details.length > 0 ? `${cat}: ${details[0]}` : cat}
                             </Text>
                         </View>
@@ -144,20 +158,20 @@ export default function CityFeedScreen() {
             {/* Actions */}
             <View className="flex-row justify-between items-center mt-2">
                  <TouchableOpacity 
-                    className="p-3 bg-white/20 rounded-full"
+                    className="p-4 bg-paper/10 rounded-full backdrop-blur-md"
                     onPress={() => handleSafety(item.id)}
                  >
                      <IconSymbol name="ellipsis" size={24} color="white" />
                  </TouchableOpacity>
 
                  <TouchableOpacity 
-                    className="flex-1 bg-blue-600 mx-4 py-4 rounded-xl items-center shadow-lg"
+                    className={`flex-1 mx-4 py-4 rounded-2xl items-center shadow-xl ${theme.button}`}
                     onPress={() => {
                         Alert.alert('Sent!', `Interest sent to ${item.full_name}`);
                         // Add actual logic: insert into interests table
                     }}
                  >
-                     <Text className="text-white font-bold text-lg">Send Interest</Text>
+                     <Text className="text-white font-bold text-lg tracking-widest uppercase">Send Interest</Text>
                  </TouchableOpacity>
             </View>
         </View>
@@ -166,13 +180,21 @@ export default function CityFeedScreen() {
   };
 
   return (
-    <View className="flex-1 bg-black">
+    <View className="flex-1 bg-ink">
       <FlatList
         data={feed}
         renderItem={renderItem}
         keyExtractor={item => item.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchFeed} tintColor="white" />}
         contentContainerStyle={{ paddingBottom: 80 }}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+            <View className="flex-1 items-center justify-center pt-32 px-10 opacity-70">
+                <IconSymbol name="moon.stars.fill" size={64} color="#A0AEC0" />
+                <Text className="text-gray-400 text-xl font-bold mt-6 text-center">It's quiet in the city...</Text>
+                <Text className="text-gray-600 text-base mt-2 text-center">Be the first to share your profile!</Text>
+            </View>
+        }
       />
     </View>
   );
@@ -187,7 +209,7 @@ function FeedImage({ path }: { path: string | null }) {
       setUrl(data.publicUrl);
     }, [path]);
   
-    if (!url) return <View className="w-full h-full bg-gray-800" />;
+    if (!url) return <View className="w-full h-full bg-ink" />;
   
     return (
       <Image 

@@ -1,17 +1,29 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Tabs } from 'expo-router';
+import { Platform } from 'react-native';
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#2563EB', // Blue-600
+        tabBarActiveTintColor: '#2962FF', // Vibrant Blue
         tabBarInactiveTintColor: '#9CA3AF', // Gray-400
         headerShown: false,
         tabBarStyle: {
-            backgroundColor: 'white',
-            borderTopWidth: 1,
-            borderTopColor: '#E5E7EB',
+            backgroundColor: '#FFFFFF',
+            borderTopWidth: 0,
+            elevation: 10,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 10,
+            height: Platform.OS === 'ios' ? 88 : 60,
+            paddingBottom: Platform.OS === 'ios' ? 28 : 8,
+            paddingTop: 8,
+        },
+        tabBarLabelStyle: {
+            fontWeight: '600',
+            fontSize: 10,
         }
       }}>
       <Tabs.Screen

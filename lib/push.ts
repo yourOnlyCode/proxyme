@@ -41,12 +41,22 @@ export async function registerForPushNotificationsAsync(userId: string) {
     // Get the token
     try {
         const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
-        if (!projectId) {
-            // Provide fallback or just let it try (Expo Go handles it differently)
-            // console.log("Project ID not found, using default");
+        
+        // Robust check for valid UUID
+        const isValidUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
+        // If we have a valid projectId, use it.
+        // If it is 'your-project-id' (placeholder) OR invalid, DO NOT pass it.
+        // Passing an empty object {} triggers the error if projectId is missing in context but we tried to be explicit.
+        // The safest way for development (Expo Go) is to call getExpoPushTokenAsync() with NO arguments if we don't have a specific ID.
+        
+        if (projectId && isValidUUID(projectId)) {
+            token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+        } else {
+            // Fallback for Expo Go / Dev Client without explicit ID
+            token = (await Notifications.getExpoPushTokenAsync()).data;
         }
 
-        token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
         console.log('Expo Push Token:', token);
 
         // Save to Supabase
@@ -62,7 +72,8 @@ export async function registerForPushNotificationsAsync(userId: string) {
         }
 
     } catch (e) {
-        console.error('Error getting push token:', e);
+        // Log but don't crash app flow
+        console.log('Push Notification Error (Non-Fatal):', e);
     }
   } else {
     console.log('Must use physical device for Push Notifications');
@@ -70,4 +81,3 @@ export async function registerForPushNotificationsAsync(userId: string) {
 
   return token;
 }
-
