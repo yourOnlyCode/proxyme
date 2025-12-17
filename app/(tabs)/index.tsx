@@ -1,7 +1,7 @@
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, Image, RefreshControl, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { showSafetyOptions } from '../../lib/safety';
@@ -22,6 +22,7 @@ type FeedProfile = {
   photos: Photo[] | null;
   detailed_interests: Record<string, string[]> | null; 
   relationship_goals: string[] | null; 
+  is_verified: boolean; // NEW
   shared_interests_count: number;
 };
 
@@ -127,9 +128,13 @@ export default function HomeScreen() {
         </View>
 
         <View className="flex-1 pr-6">
-            <View className="flex-row justify-between items-start">
-                <Text className="text-lg font-bold">{item.full_name || item.username}</Text>
+            <View className="flex-row items-center mb-1">
+                <Text className="text-lg font-bold mr-1">{item.full_name || item.username}</Text>
+                {item.is_verified && (
+                    <IconSymbol name="checkmark.seal.fill" size={16} color="#3B82F6" />
+                )}
             </View>
+            
             {item.shared_interests_count > 0 && (
                 <View className="bg-blue-100 px-2 py-0.5 rounded self-start mb-1">
                     <Text className="text-blue-700 text-xs font-bold">

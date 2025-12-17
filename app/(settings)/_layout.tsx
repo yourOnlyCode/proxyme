@@ -11,6 +11,20 @@ export default function SettingsLayout() {
           headerBackTitle: 'Profile' 
         }} 
       />
+      <Stack.Screen 
+        name="edit-interests" 
+        options={{ 
+          title: 'Interests', 
+          presentation: 'modal' 
+        }} 
+      />
+      <Stack.Screen 
+        name="get-verified" 
+        options={{ 
+          title: 'Get Verified', 
+          presentation: 'modal' 
+        }} 
+      />
     </Stack>
   );
 }

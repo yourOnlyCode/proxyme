@@ -1,15 +1,16 @@
+import { useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { Dimensions, FlatList, RefreshControl, Text, TouchableOpacity, View, Image } from 'react-native';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Image } from 'expo-image';
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, FlatList, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
-const { width, height } = Dimensions.get('window');
-const ITEM_HEIGHT = height - 90; 
+const { width } = Dimensions.get('window');
+
+// Keep card height manageable, not full screen to encourage scrolling
+const CARD_HEIGHT = width * 1.3; 
 
 type Photo = {
   url: string;
@@ -24,211 +25,175 @@ type FeedProfile = {
   avatar_url: string | null;
   dist_meters: number;
   photos: Photo[] | null;
-  detailed_interests: Record<string, string[]> | null; 
-  relationship_goals: string[] | null; 
+  detailed_interests: Record<string, string[]> | null;
+  relationship_goals: string[] | null;
+  is_verified: boolean; // NEW
   shared_interests_count: number;
 };
 
-export default function FeedScreen() {
+const CITY_RANGE = 30000; // 30km for "City"
+
+export default function CityFeedScreen() {
   const { user } = useAuth();
   const { location } = useProxyLocation();
   const [feed, setFeed] = useState<FeedProfile[]>([]);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  
+  const router = useRouter();
+
   const fetchFeed = async () => {
     if (!user || !location) return;
+
     setLoading(true);
 
     const { data, error } = await supabase.rpc('get_feed_users', {
       lat: location.coords.latitude,
       long: location.coords.longitude,
-      range_meters: 30000 
+      range_meters: CITY_RANGE
     });
 
-    if (!error) {
+    if (error) {
+      console.error('Error fetching city feed:', error);
+    } else {
       setFeed(data || []);
     }
     setLoading(false);
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await fetchFeed();
-    setRefreshing(false);
-  };
-
-  useFocusEffect(
-    useCallback(() => {
-      fetchFeed();
-    }, [location])
-  );
-
-  const sendInterest = async (targetUserId: string) => {
-      const { error } = await supabase
-        .from('interests')
-        .insert({
-            sender_id: user?.id,
-            receiver_id: targetUserId,
-            status: 'pending'
-        });
-      
-      if (error) {
-          Alert.alert('Error', error.message);
-      } else {
-          Alert.alert('Sent!', 'Interest sent successfully.');
-      }
-  };
-
   const handleSafety = (targetUserId: string) => {
-      if (user) {
-          showSafetyOptions(user.id, targetUserId, () => {
-              // Remove blocked user from feed immediately
-              setFeed(prev => prev.filter(p => p.id !== targetUserId));
-          });
-      }
+    if (user) {
+        showSafetyOptions(user.id, targetUserId, () => {
+            // Remove user from feed immediately
+            setFeed(prev => prev.filter(p => p.id !== targetUserId));
+        });
+    }
   };
+
+  // Initial load
+  useCallback(() => {
+    fetchFeed();
+  }, [location]);
 
   const renderItem = ({ item }: { item: FeedProfile }) => {
-     let displayPhotos: string[] = [];
-     if (item.photos && item.photos.length > 0) {
-         displayPhotos = item.photos.map(p => p.url);
-     } else if (item.avatar_url) {
-         displayPhotos = [item.avatar_url];
-     }
-
-     return (
-         <View style={{ width, height: ITEM_HEIGHT }} className="bg-black relative">
-             <FlatList
-                data={displayPhotos}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                keyExtractor={(photo, index) => `${item.id}-${index}`}
-                renderItem={({ item: photoUrl }) => (
-                    <FeedImage path={photoUrl} style={{ width, height: ITEM_HEIGHT }} />
-                )}
-             />
-             
-             {displayPhotos.length > 1 && (
-                 <View className="absolute top-10 left-0 right-0 flex-row justify-center space-x-2">
-                     {displayPhotos.map((_, i) => (
-                         <View key={i} className="w-16 h-1 bg-white/30 rounded-full mx-1" />
-                     ))}
-                 </View>
-             )}
-
-             {/* Safety Button */}
-             <TouchableOpacity 
-                className="absolute top-12 right-4 bg-black/40 p-2 rounded-full backdrop-blur-md z-10"
-                onPress={() => handleSafety(item.id)}
-             >
-                 <IconSymbol name="ellipsis" size={24} color="white" />
-             </TouchableOpacity>
-
-             <View className="absolute bottom-0 left-0 right-0 h-3/4 bg-black/40" pointerEvents="none" />
-
-             <View className="absolute bottom-10 left-4 right-4">
-                 <View className="flex-row items-center mb-1">
-                     <Text className="text-white text-3xl font-bold mr-2 shadow-sm">{item.full_name}</Text>
-                 </View>
-                 <Text className="text-gray-300 text-xl mb-3 shadow-sm">@{item.username}</Text>
-
-                 {/* Relationship Goals */}
-                 {item.relationship_goals && item.relationship_goals.length > 0 && (
-                     <View className="flex-row flex-wrap mb-3">
-                         {item.relationship_goals.map((goal, idx) => (
-                             <View key={idx} className="bg-white/20 px-2 py-1 rounded mr-2 mb-1 backdrop-blur-sm">
-                                 <Text className="text-white text-xs font-bold uppercase">{goal}</Text>
+    // If no photos, use avatar. If no avatar, placeholder.
+    const hasPhotos = item.photos && item.photos.length > 0;
+    
+    return (
+      <View style={{ height: CARD_HEIGHT }} className="w-full mb-8 relative">
+        {/* Image Carousel (Simplified as single image for MVP, swipeable later) */}
+        <View className="w-full h-full bg-gray-200">
+             <FeedImage path={hasPhotos ? item.photos![0].url : item.avatar_url} />
+        </View>
+        
+        {/* Overlay Content */}
+        <View className="absolute bottom-0 left-0 right-0 bg-black/40 p-4 pt-12">
+            <View className="flex-row justify-between items-end mb-2">
+                <View>
+                    <View className="flex-row items-center">
+                         <Text className="text-white text-3xl font-bold shadow-sm">{item.full_name}</Text>
+                         {item.is_verified && (
+                             <View className="ml-2 bg-white rounded-full">
+                                <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" />
                              </View>
-                         ))}
-                     </View>
-                 )}
+                         )}
+                    </View>
+                    <Text className="text-gray-200 text-lg font-medium">@{item.username}</Text>
+                </View>
+                
+                <View className="items-end">
+                    <View className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full mb-2">
+                         <Text className="text-white font-bold">{Math.round(item.dist_meters / 1000)}km away</Text>
+                    </View>
+                    {item.shared_interests_count > 0 && (
+                        <View className="bg-blue-500 px-3 py-1 rounded-full">
+                            <Text className="text-white font-bold">
+                                {item.shared_interests_count} Matches
+                            </Text>
+                        </View>
+                    )}
+                </View>
+            </View>
 
-                 {/* Detailed Interests */}
-                 <View className="mb-4">
-                     {item.detailed_interests && Object.keys(item.detailed_interests).length > 0 ? (
-                         <View className="flex-row flex-wrap">
-                             {Object.entries(item.detailed_interests).map(([category, details]) => (
-                                 <View key={category} className="bg-white/10 px-3 py-1.5 rounded-lg mr-2 mb-2 border border-white/20">
-                                     <Text className="text-white text-xs font-bold mb-0.5 opacity-70 uppercase">{category}</Text>
-                                     {details && details.length > 0 ? (
-                                         <Text className="text-white text-sm font-semibold">{details.join(', ')}</Text>
-                                     ) : null}
-                                 </View>
-                             ))}
-                         </View>
-                     ) : null}
-                 </View>
+            {/* Relationship Goals */}
+            {item.relationship_goals && item.relationship_goals.length > 0 && (
+                <View className="flex-row mb-2">
+                    {item.relationship_goals.map((goal, idx) => (
+                        <View key={idx} className="bg-white/20 px-2 py-1 rounded mr-2">
+                             <Text className="text-white text-xs font-bold uppercase">{goal}</Text>
+                        </View>
+                    ))}
+                </View>
+            )}
 
-                 <Text className="text-white text-base mb-6 shadow-sm font-medium" numberOfLines={3}>{item.bio}</Text>
+            <Text className="text-white text-base leading-5 mb-3" numberOfLines={2}>
+                {item.bio}
+            </Text>
 
-                 <View className="flex-row justify-between items-center">
-                     <View className="flex-row items-center bg-black/60 px-3 py-2 rounded-lg backdrop-blur-md">
-                         <IconSymbol name="location.fill" size={16} color="white" />
-                         <Text className="text-white ml-2 font-bold">{Math.round(item.dist_meters)}m away</Text>
-                     </View>
+            {/* Detailed Interests Preview */}
+            {item.detailed_interests && (
+                <View className="flex-row flex-wrap mb-4">
+                    {Object.entries(item.detailed_interests).slice(0, 3).map(([cat, details], i) => (
+                        <View key={i} className="bg-white/10 px-2 py-1 rounded-lg mr-2 mb-1 border border-white/20">
+                            <Text className="text-white text-xs">
+                                {details.length > 0 ? `${cat}: ${details[0]}` : cat}
+                            </Text>
+                        </View>
+                    ))}
+                </View>
+            )}
 
-                     <TouchableOpacity 
-                        className="bg-white px-8 py-3 rounded-full shadow-lg"
-                        onPress={() => sendInterest(item.id)}
-                     >
-                         <Text className="text-black font-bold text-lg">Connect</Text>
-                     </TouchableOpacity>
-                 </View>
-             </View>
-         </View>
-     );
+            {/* Actions */}
+            <View className="flex-row justify-between items-center mt-2">
+                 <TouchableOpacity 
+                    className="p-3 bg-white/20 rounded-full"
+                    onPress={() => handleSafety(item.id)}
+                 >
+                     <IconSymbol name="ellipsis" size={24} color="white" />
+                 </TouchableOpacity>
+
+                 <TouchableOpacity 
+                    className="flex-1 bg-blue-600 mx-4 py-4 rounded-xl items-center shadow-lg"
+                    onPress={() => {
+                        Alert.alert('Sent!', `Interest sent to ${item.full_name}`);
+                        // Add actual logic: insert into interests table
+                    }}
+                 >
+                     <Text className="text-white font-bold text-lg">Send Interest</Text>
+                 </TouchableOpacity>
+            </View>
+        </View>
+      </View>
+    );
   };
 
   return (
     <View className="flex-1 bg-black">
-        {loading && !refreshing && feed.length === 0 && (
-            <View className="absolute inset-0 z-10 justify-center items-center">
-                <ActivityIndicator size="large" color="white" />
-            </View>
-        )}
-        
-        <FlatList
-            data={feed}
-            renderItem={renderItem}
-            keyExtractor={item => item.id}
-            pagingEnabled
-            showsVerticalScrollIndicator={false}
-            snapToInterval={ITEM_HEIGHT}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            viewabilityConfig={{
-                itemVisiblePercentThreshold: 50
-            }}
-            refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />
-            }
-        />
+      <FlatList
+        data={feed}
+        renderItem={renderItem}
+        keyExtractor={item => item.id}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchFeed} tintColor="white" />}
+        contentContainerStyle={{ paddingBottom: 80 }}
+      />
     </View>
   );
 }
 
-function FeedImage({ path, style }: { path: string | null, style: any }) {
+function FeedImage({ path }: { path: string | null }) {
     const [url, setUrl] = useState<string | null>(null);
   
     useEffect(() => {
       if (!path) return;
-      
       const { data } = supabase.storage.from('avatars').getPublicUrl(path);
       setUrl(data.publicUrl);
-      
     }, [path]);
   
-    if (!url) return <View style={style} className="bg-gray-800" />;
+    if (!url) return <View className="w-full h-full bg-gray-800" />;
   
     return (
       <Image 
-        source={url} 
-        style={style} 
-        contentFit="cover"
-        transition={200}
-        cachePolicy="memory-disk" 
+        source={{ uri: url }} 
+        style={{ width: '100%', height: '100%' }}
+        resizeMode="cover"
       />
     );
 }

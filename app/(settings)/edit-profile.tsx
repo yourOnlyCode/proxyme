@@ -41,6 +41,7 @@ export default function EditProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [relationshipGoals, setRelationshipGoals] = useState<string[]>([]);
   const [socials, setSocials] = useState<SocialLinks>({});
+  const [isVerified, setIsVerified] = useState(false);
 
   // Modal State
   const [showSocialModal, setShowSocialModal] = useState(false);
@@ -61,7 +62,7 @@ export default function EditProfileScreen() {
 
       const { data, error, status } = await supabase
         .from('profiles')
-        .select(`username, full_name, bio, avatar_url, relationship_goals, social_links`)
+        .select(`username, full_name, bio, avatar_url, relationship_goals, social_links, is_verified`)
         .eq('id', user.id)
         .single();
 
@@ -76,6 +77,7 @@ export default function EditProfileScreen() {
         setAvatarUrl(data.avatar_url);
         setRelationshipGoals(data.relationship_goals || []);
         setSocials(data.social_links || {});
+        setIsVerified(data.is_verified || false);
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -235,6 +237,31 @@ export default function EditProfileScreen() {
   return (
     <View className="flex-1 bg-white">
       <ScrollView className="flex-1 p-4">
+        {/* Verification Banner */}
+        <TouchableOpacity 
+            onPress={() => router.push('/(settings)/get-verified')}
+            className={`mb-6 p-4 rounded-xl flex-row items-center justify-between ${
+                isVerified ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50 border border-gray-100'
+            }`}
+        >
+            <View className="flex-row items-center">
+                <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${
+                    isVerified ? 'bg-blue-500' : 'bg-gray-200'
+                }`}>
+                    <IconSymbol name="checkmark.seal.fill" size={20} color="white" />
+                </View>
+                <View>
+                    <Text className="font-bold text-base">
+                        {isVerified ? 'You are Verified' : 'Get Verified'}
+                    </Text>
+                    <Text className="text-gray-500 text-xs">
+                        {isVerified ? 'Badge active on your profile' : 'Stand out with a blue checkmark'}
+                    </Text>
+                </View>
+            </View>
+            {!isVerified && <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />}
+        </TouchableOpacity>
+
         <View className="items-center mb-8">
           <Avatar
             url={avatarUrl}

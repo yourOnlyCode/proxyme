@@ -27,7 +27,8 @@ type ProfileData = {
     avatar_url: string | null;
     detailed_interests: Record<string, string[]> | null; 
     relationship_goals: string[] | null; 
-    social_links: SocialLinks | null; // NEW FIELD
+    social_links: SocialLinks | null; 
+    is_verified: boolean; // NEW FIELD
     photos: Photo[] | null;
 };
 
@@ -43,7 +44,7 @@ export default function ProfileScreen() {
 
     const { data, error } = await supabase
         .from('profiles')
-        .select(`username, full_name, bio, avatar_url, detailed_interests, relationship_goals, social_links`)
+        .select(`username, full_name, bio, avatar_url, detailed_interests, relationship_goals, social_links, is_verified`)
         .eq('id', user.id)
         .single();
 
@@ -120,7 +121,12 @@ export default function ProfileScreen() {
                 </View>
                 
                 <View className="mt-3">
-                    <Text className="text-2xl font-bold">{profile?.full_name || 'No Name'}</Text>
+                    <View className="flex-row items-center">
+                        <Text className="text-2xl font-bold mr-2">{profile?.full_name || 'No Name'}</Text>
+                        {profile?.is_verified && (
+                            <IconSymbol name="checkmark.seal.fill" size={20} color="#3B82F6" />
+                        )}
+                    </View>
                     <Text className="text-gray-500 text-base">@{profile?.username || 'username'}</Text>
                 </View>
                 
