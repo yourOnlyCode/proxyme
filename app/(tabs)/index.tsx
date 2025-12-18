@@ -217,7 +217,11 @@ export default function HomeScreen() {
     <View className="flex-1 bg-paper pt-12 px-4">
       {/* Header */}
       <View className="mb-6 flex-row justify-between items-center">
-        <Text className="text-3xl font-extrabold tracking-tight text-ink">Proxy</Text>
+        <Image 
+          source={require('../../assets/images/icon.png')}
+          style={{ width: 40, height: 40, borderRadius: 8 }}
+          resizeMode="contain"
+        />
         <TouchableOpacity onPress={() => signOut()}>
             <Text className="text-romance font-bold opacity-80">Sign Out</Text>
         </TouchableOpacity>

@@ -208,6 +208,7 @@ export default function ChatScreen() {
                   value={newMessage}
                   onChangeText={setNewMessage}
                   placeholder="Type a message..."
+                  placeholderTextColor="#6b7280"
                   className="flex-1 py-3 text-base text-ink"
                   onSubmitEditing={sendMessage}
               />

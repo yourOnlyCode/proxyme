@@ -330,7 +330,7 @@ export default function EditProfileScreen() {
         </View>
 
         <View className="mb-6">
-          <Text className="text-gray-500 mb-2 ml-1 font-bold">Looking For (Select One)</Text>
+          <Text className="text-gray-500 mb-2 ml-1 font-bold">What're you looking for?</Text>
           <View className="flex-row justify-between">
               {RELATIONSHIP_OPTS.map(opt => {
                   const isSelected = relationshipGoals.includes(opt);
@@ -475,6 +475,7 @@ export default function EditProfileScreen() {
                             <Text className="text-gray-500 mb-2 font-semibold ml-1">Enter your handle or URL:</Text>
                             <TextInput
                                 placeholder={currentPlatformConfig?.placeholder}
+                                placeholderTextColor="#6b7280"
                                 value={tempLink}
                                 onChangeText={setTempLink}
                                 autoCapitalize="none"

@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.proxy.app"
+      "bundleIdentifier": "com.proxy-social.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,9 +22,14 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "package": "com.proxy.app",
+      "package": "com.proxy-social.app",
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -42,6 +50,7 @@
         }
       ],
       "expo-secure-store",
+      "expo-notifications",
       [
         "expo-location",
         {
@@ -62,8 +71,9 @@
     },
     "extra": {
       "eas": {
-        "projectId": "your-project-id"
-      }
+        "projectId": "a35c1d45-d089-47b8-a702-de90176b4f4d"
+      },
+      "router": {}
     }
   }
 }
