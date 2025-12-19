@@ -3,17 +3,8 @@ import { useEffect, useState } from 'react';
 import { Alert, FlatList, Image, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
-
-type Interest = {
-  id: string;
-  sender: {
-    id: string;
-    username: string;
-    avatar_url: string | null;
-  };
-  status: 'pending' | 'accepted' | 'declined';
-  created_at: string;
-};
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { ProfileModal, ProfileData } from '@/components/ProfileModal';
 
 type Connection = {
   id: string; // connection id (interest id)
@@ -22,152 +13,151 @@ type Connection = {
     username: string;
     avatar_url: string | null;
     full_name: string | null;
+    last_seen: string | null;
+    status_text: string | null; // NEW
+    status_image_url: string | null; // NEW
   };
 };
 
-export default function InterestsScreen() {
+export default function ConnectionsScreen() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'incoming' | 'connections'>('incoming');
-  const [incoming, setIncoming] = useState<Interest[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     if (user) fetchData();
-  }, [user, activeTab]);
+  }, [user]);
 
   const fetchData = async () => {
     if (!user) return;
     setLoading(true);
 
-    if (activeTab === 'incoming') {
-      const { data, error } = await supabase
-        .from('interests')
-        .select(`
-          id,
-          status,
-          created_at,
-          sender:sender_id (id, username, avatar_url)
-        `)
-        .eq('receiver_id', user.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
-        
-        if (data) setIncoming(data as any); // Cast because Supabase types can be tricky with joins
-    } else {
-      // Fetch Accepted Connections
-      // We need to check both where we are sender AND where we are receiver
-      const { data: sentData } = await supabase
-        .from('interests')
-        .select(`id, peer:receiver_id (id, username, avatar_url, full_name)`)
-        .eq('sender_id', user.id)
-        .eq('status', 'accepted');
+    const { data: sentData } = await supabase
+      .from('interests')
+      .select(`id, peer:receiver_id (id, username, avatar_url, full_name, last_seen, status_text, status_image_url)`)
+      .eq('sender_id', user.id)
+      .eq('status', 'accepted');
 
-      const { data: receivedData } = await supabase
-        .from('interests')
-        .select(`id, peer:sender_id (id, username, avatar_url, full_name)`)
-        .eq('receiver_id', user.id)
-        .eq('status', 'accepted');
+    const { data: receivedData } = await supabase
+      .from('interests')
+      .select(`id, peer:sender_id (id, username, avatar_url, full_name, last_seen, status_text, status_image_url)`)
+      .eq('receiver_id', user.id)
+      .eq('status', 'accepted');
 
-      const combined = [...(sentData || []), ...(receivedData || [])];
-      setConnections(combined as any);
-    }
+    let combined = [...(sentData || []), ...(receivedData || [])] as Connection[];
+    
+    // Sort by last_seen (descending)
+    combined.sort((a, b) => {
+        if (!a.peer.last_seen) return 1;
+        if (!b.peer.last_seen) return -1;
+        return new Date(b.peer.last_seen).getTime() - new Date(a.peer.last_seen).getTime();
+    });
+
+    setConnections(combined);
     setLoading(false);
   };
 
-  const handleResponse = async (interestId: string, response: 'accepted' | 'declined') => {
-    const { error } = await supabase
-      .from('interests')
-      .update({ status: response })
-      .eq('id', interestId);
-
-    if (error) {
-      Alert.alert('Error', error.message);
-    } else {
-      // Remove from list
-      setIncoming(prev => prev.filter(i => i.id !== interestId));
-      if (response === 'accepted') {
-        Alert.alert('Connected!', 'You can now chat with this user.');
-        setActiveTab('connections'); // Switch tab to see new connection
+  const openProfile = async (userId: string, connectionId: string) => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (data) {
+          const profileWithContext = {
+              ...data,
+              has_sent_interest: true, // We are connected
+          };
+          setSelectedProfile(profileWithContext as ProfileData);
+          setSelectedConnectionId(connectionId);
+          setModalVisible(true);
+      } else {
+          Alert.alert('Error', 'Could not load profile');
       }
-    }
   };
 
-  const renderIncoming = ({ item }: { item: Interest }) => (
-    <View className="flex-row items-center justify-between bg-white p-4 rounded-xl mb-3 shadow-sm border border-gray-100">
-      <View className="flex-row items-center flex-1">
-        <Avatar path={item.sender.avatar_url} />
-        <View className="ml-3">
-            <Text className="font-bold text-lg">{item.sender.username}</Text>
-            <Text className="text-gray-500 text-xs">Sent interest</Text>
+  const handleMessage = (connectionId: string, username: string) => {
+      setModalVisible(false);
+      router.push({
+          pathname: "/chat/[id]",
+          params: { id: connectionId, username: username }
+      });
+  };
+
+  const renderConnection = ({ item }: { item: Connection }) => (
+    <View className="flex-row items-center bg-white p-4 rounded-xl mb-3 shadow-sm border border-gray-100">
+      <TouchableOpacity 
+        className="flex-row items-center flex-1"
+        onPress={() => handleMessage(item.id, item.peer.username)}
+      >
+        <Avatar path={item.peer.avatar_url} />
+        <View className="ml-3 flex-1">
+            <View className="flex-row items-center">
+                <Text className="font-bold text-lg mr-2">{item.peer.username}</Text>
+                {item.peer.status_image_url && (
+                    <View className="w-5 h-5 rounded overflow-hidden border border-gray-200">
+                        {/* Reuse Avatar logic or specialized image? Reusing Avatar logic for now as it handles storage download */}
+                        <Avatar path={item.peer.status_image_url} /> 
+                    </View>
+                )}
+            </View>
+            
+            {item.peer.status_text ? (
+                <Text className="text-ink italic text-sm" numberOfLines={1}>"{item.peer.status_text}"</Text>
+            ) : (
+                <Text className="text-gray-500">{item.peer.full_name}</Text>
+            )}
         </View>
-      </View>
-      <View className="flex-row">
-        <TouchableOpacity 
-            className="bg-gray-200 px-4 py-2 rounded-lg mr-2"
-            onPress={() => handleResponse(item.id, 'declined')}
-        >
-            <Text className="font-semibold">Decline</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-            className="bg-black px-4 py-2 rounded-lg"
-            onPress={() => handleResponse(item.id, 'accepted')}
-        >
-            <Text className="text-white font-semibold">Accept</Text>
-        </TouchableOpacity>
+      </TouchableOpacity>
+
+      <View className="flex-row items-center space-x-2">
+           <TouchableOpacity 
+                className="bg-gray-100 p-3 rounded-full mr-2"
+                onPress={() => openProfile(item.peer.id, item.id)}
+            >
+                <IconSymbol name="eye.fill" size={20} color="#4A5568" />
+            </TouchableOpacity>
+
+          <TouchableOpacity 
+              className="bg-gray-100 p-3 rounded-full"
+              onPress={() => handleMessage(item.id, item.peer.username)}
+          >
+              <IconSymbol name="message.fill" size={20} color="#4A5568" />
+          </TouchableOpacity>
       </View>
     </View>
   );
 
-  const renderConnection = ({ item }: { item: Connection }) => (
-    <TouchableOpacity 
-        className="flex-row items-center bg-white p-4 rounded-xl mb-3 shadow-sm border border-gray-100"
-        onPress={() => router.push({
-          pathname: "/chat/[id]",
-          params: { id: item.id, username: item.peer.username }
-        })}
-    >
-      <Avatar path={item.peer.avatar_url} />
-      <View className="ml-3 flex-1">
-          <Text className="font-bold text-lg">{item.peer.username}</Text>
-          <Text className="text-gray-500">{item.peer.full_name}</Text>
-      </View>
-      <View className="bg-gray-100 px-3 py-1 rounded-full">
-          <Text className="text-xs font-bold text-gray-600">Chat</Text>
-      </View>
-    </TouchableOpacity>
-  );
-
   return (
     <View className="flex-1 bg-gray-50 pt-12 px-4">
-      <Text className="text-3xl font-bold mb-6">Inbox</Text>
-
-      <View className="flex-row mb-6 bg-gray-200 p-1 rounded-lg">
-        <TouchableOpacity 
-            className={`flex-1 py-2 rounded-md items-center ${activeTab === 'incoming' ? 'bg-white shadow-sm' : ''}`}
-            onPress={() => setActiveTab('incoming')}
-        >
-            <Text className={`font-semibold ${activeTab === 'incoming' ? 'text-black' : 'text-gray-500'}`}>Requests</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-            className={`flex-1 py-2 rounded-md items-center ${activeTab === 'connections' ? 'bg-white shadow-sm' : ''}`}
-            onPress={() => setActiveTab('connections')}
-        >
-            <Text className={`font-semibold ${activeTab === 'connections' ? 'text-black' : 'text-gray-500'}`}>Connections</Text>
-        </TouchableOpacity>
+      <ProfileModal 
+         visible={modalVisible}
+         profile={selectedProfile}
+         onClose={() => setModalVisible(false)}
+         mode="connection"
+         onMessage={() => selectedProfile && selectedConnectionId && handleMessage(selectedConnectionId, selectedProfile.username)}
+      />
+      
+      <View className="flex-row justify-between items-center mb-6">
+          <Text className="text-3xl font-bold">Connections</Text>
+          <TouchableOpacity onPress={() => router.push('/requests')}>
+              <IconSymbol name="tray.fill" size={28} color="#2D3748" />
+          </TouchableOpacity>
       </View>
 
       <FlatList
-        data={activeTab === 'incoming' ? incoming : connections}
+        data={connections}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} />}
-        renderItem={activeTab === 'incoming' ? renderIncoming as any : renderConnection as any}
+        renderItem={renderConnection}
         ListEmptyComponent={
             <View className="items-center mt-10">
-                <Text className="text-gray-400 text-lg">
-                    {activeTab === 'incoming' ? 'No new requests.' : 'No connections yet.'}
-                </Text>
+                <Text className="text-gray-400 text-lg">No connections yet.</Text>
             </View>
         }
       />

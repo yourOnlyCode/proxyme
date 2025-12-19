@@ -5,7 +5,11 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 import "../global.css";
 import { AuthProvider, useAuth } from '../lib/auth';
+import { LocationProvider } from '../lib/location'; // New Import
 import { registerForPushNotificationsAsync } from '../lib/push';
+import { supabase } from '../lib/supabase';
+import { ToastProvider } from '@/components/ui/ToastProvider';
+import { TutorialProvider } from '@/components/TutorialProvider';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -23,11 +27,20 @@ function InitialLayout() {
     if (loading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inOnboardingGroup = segments[0] === 'onboarding';
 
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/sign-in');
-    } else if (session && inAuthGroup) {
-      router.replace('/(tabs)');
+    } else if (session) {
+      // Fetch profile to check onboarding status
+      supabase.from('profiles').select('is_onboarded').eq('id', session.user.id).single()
+      .then(({ data }) => {
+          if (data && !data.is_onboarded && !inOnboardingGroup) {
+              router.replace('/onboarding');
+          } else if (data && data.is_onboarded && (inAuthGroup || inOnboardingGroup)) {
+              router.replace('/(tabs)');
+          }
+      });
     }
   }, [session, loading, segments]);
 
@@ -54,6 +67,7 @@ function InitialLayout() {
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(settings)" options={{ headerShown: false }} />
         <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="requests" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="dark" />
     </ThemeProvider>
@@ -62,8 +76,14 @@ function InitialLayout() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <InitialLayout />
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <LocationProvider>
+          <TutorialProvider>
+            <InitialLayout />
+          </TutorialProvider>
+        </LocationProvider>
+      </AuthProvider>
+    </ToastProvider>
   );
 }

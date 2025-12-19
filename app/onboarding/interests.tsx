@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Button, LayoutAnimation, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
-import { InterestSelector } from '../../components/profile/InterestSelector'; // Import component
+import { InterestSelector } from '../../components/profile/InterestSelector';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
@@ -11,7 +11,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 type DetailedInterests = Record<string, string[]>;
 
-export default function EditInterestsScreen() {
+export default function OnboardingInterestsScreen() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -58,6 +58,13 @@ export default function EditInterestsScreen() {
           cleanedInterests[key] = validItems;
       });
 
+      // Require at least one interest to save? The user said "require adding at least one interest" in the flow.
+      if (Object.keys(cleanedInterests).length === 0) {
+          Alert.alert('Required', 'Please select at least one interest category.');
+          setSaving(false);
+          return;
+      }
+
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -68,7 +75,6 @@ export default function EditInterestsScreen() {
 
       if (error) throw error;
 
-      Alert.alert('Success', 'Interests updated!');
       router.back();
     } catch (error) {
       if (error instanceof Error) {
@@ -84,7 +90,6 @@ export default function EditInterestsScreen() {
   return (
     <ScrollView className="flex-1 bg-white p-4">
       <View className="mb-6">
-        <Text className="text-2xl font-bold mb-2">Detailed Interests</Text>
         <Text className="text-gray-500 mb-6 text-base leading-5">
             Select up to <Text className="font-bold text-black">3 categories</Text>. 
             For each, list your top 3 specific favorites.
@@ -99,9 +104,10 @@ export default function EditInterestsScreen() {
             onChange={setInterestDetails}
         />
 
-        <Button title={saving ? 'Saving...' : 'Save Interests'} onPress={saveInterests} disabled={saving} color="#000" />
+        <Button title={saving ? 'Saving...' : 'Save & Continue'} onPress={saveInterests} disabled={saving} color="#000" />
         <View className="h-20" />
       </View>
     </ScrollView>
   );
 }
+

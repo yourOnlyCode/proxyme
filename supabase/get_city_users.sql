@@ -1,11 +1,11 @@
 -- Drop the old function first because return type changed
-DROP FUNCTION IF EXISTS public.get_feed_users(double precision, double precision, integer);
+DROP FUNCTION IF EXISTS public.get_city_users(double precision, double precision, integer);
 
--- Re-create with new return fields
-create or replace function public.get_feed_users(
+-- Re-create with new return fields (status + connection_id)
+create or replace function public.get_city_users(
   lat float,
   long float,
-  range_meters int default 20000
+  range_meters int default 50000
 )
 returns table (
   id uuid,
@@ -18,8 +18,14 @@ returns table (
   photos jsonb,
   dist_meters float,
   shared_interests_count int,
-  has_sent_interest boolean, -- New field
-  has_received_interest boolean -- New field
+  city text,
+  state text,
+  is_verified boolean,
+  has_sent_interest boolean,
+  has_received_interest boolean,
+  status_text text,       -- Added
+  status_image_url text,  -- Added
+  connection_id uuid      -- Added
 )
 language plpgsql
 security definer
@@ -64,6 +70,9 @@ begin
       ), 0)::int
       from jsonb_object_keys(p.detailed_interests) as key
     ) as shared_interests_count,
+    p.city,
+    p.state,
+    p.is_verified,
     -- Check if I have sent an interest to them
     exists (
         select 1 from public.interests i 
@@ -73,12 +82,21 @@ begin
     exists (
         select 1 from public.interests i 
         where i.sender_id = p.id and i.receiver_id = auth.uid()
-    ) as has_received_interest
+    ) as has_received_interest,
+    p.status_text,       -- Added
+    p.status_image_url,  -- Added
+    (
+        select i.id 
+        from public.interests i
+        where ((i.sender_id = auth.uid() and i.receiver_id = p.id) 
+           or (i.sender_id = p.id and i.receiver_id = auth.uid()))
+           and i.status = 'accepted'
+        limit 1
+    ) as connection_id  -- Added
   from
     public.profiles p
   where
-    p.is_proxy_active = true
-    and p.id <> auth.uid()
+    p.id <> auth.uid()
     and not exists (
         select 1 from public.blocks b 
         where (b.blocker_id = auth.uid() and b.blocked_id = p.id)

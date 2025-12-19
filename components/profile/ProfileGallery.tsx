@@ -1,7 +1,8 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Text, TouchableOpacity, View, LayoutAnimation } from 'react-native';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { supabase } from '../../lib/supabase';
 
 type Photo = {
@@ -18,6 +19,7 @@ interface ProfileGalleryProps {
 export default function ProfileGallery({ userId, onSetAvatar }: ProfileGalleryProps) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
 
   useEffect(() => {
     fetchPhotos();
@@ -33,37 +35,44 @@ export default function ProfileGallery({ userId, onSetAvatar }: ProfileGalleryPr
     if (data) setPhotos(data);
   };
 
-  const uploadPhotos = async () => {
-    if (photos.length >= 5) {
-      Alert.alert('Limit Reached', 'You can only upload up to 5 photos.');
+  const uploadPhotos = async (replaceAll: boolean = false) => {
+    if (!replaceAll && photos.length >= 6) {
+      Alert.alert('Limit Reached', 'You can only upload up to 6 photos.');
       return;
     }
 
     try {
       setUploading(true);
+      const limit = replaceAll ? 6 : 6 - photos.length;
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: 'images' as any,
         allowsMultipleSelection: true,
-        selectionLimit: 5 - photos.length,
+        selectionLimit: limit,
         quality: 0.5,
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0) return;
 
+      if (replaceAll) {
+          // Delete existing photos first
+          const paths = photos.map(p => p.image_url);
+          if (paths.length > 0) {
+              await supabase.storage.from('avatars').remove(paths);
+          }
+          await supabase.from('profile_photos').delete().eq('user_id', userId);
+          setPhotos([]); 
+      }
+
       const uploadPromises = result.assets.map(async (asset, index) => {
-          const fileExt = asset.uri.split('.').pop();
+          const fileExt = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpeg';
           const fileName = `${userId}/${Date.now()}_${index}.${fileExt}`;
           
-          const formData = new FormData();
-          formData.append('file', {
-            uri: asset.uri,
-            name: fileName,
-            type: asset.mimeType || 'image/jpeg',
-          } as any);
+          const arraybuffer = await fetch(asset.uri).then((res) => res.arrayBuffer());
 
           const { error: uploadError } = await supabase.storage
             .from('avatars') 
-            .upload(fileName, formData, {
+            .upload(fileName, arraybuffer, {
               contentType: asset.mimeType || 'image/jpeg',
               upsert: true
             });
@@ -73,19 +82,20 @@ export default function ProfileGallery({ userId, onSetAvatar }: ProfileGalleryPr
           return {
               user_id: userId,
               image_url: fileName,
-              display_order: photos.length + index,
+              display_order: (replaceAll ? 0 : photos.length) + index,
           };
       });
 
-      const newPhotos = await Promise.all(uploadPromises);
+      const newPhotosData = await Promise.all(uploadPromises);
 
       const { error: dbError } = await supabase
         .from('profile_photos')
-        .insert(newPhotos);
+        .insert(newPhotosData);
 
       if (dbError) throw dbError;
 
       fetchPhotos();
+      setSelectedPhoto(null);
 
     } catch (error) {
         if (error instanceof Error) {
@@ -96,19 +106,17 @@ export default function ProfileGallery({ userId, onSetAvatar }: ProfileGalleryPr
     }
   };
 
-  const makeCover = async (selectedPhoto: Photo) => {
-      // Move selected photo to index 0, shift others down
+  const makeCover = async () => {
+      if (!selectedPhoto) return;
       const otherPhotos = photos.filter(p => p.id !== selectedPhoto.id);
       const reordered = [selectedPhoto, ...otherPhotos].map((p, index) => ({
           ...p,
           display_order: index
       }));
 
-      // Optimistic update
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setPhotos(reordered);
 
-      // Update DB
-      // We need to update each row. Supabase upsert requires primary keys.
       const updates = reordered.map(p => ({
           id: p.id,
           user_id: userId,
@@ -116,78 +124,110 @@ export default function ProfileGallery({ userId, onSetAvatar }: ProfileGalleryPr
           display_order: p.display_order
       }));
 
-      const { error } = await supabase.from('profile_photos').upsert(updates);
+      await supabase.from('profile_photos').upsert(updates);
+      setSelectedPhoto(null);
+  };
+
+  const deletePhoto = async () => {
+      if (!selectedPhoto) return;
       
-      if (error) {
-          Alert.alert('Error', 'Failed to update cover photo.');
-          fetchPhotos(); // Revert on error
-      } else {
-          Alert.alert('Success', 'Cover photo updated!');
-      }
-  };
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setPhotos(prev => prev.filter(p => p.id !== selectedPhoto.id));
+      setSelectedPhoto(null);
 
-  const handlePhotoPress = (photo: Photo) => {
-      Alert.alert('Photo Options', 'Select an action:', [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-              text: 'Set as Profile Picture', 
-              onPress: () => onSetAvatar(photo.image_url) 
-          },
-          { 
-              text: 'Make Cover Photo', 
-              onPress: () => makeCover(photo) 
-          },
-          { 
-              text: 'Delete', 
-              style: 'destructive',
-              onPress: () => deletePhoto(photo.id, photo.image_url)
-          }
-      ]);
-  };
-
-  const deletePhoto = async (photoId: string, path: string) => {
-      await supabase.storage.from('avatars').remove([path]);
-      await supabase.from('profile_photos').delete().eq('id', photoId);
+      await supabase.storage.from('avatars').remove([selectedPhoto.image_url]);
+      await supabase.from('profile_photos').delete().eq('id', selectedPhoto.id);
       fetchPhotos();
+  };
+
+  const handleSetProfile = () => {
+      if (!selectedPhoto) return;
+      onSetAvatar(selectedPhoto.image_url);
+      Alert.alert('Success', 'Profile picture updated!');
+      setSelectedPhoto(null);
   };
 
   return (
     <View className="mt-6">
-      <Text className="text-lg font-bold mb-3">Gallery ({photos.length}/5)</Text>
-      <Text className="text-gray-400 text-xs mb-3">
-          First photo is your Cover Photo. Tap to manage.
+      <View className="flex-row justify-between items-center mb-3">
+          <Text className="text-lg font-bold">Gallery ({photos.length}/6)</Text>
+          {photos.length > 0 && (
+              <TouchableOpacity onPress={() => uploadPhotos(true)}>
+                  <Text className="text-red-500 font-bold text-xs">Replace All</Text>
+              </TouchableOpacity>
+          )}
+      </View>
+
+      <Text className="text-gray-400 text-xs mb-4">
+          First photo is Cover. Tap photo to edit.
       </Text>
       
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
-        {photos.map((photo, index) => (
-          <TouchableOpacity 
-            key={photo.id} 
-            className="mr-3 relative"
-            onPress={() => handlePhotoPress(photo)}
-          >
-            <PhotoImage path={photo.image_url} />
-            {index === 0 && (
-                <View className="absolute top-1 left-1 bg-black/60 px-2 py-0.5 rounded">
-                    <Text className="text-white text-[10px] font-bold">COVER</Text>
-                </View>
-            )}
-          </TouchableOpacity>
-        ))}
+      <View className="flex-row flex-wrap gap-2">
+        {photos.map((photo, index) => {
+            const isSelected = selectedPhoto?.id === photo.id;
+            return (
+              <TouchableOpacity 
+                key={photo.id} 
+                className={`relative mb-2 ${isSelected ? 'z-50' : 'z-0'}`}
+                onPress={() => setSelectedPhoto(isSelected ? null : photo)}
+                activeOpacity={0.9}
+              >
+                <PhotoImage path={photo.image_url} />
+                {index === 0 && (
+                    <View className="absolute top-1 left-1 bg-black/60 px-2 py-0.5 rounded">
+                        <Text className="text-white text-[10px] font-bold">COVER</Text>
+                    </View>
+                )}
+                {isSelected && (
+                    <View className="absolute inset-0 bg-black/20 rounded-xl" />
+                )}
+                
+                {/* Floating Menu - Centered Above */}
+                {isSelected && (
+                    <View className="absolute bottom-full mb-2 self-center bg-white rounded-xl shadow-2xl border border-gray-100 py-1 px-1 z-50 min-w-[140px]">
+                        <TouchableOpacity 
+                            onPress={handleSetProfile}
+                            className="flex-row items-center p-2 border-b border-gray-50"
+                        >
+                            <IconSymbol name="person.crop.circle" size={16} color="#4B5563" />
+                            <Text className="ml-2 text-ink text-xs font-bold">Set Profile</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                            onPress={makeCover}
+                            className="flex-row items-center p-2 border-b border-gray-50"
+                        >
+                            <IconSymbol name="star.fill" size={16} color="#F59E0B" />
+                            <Text className="ml-2 text-ink text-xs font-bold">Make Cover</Text>
+                        </TouchableOpacity>
 
-        {photos.length < 5 && (
+                        <TouchableOpacity 
+                            onPress={deletePhoto}
+                            className="flex-row items-center p-2"
+                        >
+                            <IconSymbol name="trash.fill" size={16} color="#EF4444" />
+                            <Text className="ml-2 text-red-500 text-xs font-bold">Delete</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+              </TouchableOpacity>
+            );
+        })}
+
+        {photos.length < 6 && (
           <TouchableOpacity 
-            className="w-32 h-40 bg-gray-200 rounded-lg items-center justify-center border-2 border-dashed border-gray-400"
-            onPress={uploadPhotos}
+            className="w-[108px] h-[144px] bg-gray-100 rounded-xl items-center justify-center border border-dashed border-gray-300 mb-2"
+            onPress={() => uploadPhotos(false)}
             disabled={uploading}
           >
             {uploading ? (
               <ActivityIndicator />
             ) : (
-              <Text className="text-gray-500 font-bold text-3xl">+</Text>
+              <IconSymbol name="plus" size={32} color="#9CA3AF" />
             )}
           </TouchableOpacity>
         )}
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -202,12 +242,12 @@ function PhotoImage({ path }: { path: string }) {
     }
   }, [path]);
 
-  if (!url) return <View className="w-32 h-40 bg-gray-300 rounded-lg animate-pulse" />;
+  if (!url) return <View className="w-[108px] h-[144px] bg-gray-200 rounded-xl animate-pulse" />;
 
   return (
     <Image 
       source={url} 
-      style={{ width: 128, height: 160, borderRadius: 8, backgroundColor: '#d1d5db' }}
+      style={{ width: 108, height: 144, borderRadius: 12 }} 
       contentFit="cover"
       transition={200}
       cachePolicy="memory-disk"

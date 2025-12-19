@@ -40,19 +40,14 @@ export default function Avatar({ url, size = 150, onUpload, editable = false }: 
 
       const image = result.assets[0];
       
-      const fileExt = image.uri.split('.').pop();
+      const fileExt = image.uri.split('.').pop()?.toLowerCase() ?? 'jpeg';
       const fileName = `${Date.now()}.${fileExt}`;
       const filePath = `${fileName}`;
       
-      // Use FormData for robust file upload
-      const formData = new FormData();
-      formData.append('file', {
-        uri: image.uri,
-        name: fileName,
-        type: image.mimeType || 'image/jpeg',
-      } as any);
+      // Read file as ArrayBuffer for reliable upload
+      const arraybuffer = await fetch(image.uri).then((res) => res.arrayBuffer());
 
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, formData, {
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, arraybuffer, {
           contentType: image.mimeType || 'image/jpeg',
           upsert: true
       });

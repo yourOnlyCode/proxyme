@@ -1,4 +1,5 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { FontAwesome, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
@@ -22,12 +23,12 @@ type SocialLinks = {
 };
 
 const SOCIAL_PLATFORMS = [
-    { id: 'instagram', name: 'Instagram', icon: 'camera.fill', color: '#E1306C', placeholder: 'Instagram Handle (@user)' },
-    { id: 'tiktok', name: 'TikTok', icon: 'music.note', color: '#000000', placeholder: 'TikTok Handle (@user)' },
-    { id: 'facebook', name: 'Facebook', icon: 'hand.thumbsup.fill', color: '#1877F2', placeholder: 'Facebook Profile URL' },
-    { id: 'linkedin', name: 'LinkedIn', icon: 'briefcase.fill', color: '#0077B5', placeholder: 'LinkedIn URL' },
-    { id: 'x', name: 'X (Twitter)', icon: 'bubble.left.fill', color: '#1DA1F2', placeholder: 'X Handle (@user)' },
-] as const;
+    { id: 'instagram', name: 'Instagram', icon: 'instagram', lib: FontAwesome, color: '#E1306C', placeholder: 'Instagram Handle (@user)' },
+    { id: 'tiktok', name: 'TikTok', icon: 'tiktok', lib: FontAwesome5, color: '#000000', placeholder: 'TikTok Handle (@user)' },
+    { id: 'facebook', name: 'Facebook', icon: 'facebook-square', lib: FontAwesome, color: '#1877F2', placeholder: 'Facebook Profile URL' },
+    { id: 'linkedin', name: 'LinkedIn', icon: 'linkedin-square', lib: FontAwesome, color: '#0077B5', placeholder: 'LinkedIn URL' },
+    { id: 'x', name: 'X (Twitter)', icon: 'twitter', lib: FontAwesome, color: '#1DA1F2', placeholder: 'X Handle (@user)' },
+];
 
 export default function EditProfileScreen() {
   const { user, signOut } = useAuth();
@@ -259,12 +260,16 @@ export default function EditProfileScreen() {
 
   return (
     <View className="flex-1 bg-white">
-      {/* Modal Grabber Indicator */}
-      <View className="items-center pt-2 pb-2 bg-white">
-          <View className="w-12 h-1.5 bg-gray-300 rounded-full" />
+      {/* Custom Header */}
+      <View className="px-4 py-4 flex-row items-center justify-between bg-white border-b border-gray-100">
+          <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
+              <IconSymbol name="chevron.left" size={28} color="#1A1A1A" />
+          </TouchableOpacity>
+          <Text className="text-xl font-bold text-ink">Edit Profile</Text>
+          <View className="w-10" /> 
       </View>
 
-      <ScrollView className="flex-1 px-4">
+      <ScrollView className="flex-1 px-4 pt-4">
         {/* Verification Banner */}
         <TouchableOpacity 
             onPress={() => router.push('/(settings)/get-verified')}
@@ -371,10 +376,11 @@ export default function EditProfileScreen() {
             {Object.entries(socials).map(([key, value]) => {
                 const config = SOCIAL_PLATFORMS.find(p => p.id === key);
                 if (!config) return null;
+                const IconComponent = config.lib;
                 return (
                     <View key={key} className="flex-row items-center justify-between bg-white p-3 rounded-lg mb-2 border border-gray-200 shadow-sm">
                         <View className="flex-row items-center flex-1">
-                            <IconSymbol name={config.icon as any} size={20} color={config.color} />
+                            <IconComponent name={config.icon as any} size={20} color={config.color} />
                             <Text className="ml-3 font-semibold text-ink capitalize">{config.name}</Text>
                             <Text className="ml-2 text-gray-500 text-xs flex-1" numberOfLines={1}>{value}</Text>
                         </View>
@@ -448,13 +454,14 @@ export default function EditProfileScreen() {
                         <View className="flex-row flex-wrap justify-between">
                             {SOCIAL_PLATFORMS.map(p => {
                                 if (socials[p.id as keyof SocialLinks]) return null;
+                                const IconComponent = p.lib;
                                 return (
                                     <TouchableOpacity 
                                       key={p.id}
                                       onPress={() => setSelectedPlatform(p.id)}
                                       className="w-[30%] aspect-square bg-gray-50 rounded-2xl items-center justify-center mb-4 border border-gray-200 shadow-sm"
                                     >
-                                        <IconSymbol name={p.icon as any} size={32} color={p.color} />
+                                        <IconComponent name={p.icon as any} size={32} color={p.color} />
                                         <Text className="text-xs font-bold mt-2 text-ink">{p.name}</Text>
                                     </TouchableOpacity>
                                 );
@@ -467,8 +474,12 @@ export default function EditProfileScreen() {
                                     <IconSymbol name="chevron.left" size={24} color="#1A1A1A" />
                                 </TouchableOpacity>
                                 <View className="flex-row items-center">
-                                    <IconSymbol name={currentPlatformConfig?.icon as any} size={28} color={currentPlatformConfig?.color} />
-                                    <Text className="text-xl font-bold ml-3 text-ink">{currentPlatformConfig?.name}</Text>
+                                    {currentPlatformConfig && (
+                                        <>
+                                            <currentPlatformConfig.lib name={currentPlatformConfig.icon as any} size={28} color={currentPlatformConfig.color} />
+                                            <Text className="text-xl font-bold ml-3 text-ink">{currentPlatformConfig.name}</Text>
+                                        </>
+                                    )}
                                 </View>
                             </View>
                             

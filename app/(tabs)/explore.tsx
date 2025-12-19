@@ -1,4 +1,5 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Dimensions, Image, Linking, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
@@ -6,6 +7,14 @@ import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+
+const SOCIAL_PLATFORMS_MAP: Record<string, { lib: any, icon: string, color: string }> = {
+    'instagram': { lib: FontAwesome, icon: 'instagram', color: '#E1306C' },
+    'tiktok': { lib: FontAwesome5, icon: 'tiktok', color: '#000000' },
+    'facebook': { lib: FontAwesome, icon: 'facebook-square', color: '#1877F2' },
+    'linkedin': { lib: FontAwesome, icon: 'linkedin-square', color: '#0077B5' },
+    'x': { lib: FontAwesome, icon: 'twitter', color: '#1DA1F2' },
+};
 
 type Photo = {
   url: string;
@@ -33,8 +42,9 @@ type ProfileData = {
 };
 
 export default function ProfileScreen() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -60,6 +70,10 @@ export default function ProfileScreen() {
         .eq('user_id', user.id)
         .order('display_order');
 
+    // Fetch stats
+    const { data: statsData } = await supabase.rpc('get_user_connection_stats', { target_user_id: user.id });
+    if (statsData) setStats(statsData);
+
     setProfile({
         ...data,
         photos: (photosData || []).map(p => ({ url: p.image_url, order: p.display_order }))
@@ -84,17 +98,6 @@ export default function ProfileScreen() {
           case 'tiktok': return `https://tiktok.com/@${handle.replace('@', '')}`;
           case 'x': return `https://x.com/${handle.replace('@', '')}`;
           default: return handle;
-      }
-  };
-
-  const getSocialIcon = (platform: string) => {
-      switch (platform) {
-          case 'instagram': return { name: 'camera.fill', color: '#E1306C' };
-          case 'tiktok': return { name: 'music.note', color: '#000000' };
-          case 'facebook': return { name: 'hand.thumbsup.fill', color: '#1877F2' };
-          case 'linkedin': return { name: 'briefcase.fill', color: '#0077B5' };
-          case 'x': return { name: 'bubble.left.fill', color: '#1DA1F2' }; // Using generic bubble for X if logo unavailable
-          default: return { name: 'link', color: '#718096' };
       }
   };
 
@@ -153,44 +156,50 @@ export default function ProfileScreen() {
                     <Text className={`text-base font-semibold ${theme.text} mt-1 opacity-80`}>@{profile?.username || 'username'}</Text>
                 </View>
                 
-                {/* Relationship Goals */}
-                {profile?.relationship_goals && profile.relationship_goals.length > 0 && (
-                    <View className="flex-row flex-wrap mt-4">
-                        {profile.relationship_goals.map((goal, idx) => {
-                             const goalTheme = getTheme(goal);
-                             return (
-                                <View key={idx} className={`px-3 py-1 rounded-full mr-2 mb-2 border ${goalTheme.border} ${goalTheme.badge}`}>
-                                    <Text className={`text-xs font-bold uppercase tracking-wide ${goalTheme.text}`}>{goal}</Text>
-                                </View>
-                            );
-                        })}
-                    </View>
-                )}
-
-                {/* Social Links (Icons) */}
-                {profile?.social_links && Object.keys(profile.social_links).length > 0 && (
-                    <View className="flex-row mt-5 space-x-4">
-                        {Object.entries(profile.social_links).map(([platform, handle]) => {
-                            if (!handle) return null;
-                            const iconConfig = getSocialIcon(platform);
-                            return (
-                                <TouchableOpacity 
-                                    key={platform} 
-                                    onPress={() => openLink(getSocialUrl(platform, handle))}
-                                    className="bg-white p-3 rounded-full shadow-sm border border-gray-100 items-center justify-center"
-                                    style={{ width: 44, height: 44 }}
-                                >
-                                    <IconSymbol name={iconConfig.name as any} size={20} color={iconConfig.color} />
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
+                {/* Connection Stats (Clickable) */}
+                {stats && stats.total > 0 && (
+                    <TouchableOpacity 
+                        onPress={() => router.push('/interests')}
+                        className="flex-row mt-6 bg-white p-3 rounded-xl justify-between border border-gray-100 shadow-sm"
+                    >
+                        <View className="items-center flex-1 justify-center">
+                            <Text className="text-xl font-bold text-ink mb-1">{stats.total}</Text>
+                            <IconSymbol name="person.2.fill" size={16} color="#9CA3AF" />
+                        </View>
+                        <View className="w-[1px] bg-gray-200" />
+                        <View className="items-center flex-1 justify-center">
+                            <Text className="text-lg font-bold text-romance mb-1">{stats.romance || 0}</Text>
+                            <IconSymbol name="heart.fill" size={14} color="#E07A5F" />
+                        </View>
+                        <View className="items-center flex-1 justify-center">
+                            <Text className="text-lg font-bold text-friendship mb-1">{stats.friendship || 0}</Text>
+                            <IconSymbol name="person.2.fill" size={14} color="#81B29A" />
+                        </View>
+                        <View className="items-center flex-1 justify-center">
+                            <Text className="text-lg font-bold text-business mb-1">{stats.business || 0}</Text>
+                            <IconSymbol name="briefcase.fill" size={14} color="#3D405B" />
+                        </View>
+                    </TouchableOpacity>
                 )}
 
                 {/* Bio */}
                 <Text className="mt-6 text-ink text-lg leading-7 font-medium opacity-90">
                     {profile?.bio || 'Add a bio to introduce yourself.'}
                 </Text>
+
+                {/* Photos Gallery */}
+                {profile?.photos && profile.photos.length > 0 && (
+                    <View className="mt-6">
+                        <Text className="text-xl font-bold mb-3 text-ink">Photos</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            {profile.photos.map((p, i) => (
+                                <View key={i} className="mr-3 w-32 h-40 rounded-xl overflow-hidden shadow-sm bg-gray-100 border border-gray-200">
+                                    <ProfileImage path={p.url} style={{ width: '100%', height: '100%' }} />
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
 
                 {/* Detailed Interests */}
                 <View className="mt-8">
@@ -219,22 +228,13 @@ export default function ProfileScreen() {
                     )}
                 </View>
 
-                {/* Gallery Grid */}
-                <Text className="text-xl font-bold mt-6 mb-4 text-ink">Photos</Text>
-                <View className="flex-row flex-wrap">
-                    {profile?.photos?.map((photo, index) => (
-                        <View key={index} className="w-1/3 aspect-[4/5] p-1">
-                             <View className="w-full h-full rounded-xl overflow-hidden bg-gray-100 shadow-sm">
-                                 <ProfileImage path={photo.url} style={{ width: '100%', height: '100%' }} />
-                             </View>
-                        </View>
-                    ))}
-                    {(!profile?.photos || profile.photos.length === 0) && (
-                        <View className="w-full bg-gray-50 p-6 rounded-2xl items-center border border-dashed border-gray-300">
-                             <Text className="text-gray-400 italic">No gallery photos added.</Text>
-                        </View>
-                    )}
-                </View>
+                {/* Sign Out Button */}
+                <TouchableOpacity 
+                    onPress={() => signOut()} 
+                    className="mt-8 mb-8 bg-gray-100 py-4 rounded-2xl items-center border border-gray-200"
+                >
+                    <Text className="text-red-500 font-bold text-lg">Sign Out</Text>
+                </TouchableOpacity>
             </View>
         </ScrollView>
     </View>

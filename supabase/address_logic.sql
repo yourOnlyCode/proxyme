@@ -1,11 +1,15 @@
--- Drop the old function first because return type changed
+-- Add address columns
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS street TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS street_number TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ;
+
 DROP FUNCTION IF EXISTS public.get_feed_users(double precision, double precision, integer);
 
--- Re-create with new return fields
+-- Recreate get_feed_users with stricter default range (92m = 300ft) and stale check
 create or replace function public.get_feed_users(
   lat float,
   long float,
-  range_meters int default 20000
+  range_meters int default 92
 )
 returns table (
   id uuid,
@@ -18,8 +22,11 @@ returns table (
   photos jsonb,
   dist_meters float,
   shared_interests_count int,
-  has_sent_interest boolean, -- New field
-  has_received_interest boolean -- New field
+  has_sent_interest boolean,
+  has_received_interest boolean,
+  status_text text,
+  status_image_url text,
+  connection_id uuid
 )
 language plpgsql
 security definer
@@ -64,21 +71,28 @@ begin
       ), 0)::int
       from jsonb_object_keys(p.detailed_interests) as key
     ) as shared_interests_count,
-    -- Check if I have sent an interest to them
     exists (
         select 1 from public.interests i 
         where i.sender_id = auth.uid() and i.receiver_id = p.id
     ) as has_sent_interest,
-    -- Check if they have sent an interest to me
     exists (
         select 1 from public.interests i 
         where i.sender_id = p.id and i.receiver_id = auth.uid()
-    ) as has_received_interest
+    ) as has_received_interest,
+    CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_text ELSE NULL END as status_text,
+    CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_image_url ELSE NULL END as status_image_url,
+    (
+      select i.id from public.interests i 
+      where ((i.sender_id = auth.uid() and i.receiver_id = p.id) or (i.sender_id = p.id and i.receiver_id = auth.uid()))
+      and i.status = 'accepted'
+      limit 1
+    ) as connection_id
   from
     public.profiles p
   where
     p.is_proxy_active = true
     and p.id <> auth.uid()
+    and (p.last_seen > now() - interval '1 hour') -- Filter stale users (1 hour)
     and not exists (
         select 1 from public.blocks b 
         where (b.blocker_id = auth.uid() and b.blocked_id = p.id)
@@ -94,3 +108,4 @@ begin
     dist_meters asc;
 end;
 $$;
+

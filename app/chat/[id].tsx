@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
+import { ProfileModal, ProfileData } from '../../components/ProfileModal';
 
 type Message = {
   id: string;
@@ -13,27 +14,14 @@ type Message = {
   created_at: string;
 };
 
-type SocialLinks = {
-    instagram?: string;
-    tiktok?: string;
-    facebook?: string;
-    linkedin?: string;
-    x?: string;
-};
-
-type ChatPartner = {
-    full_name: string;
-    avatar_url: string | null;
-    social_links: SocialLinks | null;
-};
-
 export default function ChatScreen() {
-  const { id } = useLocalSearchParams(); // This is the Conversation ID (Interests ID)
+  const { id } = useLocalSearchParams();
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
-  const [partner, setPartner] = useState<ChatPartner | null>(null);
+  const [partner, setPartner] = useState<ProfileData | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const router = useRouter();
 
@@ -62,7 +50,6 @@ export default function ChatScreen() {
   }, [id, user]);
 
   async function fetchPartnerInfo() {
-      // First get the interest record to find the other user ID
       const { data: interest } = await supabase
         .from('interests')
         .select('sender_id, receiver_id')
@@ -74,11 +61,17 @@ export default function ChatScreen() {
           
           const { data: profile } = await supabase
             .from('profiles')
-            .select('full_name, avatar_url, social_links')
+            .select('*') 
             .eq('id', partnerId)
             .single();
           
-          if (profile) setPartner(profile);
+          if (profile) {
+              setPartner({
+                  ...profile,
+                  has_sent_interest: true, // We are chatting, so we must be connected
+                  has_received_interest: true
+              } as ProfileData);
+          }
       }
   }
 
@@ -132,7 +125,7 @@ export default function ChatScreen() {
           case 'tiktok': return { name: 'music.note', color: '#000000' };
           case 'facebook': return { name: 'hand.thumbsup.fill', color: '#1877F2' };
           case 'linkedin': return { name: 'briefcase.fill', color: '#0077B5' };
-          case 'x': return { name: 'bubble.left.fill', color: '#1DA1F2' }; // Using generic bubble for X if logo unavailable
+          case 'x': return { name: 'bubble.left.fill', color: '#1DA1F2' };
           default: return { name: 'link', color: '#718096' };
       }
   };
@@ -142,6 +135,12 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1 bg-white"
     >
+      <ProfileModal 
+         visible={modalVisible}
+         profile={partner}
+         onClose={() => setModalVisible(false)}
+      />
+
       {/* Header */}
       <View className="px-4 pt-12 pb-4 border-b border-gray-100 flex-row items-center bg-white shadow-sm z-10">
           <TouchableOpacity onPress={() => router.back()} className="mr-4">
@@ -149,7 +148,11 @@ export default function ChatScreen() {
           </TouchableOpacity>
           
           {partner && (
-             <View className="flex-1 flex-row justify-between items-center">
+             <TouchableOpacity 
+                activeOpacity={0.8}
+                onPress={() => setModalVisible(true)}
+                className="flex-1 flex-row justify-between items-center"
+             >
                  <View className="flex-row items-center">
                     <View className="w-10 h-10 bg-gray-200 rounded-full overflow-hidden mr-3">
                         <ChatAvatar path={partner.avatar_url} />
@@ -166,7 +169,7 @@ export default function ChatScreen() {
                                     return (
                                         <TouchableOpacity 
                                             key={platform} 
-                                            onPress={() => openLink(getSocialUrl(platform, handle))}
+                                            onPress={() => openLink(getSocialUrl(platform, handle as string))}
                                             className="bg-gray-50 p-1.5 rounded-full border border-gray-100"
                                         >
                                             <IconSymbol name={iconConfig.name as any} size={12} color={iconConfig.color} />
@@ -177,7 +180,7 @@ export default function ChatScreen() {
                         )}
                     </View>
                  </View>
-             </View>
+             </TouchableOpacity>
           )}
       </View>
 
