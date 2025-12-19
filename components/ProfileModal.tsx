@@ -1,7 +1,8 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, Dimensions, Image, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Image, Linking, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
@@ -25,7 +26,8 @@ export type ProfileData = {
   social_links?: any;
   status_text?: string | null;
   status_image_url?: string | null;
-  connection_id?: string | null; // NEW
+  status_created_at?: string | null; // NEW
+  connection_id?: string | null;
   has_sent_interest?: boolean;
   has_received_interest?: boolean;
 };
@@ -36,7 +38,7 @@ type ProfileModalProps = {
   visible: boolean;
   profile: ProfileData | null;
   onClose: () => void;
-  myInterests?: Record<string, string[]> | null; // Pass my interests to calculate/highlight shared
+  myInterests?: Record<string, string[]> | null;
   mode?: ModalMode;
   onAccept?: () => void;
   onDecline?: () => void;
@@ -247,7 +249,12 @@ export function ProfileModal({
                                 )}
                              </View>
                         </View>
-                        <Text className="text-gray-500 font-medium text-lg mb-4">@{profile.username}</Text>
+                        
+                        {/* Username & Socials */}
+                        <View className="flex-row items-center mb-4 flex-wrap">
+                            <Text className="text-gray-500 font-medium text-lg mr-3">@{profile.username}</Text>
+                            <SocialIcons links={profile.social_links} />
+                        </View>
 
                         {/* Connection Stats */}
                         {stats && stats.total > 0 && (
@@ -349,9 +356,6 @@ export function ProfileModal({
                                  <Text className="text-gray-400 italic">No detailed interests shared yet.</Text>
                              )}
                         </View>
-
-                        {/* Photos Grid (If more than 1) */}
-                         {/* Placeholder for future detailed photo grid */}
                     </View>
                  </ScrollView>
 
@@ -419,5 +423,45 @@ function ProfileImage({ path }: { path: string | null }) {
         style={{ width: '100%', height: '100%' }}
         resizeMode="cover"
       />
+    );
+}
+
+function SocialIcons({ links }: { links: any }) {
+    if (!links) return null;
+    const entries = Object.entries(links).filter(([_, v]) => !!v);
+    if (entries.length === 0) return null;
+
+    const getIcon = (p: string) => {
+        switch (p) {
+            case 'instagram': return 'instagram';
+            case 'tiktok': return 'tiktok';
+            case 'x': return 'twitter'; 
+            case 'facebook': return 'facebook';
+            case 'linkedin': return 'linkedin';
+            default: return 'link';
+        }
+    };
+
+    const openLink = (p: string, h: string) => {
+        let url = h;
+        if (!h.startsWith('http')) {
+             const clean = h.replace('@', '');
+             if (p === 'instagram') url = `https://instagram.com/${clean}`;
+             else if (p === 'tiktok') url = `https://tiktok.com/@${clean}`;
+             else if (p === 'x') url = `https://x.com/${clean}`;
+             else if (p === 'facebook') url = `https://facebook.com/${h}`;
+             else if (p === 'linkedin') url = `https://linkedin.com/in/${h}`;
+        }
+        Linking.openURL(url).catch(err => console.error("Error opening URL:", err));
+    };
+
+    return (
+        <View className="flex-row space-x-4 items-center">
+            {entries.map(([platform, handle]) => (
+                <TouchableOpacity key={platform} onPress={() => openLink(platform, handle as string)}>
+                    <FontAwesome5 name={getIcon(platform)} size={20} color="#6B7280" />
+                </TouchableOpacity>
+            ))}
+        </View>
     );
 }

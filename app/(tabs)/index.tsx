@@ -519,6 +519,17 @@ function FeedImage({ path, resizeMode = 'cover' }: { path: string | null, resize
 function StatusPreviewModal({ visible, profile, onClose }: { visible: boolean, profile: FeedProfile | null, onClose: () => void }) {
     if (!visible || !profile) return null;
     
+    let expiryText = '';
+    if (profile.status_created_at) {
+        const created = new Date(profile.status_created_at);
+        const expires = new Date(created.getTime() + 60 * 60 * 1000); // 1 hour
+        if (expires > new Date()) {
+            expiryText = `Expires at ${expires.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+        } else {
+            expiryText = 'Expired';
+        }
+    }
+    
     return (
         <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
              <TouchableOpacity style={{flex:1, backgroundColor:'rgba(0,0,0,0.8)', justifyContent:'center', padding: 24}} activeOpacity={1} onPress={onClose}>
@@ -534,7 +545,8 @@ function StatusPreviewModal({ visible, profile, onClose }: { visible: boolean, p
                            </View>
                        )}
                        <View className="p-4 bg-gray-50 border-t border-gray-100 items-center">
-                           <Text className="text-xs font-bold text-gray-400 uppercase tracking-widest">Posted by {profile.full_name || profile.username}</Text>
+                           <Text className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Posted by {profile.full_name || profile.username}</Text>
+                           {expiryText ? <Text className="text-[10px] text-gray-400 font-medium">{expiryText}</Text> : null}
                        </View>
                   </TouchableOpacity>
              </TouchableOpacity>

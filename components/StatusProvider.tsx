@@ -220,7 +220,14 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                         {currentStatus && (
                             <View className="mb-6 p-4 bg-gray-50 rounded-2xl border border-gray-200">
                                 <View className="flex-row items-center justify-between mb-3">
-                                    <Text className="text-xs text-gray-400 font-bold uppercase">Active Now</Text>
+                                    <View>
+                                        <Text className="text-xs text-gray-400 font-bold uppercase">Active Now</Text>
+                                        {currentStatus.createdAt && (
+                                            <Text className="text-[10px] text-gray-400 font-medium">
+                                                Expires {new Date(new Date(currentStatus.createdAt).getTime() + 60 * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                            </Text>
+                                        )}
+                                    </View>
                                     <View className="flex-row items-center">
                                         <TouchableOpacity 
                                             onPress={() => submitStatus(true)}

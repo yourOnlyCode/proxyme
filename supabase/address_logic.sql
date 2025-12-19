@@ -26,6 +26,7 @@ returns table (
   has_received_interest boolean,
   status_text text,
   status_image_url text,
+  status_created_at timestamptz,
   connection_id uuid
 )
 language plpgsql
@@ -81,6 +82,7 @@ begin
     ) as has_received_interest,
     CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_text ELSE NULL END as status_text,
     CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_image_url ELSE NULL END as status_image_url,
+    CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_created_at ELSE NULL END as status_created_at,
     (
       select i.id from public.interests i 
       where ((i.sender_id = auth.uid() and i.receiver_id = p.id) or (i.sender_id = p.id and i.receiver_id = auth.uid()))
