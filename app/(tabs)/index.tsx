@@ -3,7 +3,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, FlatList, Image, LayoutAnimation, Modal, Platform, RefreshControl, Switch, Text, TouchableOpacity, UIManager, View } from 'react-native';
+import { Animated, Dimensions, FlatList, Image, LayoutAnimation, Modal, PanResponder, Platform, RefreshControl, Switch, Text, TouchableOpacity, UIManager, View } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
@@ -22,7 +22,7 @@ const MICRO_RANGE = 92; // 300 feet
 export default function HomeScreen() {
   const { signOut, user } = useAuth();
   const { isProxyActive, toggleProxy, location, address } = useProxyLocation();
-  const { openModal, currentStatus, deleteStatus } = useStatus();
+  const { openModal, openCamera, currentStatus, deleteStatus } = useStatus();
   const [feed, setFeed] = useState<FeedProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -188,6 +188,23 @@ export default function HomeScreen() {
     return Math.round((score / maxScore) * 100);
   };
 
+  // Swipe gesture handler (left to right to open camera)
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Only respond to horizontal swipes from left edge
+        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && gestureState.dx > 50 && evt.nativeEvent.pageX < 30;
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        // Left to right swipe (dx > 0) from left edge
+        if (gestureState.dx > 100 && evt.nativeEvent.pageX < 50) {
+          openCamera();
+        }
+      },
+    })
+  ).current;
+
   const renderCard = ({ item }: { item: FeedProfile }) => {
     const primaryGoal = item.relationship_goals?.[0];
     const colors = getGoalColors(primaryGoal);
@@ -352,7 +369,7 @@ export default function HomeScreen() {
   };
 
   return (
-    <View className="flex-1 bg-paper">
+    <View className="flex-1 bg-paper" {...panResponder.panHandlers}>
       {/* Animated Header */}
       <Animated.View 
         style={{ 

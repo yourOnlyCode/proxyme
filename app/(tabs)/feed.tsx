@@ -2,15 +2,25 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, Image, RefreshControl, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, FlatList, Image, RefreshControl, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
+type StatusItem = {
+    id: string;
+    content: string | null;
+    type: 'text' | 'image';
+    caption?: string;
+    created_at: string;
+    expires_at: string;
+};
+
 type FeedProfile = ProfileData & {
   dist_meters: number;
+  statuses?: StatusItem[];
 };
 
 const CITY_RANGE = 50000; // 50km for "City"
@@ -55,7 +65,6 @@ export default function CityFeedScreen() {
 
     setLoading(true);
 
-    // Use new RPC that ignores proxy status and returns city/state
     const { data, error } = await supabase.rpc('get_city_users', {
       lat: location.coords.latitude,
       long: location.coords.longitude,
@@ -65,8 +74,8 @@ export default function CityFeedScreen() {
     if (error) {
       console.error('Error fetching city feed:', error);
     } else if (data) {
-      // 1. Filter: Only show users with an active Status
-      let filtered = data.filter((u: FeedProfile) => u.status_text || u.status_image_url);
+      // 1. Filter: Only show users with active statuses
+      let filtered = data.filter((u: FeedProfile) => u.statuses && u.statuses.length > 0);
 
       // 2. Sort: Top down based on Interest Match Score
       if (myInterests) {
@@ -146,16 +155,6 @@ export default function CityFeedScreen() {
 
   return (
     <View className="flex-1 bg-ink">
-      {/* Header Overlay */}
-      <View className="absolute top-12 right-4 z-10">
-          <TouchableOpacity 
-              onPress={() => router.push('/requests')}
-              className="bg-black/30 p-2 rounded-full backdrop-blur-md"
-          >
-              <IconSymbol name="tray.fill" size={24} color="white" />
-          </TouchableOpacity>
-      </View>
-
       <FlatList
         data={feed}
         renderItem={({ item }) => (
@@ -182,7 +181,7 @@ export default function CityFeedScreen() {
             <View style={{ height: listHeight }} className="items-center justify-center px-10 opacity-70">
                 <IconSymbol name="moon.stars.fill" size={64} color="#A0AEC0" />
                 <Text className="text-gray-400 text-xl font-bold mt-6 text-center">It's quiet in {address?.city || 'the city'}...</Text>
-                <Text className="text-gray-600 text-base mt-2 text-center">Be the first to share your profile!</Text>
+                <Text className="text-gray-600 text-base mt-2 text-center">Be the first to share your status!</Text>
             </View>
         }
         ListFooterComponent={
@@ -237,103 +236,112 @@ function CityFeedCard({
     percentage: number
 }) {
     const [activeIndex, setActiveIndex] = useState(0);
-    const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-        if (viewableItems.length > 0) {
-            setActiveIndex(viewableItems[0].index || 0);
+    const statuses = item.statuses || [];
+    const currentStatus = statuses[activeIndex];
+
+    const handleTap = (evt: any) => {
+        const x = evt.nativeEvent.locationX;
+        if (x < width * 0.3) {
+            // Previous
+            if (activeIndex > 0) setActiveIndex(activeIndex - 1);
+        } else {
+            // Next
+            if (activeIndex < statuses.length - 1) setActiveIndex(activeIndex + 1);
+            else {
+                // If last, open profile? or just stop?
+                // openProfile(item);
+            }
         }
-    }).current;
-    const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+    };
 
     const primaryGoal = item.relationship_goals?.[0];
     const theme = getTheme(primaryGoal);
     const isConnected = !!item.connection_id;
-    
-    // Construct Gallery: Status Image -> Photos -> Avatar
-    const galleryImages: string[] = [];
-    if (item.status_image_url) galleryImages.push(item.status_image_url);
-    if (item.photos && item.photos.length > 0) {
-        item.photos.forEach(p => galleryImages.push(p.url));
-    }
-    if (item.avatar_url) galleryImages.push(item.avatar_url);
-    
-    // Unique images
-    const uniqueImages = Array.from(new Set(galleryImages));
-    const displayImages = uniqueImages.length > 0 ? uniqueImages : [null];
+
+    if (!currentStatus) return null; // Should not happen due to filter
 
     return (
       <View style={{ height: listHeight, width: width }} className="bg-black relative shadow-2xl overflow-hidden">
-        {/* Horizontal Carousel */}
-        <FlatList
-            data={displayImages}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(img, idx) => `city-${item.id}-${idx}`}
-            onViewableItemsChanged={onViewableItemsChanged}
-            viewabilityConfig={viewabilityConfig}
-            renderItem={({ item: imgPath }) => (
-                <View style={{ width, height: listHeight }}>
-                    <TouchableOpacity 
-                        activeOpacity={1} 
-                        onPress={() => openProfile(item)}
-                        className="w-full h-full"
-                    >
-                        <FeedImage path={imgPath} />
-                    </TouchableOpacity>
-                </View>
-            )}
-        />
+        
+        {/* Status Progress Bars */}
+        <View className="absolute top-14 left-2 right-2 flex-row gap-1 z-50 h-1">
+            {statuses.map((_, i) => (
+                <View 
+                    key={i} 
+                    className={`flex-1 h-full rounded-full ${i <= activeIndex ? 'bg-white' : 'bg-white/30'}`}
+                />
+            ))}
+        </View>
 
-        {/* Page Indicator (Dots) */}
-        {displayImages.length > 1 && (
-            <View className="absolute top-24 left-0 right-0 flex-row justify-center space-x-1.5 z-20">
-                {displayImages.map((_, i) => (
-                    <View 
-                        key={i} 
-                        className={`w-2 h-2 rounded-full backdrop-blur-md ${i === activeIndex ? 'bg-white' : 'bg-white/30'}`} 
-                    />
-                ))}
+        {/* Content Area (Tap to Advance) */}
+        <TouchableWithoutFeedback onPress={handleTap}>
+            <View style={{ width, height: listHeight }}>
+                {currentStatus.type === 'image' ? (
+                    <FeedImage path={currentStatus.content} containerHeight={listHeight} containerWidth={width} />
+                ) : (
+                    <View className="w-full h-full items-center justify-center bg-ink p-8">
+                         <Text className="text-white text-2xl font-bold italic text-center leading-9">
+                             "{currentStatus.content}"
+                         </Text>
+                    </View>
+                )}
+                {/* Gradient Overlay for Text Visibility if Image */}
+                {currentStatus.type === 'image' && (
+                    <View className="absolute inset-0 bg-black/10" />
+                )}
             </View>
-        )}
+        </TouchableWithoutFeedback>
             
         {/* Top Overlay: Compact Header */}
-        <View className="absolute top-0 left-0 right-0 pt-16 pb-4 px-4 bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
-            <View className="flex-row items-center flex-wrap shadow-sm">
-                <Text className="text-white text-xl font-bold mr-2 shadow-md">{item.full_name}</Text>
-                {item.is_verified && (
-                    <IconSymbol name="checkmark.seal.fill" size={16} color="#3B82F6" style={{ marginRight: 6 }} />
-                )}
-                <Text className="text-gray-300 text-xs font-semibold mr-3 shadow-sm">@{item.username}</Text>
-                
-                <View className="flex-row items-center bg-black/30 px-2 py-0.5 rounded border border-white/10 backdrop-blur-md">
+        <View className="absolute top-0 left-0 right-0 pt-16 pb-4 px-4 pointer-events-none">
+            <View className="flex-row items-center mt-4">
+                 <TouchableOpacity onPress={() => openProfile(item)} className="flex-row items-center">
+                    {/* Small Avatar next to name */}
+                    <View className="w-8 h-8 rounded-full overflow-hidden mr-2 border border-white/50">
+                        <FeedImage path={item.avatar_url} containerHeight={32} containerWidth={32} />
+                    </View>
+                    <View>
+                        <View className="flex-row items-center">
+                            <Text className="text-white text-base font-bold mr-1 shadow-md">{item.full_name}</Text>
+                            {item.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
+                        </View>
+                        <View className="flex-row items-center">
+                            <Text className="text-gray-300 text-[10px] font-semibold shadow-sm">@{item.username}</Text>
+                            {currentStatus && (
+                                <Text className="text-gray-400 text-[9px] ml-2 shadow-sm">
+                                    • {formatTimeAgo(currentStatus.created_at)}
+                                </Text>
+                            )}
+                        </View>
+                    </View>
+                 </TouchableOpacity>
+
+                 <View className="ml-auto flex-row items-center bg-black/30 px-2 py-0.5 rounded border border-white/10 backdrop-blur-md">
                      <IconSymbol name="location.fill" size={10} color="#E5E7EB" style={{marginRight:3}}/>
                      <Text className="text-gray-200 text-[10px] font-bold uppercase shadow-sm">
                         {item.city ? item.city : Math.round(item.dist_meters / 1000) + 'km'}
                      </Text>
-                </View>
+                 </View>
             </View>
-            {item.shared_interests_count && item.shared_interests_count > 0 && percentage > 0 && (
-                <View className="absolute right-4 top-12 bg-white/20 px-2 py-1 rounded-full backdrop-blur-md border border-white/10">
-                     <Text className="text-white text-[10px] font-bold">{percentage}% Match</Text>
-                </View>
-            ) || null}
+            {percentage > 0 && (
+                 <View className="self-start mt-2 bg-white/20 px-2 py-0.5 rounded-full backdrop-blur-md border border-white/10">
+                      <Text className="text-white text-[10px] font-bold">{percentage}% Match</Text>
+                 </View>
+            )}
         </View>
 
-        {/* Bottom Overlay: Status & Actions */}
-        <View className="absolute bottom-0 left-0 right-0 bg-black/30 p-4 pt-6" style={{ paddingBottom: tabBarHeight + 8 }}>
+        {/* Bottom Overlay: Caption/Bio & Actions */}
+        <View className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 pt-12" style={{ paddingBottom: tabBarHeight + 8 }}>
             <View className="flex-row items-end justify-between">
                 {/* Left Column: Text Content */}
                 <View className="flex-1 mr-4">
-                    {/* Status Headline */}
-                    {item.status_text && (
-                        <View>
-                            <Text className="text-[10px] text-gray-300 underline mb-0.5 font-medium italic">currently:</Text>
-                            <Text className="text-white text-lg font-bold italic mb-2 leading-6 shadow-sm">
-                                "{item.status_text}"
-                            </Text>
-                        </View>
+                    {/* If Image, show Caption or Text status */}
+                    {currentStatus.caption && (
+                        <Text className="text-white text-base font-medium italic mb-2 leading-6 shadow-sm">
+                            "{currentStatus.caption}"
+                        </Text>
                     )}
-
+                    
                     {/* Relationship Goals */}
                     {item.relationship_goals && item.relationship_goals.length > 0 && (
                         <View className="flex-row mb-2 flex-wrap">
@@ -348,28 +356,25 @@ function CityFeedCard({
                         </View>
                     )}
 
-                    {!item.status_text && (
-                        <Text className="text-gray-100 text-sm leading-5 mb-3 font-medium shadow-sm" numberOfLines={2}>
-                            {item.bio}
-                        </Text>
-                    )}
+                    {/* Bio Teaser */}
+                    <Text className="text-gray-200 text-xs leading-4 mb-2 font-medium shadow-sm opacity-80" numberOfLines={2}>
+                        {item.bio}
+                    </Text>
 
                     {/* Detailed Interests Preview */}
                     {item.detailed_interests && (
-                        <View className="flex-row flex-wrap mb-1">
+                        <View className="flex-row flex-wrap mb-1 opacity-70">
                             {Object.entries(item.detailed_interests).slice(0, 3).map(([cat, details], i) => (
-                                <View key={i} className="bg-white/20 px-2 py-1 rounded-lg mr-2 mb-1 border border-white/10">
-                                    <Text className="text-white text-[10px] font-semibold">
-                                        {details.length > 0 ? `${cat}: ${details[0]}` : cat}
-                                    </Text>
-                                </View>
+                                <Text key={i} className="text-white text-[10px] mr-2">
+                                    #{cat}
+                                </Text>
                             ))}
                         </View>
                     )}
                 </View>
 
                 {/* Right Column: Actions */}
-                <View className="items-center pb-1 gap-y-4">
+                <View className="items-center pb-1 gap-y-4 mb-6">
                      <TouchableOpacity 
                         className="w-10 h-10 bg-black/20 rounded-full items-center justify-center backdrop-blur-md border border-white/10"
                         onPress={(e) => {
@@ -417,17 +422,85 @@ const getTheme = (goal?: string) => {
     }
 };
 
-function FeedImage({ path }: { path: string | null }) {
+function FeedImage({ path, containerHeight, containerWidth }: { path: string | null, containerHeight?: number, containerWidth?: number }) {
     const [url, setUrl] = useState<string | null>(null);
+    const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   
     useEffect(() => {
       if (!path) return;
+      if (path.startsWith('http')) {
+          setUrl(path);
+          return;
+      }
       const { data } = supabase.storage.from('avatars').getPublicUrl(path);
       setUrl(data.publicUrl);
     }, [path]);
+
+    // Get image dimensions when URL loads (only for main feed images, not avatars)
+    useEffect(() => {
+        if (!url || !containerHeight || !containerWidth || containerHeight < 100) return; // Skip for small avatars
+        
+        Image.getSize(url, (width, height) => {
+            setImageDimensions({ width, height });
+        }, () => {
+            // If getSize fails, assume square
+            setImageDimensions({ width: 1, height: 1 });
+        });
+    }, [url, containerHeight, containerWidth]);
   
     if (!url) return <View className="w-full h-full bg-ink" />;
+
+    // For main feed images (not avatars), check orientation and apply appropriate display
+    if (containerHeight && containerWidth && containerHeight > 100 && imageDimensions) {
+        const imageAspect = imageDimensions.width / imageDimensions.height;
+        
+        // If image is landscape (width > height, aspect > 1), letterbox it with black bars
+        // If image is vertical (height > width, aspect < 1), fill the screen
+        if (imageAspect > 1) {
+            // Image is landscape (wider than tall) - letterbox (black bars top/bottom)
+            const imageDisplayHeight = containerWidth / imageAspect;
+            
+            return (
+                <View className="w-full h-full bg-black items-center justify-center">
+                    <Image 
+                        source={{ uri: url }} 
+                        style={{ width: containerWidth, height: imageDisplayHeight }}
+                        resizeMode="contain"
+                    />
+                </View>
+            );
+        } else {
+            // Image is vertical or square (height >= width) - fill the screen without cropping
+            // Use contain to show full image, then center it
+            const imageAspect = imageDimensions.width / imageDimensions.height;
+            const containerAspect = containerWidth / containerHeight;
+            
+            if (imageAspect < containerAspect) {
+                // Image is taller relative to container - fit height, center horizontally
+                const imageDisplayWidth = containerHeight * imageAspect;
+                return (
+                    <View className="w-full h-full bg-black items-center justify-center">
+                        <Image 
+                            source={{ uri: url }} 
+                            style={{ width: imageDisplayWidth, height: containerHeight }}
+                            resizeMode="contain"
+                        />
+                    </View>
+                );
+            } else {
+                // Image fits width - fill screen
+                return (
+                    <Image 
+                        source={{ uri: url }} 
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                    />
+                );
+            }
+        }
+    }
   
+    // Default: fill screen (for avatars or when dimensions aren't loaded yet)
     return (
       <Image 
         source={{ uri: url }} 
@@ -435,4 +508,21 @@ function FeedImage({ path }: { path: string | null }) {
         resizeMode="cover"
       />
     );
+}
+
+function formatTimeAgo(timestamp: string): string {
+    const now = new Date();
+    const time = new Date(timestamp);
+    const diffMs = now.getTime() - time.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'now';
+    if (diffMins < 60) return `${diffMins}m`;
+    if (diffHours < 24) return `${diffHours}h`;
+    if (diffDays < 7) return `${diffDays}d`;
+    
+    // For older posts, show date
+    return time.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
