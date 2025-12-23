@@ -3,15 +3,17 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
-import { ProfileModal, ProfileData } from '../../components/ProfileModal';
 
 type Message = {
   id: string;
   sender_id: string;
   content: string;
   created_at: string;
+  read?: boolean;
+  read_at?: string | null;
 };
 
 export default function ChatScreen() {
@@ -29,6 +31,7 @@ export default function ChatScreen() {
     if (id && user) {
         fetchMessages();
         fetchPartnerInfo();
+        markMessagesAsRead(); // Mark messages as read when chat opens
 
         const channel = supabase
             .channel(`chat:${id}`)
@@ -38,8 +41,13 @@ export default function ChatScreen() {
                 table: 'messages',
                 filter: `conversation_id=eq.${id}`
             }, (payload) => {
-                setMessages(prev => [...prev, payload.new as Message]);
+                const newMessage = payload.new as Message;
+                setMessages(prev => [...prev, newMessage]);
                 setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+                // Mark new message as read if it's from the other person
+                if (newMessage.sender_id !== user.id) {
+                    markMessageAsRead(newMessage.id);
+                }
             })
             .subscribe();
 
@@ -48,6 +56,54 @@ export default function ChatScreen() {
         };
     }
   }, [id, user]);
+
+  // Mark all unread messages in this conversation as read
+  async function markMessagesAsRead() {
+    if (!id || !user) return;
+    
+    const { error } = await supabase
+      .from('messages')
+      .update({ 
+        read: true,
+        read_at: new Date().toISOString()
+      })
+      .eq('conversation_id', id)
+      .eq('read', false)
+      .neq('sender_id', user.id); // Only mark messages from the other person as read
+
+    if (error) {
+      console.error('Error marking messages as read:', error);
+    } else {
+      // Update local state to reflect read status
+      setMessages(prev => prev.map(msg => 
+        msg.sender_id !== user.id && !msg.read 
+          ? { ...msg, read: true, read_at: new Date().toISOString() }
+          : msg
+      ));
+    }
+  }
+
+  // Mark a single message as read
+  async function markMessageAsRead(messageId: string) {
+    if (!user) return;
+    
+    const { error } = await supabase
+      .from('messages')
+      .update({ 
+        read: true,
+        read_at: new Date().toISOString()
+      })
+      .eq('id', messageId)
+      .neq('sender_id', user.id);
+
+    if (!error) {
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId 
+          ? { ...msg, read: true, read_at: new Date().toISOString() }
+          : msg
+      ));
+    }
+  }
 
   async function fetchPartnerInfo() {
       const { data: interest } = await supabase

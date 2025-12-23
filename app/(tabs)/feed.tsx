@@ -2,7 +2,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, FlatList, Image, PanResponder, RefreshControl, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, PanResponder, RefreshControl, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
@@ -38,7 +38,7 @@ export default function CityFeedScreen() {
   const { user } = useAuth();
   const { location, address } = useProxyLocation();
   const [feed, setFeed] = useState<FeedProfile[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Start with true to show loading state
   
   // Modal State
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
@@ -274,11 +274,18 @@ export default function CityFeedScreen() {
         onLayout={(e) => setListHeight(e.nativeEvent.layout.height)}
         decelerationRate="fast"
         ListEmptyComponent={
-            <View style={{ height: listHeight }} className="items-center justify-center px-10 opacity-70">
-                <IconSymbol name="moon.stars.fill" size={64} color="#A0AEC0" />
-                <Text className="text-gray-400 text-xl font-bold mt-6 text-center">It's quiet in {address?.city || 'the city'}...</Text>
-                <Text className="text-gray-600 text-base mt-2 text-center">Be the first to share your status!</Text>
-            </View>
+            loading ? (
+                <View style={{ height: listHeight }} className="items-center justify-center">
+                    <ActivityIndicator size="large" color="white" />
+                    <Text className="text-white mt-4 text-lg">Loading feed...</Text>
+                </View>
+            ) : (
+                <View style={{ height: listHeight }} className="items-center justify-center px-10 opacity-70">
+                    <IconSymbol name="moon.stars.fill" size={64} color="#A0AEC0" />
+                    <Text className="text-gray-400 text-xl font-bold mt-6 text-center">It's quiet in {address?.city || 'the city'}...</Text>
+                    <Text className="text-gray-600 text-base mt-2 text-center">Be the first to share your status!</Text>
+                </View>
+            )
         }
         ListFooterComponent={
             feed.length > 0 ? (
@@ -289,7 +296,7 @@ export default function CityFeedScreen() {
                         Start a conversation with your connections.
                     </Text>
                     <TouchableOpacity 
-                        onPress={() => router.push('/interests')}
+                        onPress={() => router.push(`/connections/${user?.id}`)}
                         className="bg-white px-8 py-4 rounded-full shadow-lg"
                     >
                         <Text className="text-ink font-bold text-lg uppercase tracking-wider">Go to Connections</Text>
@@ -758,6 +765,17 @@ function FeedImage({ path, containerHeight, containerWidth }: { path: string | n
     }, [url, containerHeight, containerWidth]);
   
     if (!url) return <View className="w-full h-full bg-ink" />;
+
+    // For avatars (small containers), always use cover to fill the circle
+    if (containerHeight && containerWidth && containerHeight < 100) {
+        return (
+            <Image 
+                source={{ uri: url }} 
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+            />
+        );
+    }
 
     // For main feed images (not avatars), check orientation and apply appropriate display
     if (containerHeight && containerWidth && containerHeight > 100 && imageDimensions) {

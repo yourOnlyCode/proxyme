@@ -269,7 +269,7 @@ export function StatusFloatingButton() {
                   </View>
               ) : (
                   <IconSymbol 
-                      name={menuOpen ? "xmark" : "arrow.up"} 
+                      name={menuOpen ? "xmark" : "plus"} 
                       size={24} 
                       color="white" 
                   />

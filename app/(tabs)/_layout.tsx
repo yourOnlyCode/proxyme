@@ -1,12 +1,12 @@
+import { StatusFloatingButton } from '@/components/StatusFloatingButton';
+import { StatusProvider } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useAuth } from '@/lib/auth';
+import { useProxyLocation } from '@/lib/location';
+import { supabase } from '@/lib/supabase';
 import { Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, View, Text } from 'react-native';
-import { StatusFloatingButton } from '@/components/StatusFloatingButton';
-import { useProxyLocation } from '@/lib/location';
-import { StatusProvider } from '@/components/StatusProvider';
-import { useAuth } from '@/lib/auth';
-import { supabase } from '@/lib/supabase';
+import { Platform, View } from 'react-native';
 
 export default function TabLayout() {
   const { address } = useProxyLocation();
@@ -63,23 +63,29 @@ export default function TabLayout() {
       if (connections && connections.length > 0) {
         const connectionIds = connections.map(c => c.id);
         
-        // Note: Messages table doesn't have a 'read' field yet
-        // For now, we'll set unread count to 0
-        // This can be updated when read tracking is implemented
+        // Count unread messages (messages sent by others that are not read)
+        const { count } = await supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .in('conversation_id', connectionIds)
+          .eq('read', false)
+          .neq('sender_id', user.id);
+        
+        setUnreadMessagesCount(count || 0);
+      } else {
         setUnreadMessagesCount(0);
       }
     };
 
     fetchUnreadMessages();
 
-    // Subscribe to message changes
+    // Subscribe to message changes (inserts and updates for read status)
     const subscription = supabase
       .channel('unread-messages')
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'messages',
-        filter: `receiver_id=eq.${user.id}`
+        table: 'messages'
       }, () => {
         fetchUnreadMessages();
       })
@@ -130,19 +136,10 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="interests"
+          name="clubs"
           options={{
-            title: 'Connections',
-            tabBarIcon: ({ color }) => (
-              <View>
-                <IconSymbol size={28} name="person.2.fill" color={color} />
-                {pendingRequestsCount > 0 && (
-                  <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 items-center justify-center border-2 border-white">
-                    <Text className="text-white text-[10px] font-bold">{pendingRequestsCount > 9 ? '9+' : String(pendingRequestsCount)}</Text>
-                  </View>
-                )}
-              </View>
-            ),
+            title: 'Clubs',
+            tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.3.fill" color={color} />,
           }}
         />
         <Tabs.Screen

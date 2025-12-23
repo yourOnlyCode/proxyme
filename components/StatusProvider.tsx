@@ -36,7 +36,7 @@ export type StatusItem = {
 
 type StatusContextType = {
     openModal: () => void;
-    openCamera: () => void;
+    openCamera: (fromSwipe?: boolean) => void;
     closeModal: () => void;
     activeStatuses: StatusItem[];
     fetchStatus: () => void;
@@ -51,6 +51,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   
   const [modalVisible, setModalVisible] = useState(false);
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
+  const [cameraFromSwipe, setCameraFromSwipe] = useState(false);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewStartIndex, setPreviewStartIndex] = useState(0);
   const [updating, setUpdating] = useState(false);
@@ -199,7 +200,8 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       }
   };
 
-  const openCamera = () => {
+  const openCamera = (fromSwipe: boolean = false) => {
+      setCameraFromSwipe(fromSwipe);
       setCameraModalVisible(true);
   };
 
@@ -562,8 +564,12 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       {/* Custom Camera Modal - Rendered after status modal to ensure it's on top */}
       <CameraModal
         visible={cameraModalVisible}
-        onClose={() => setCameraModalVisible(false)}
+        onClose={() => {
+          setCameraModalVisible(false);
+          setCameraFromSwipe(false);
+        }}
         onPhotoTaken={handleCameraPhoto}
+        slideFromRight={cameraFromSwipe}
       />
 
       {/* Status Preview Modal - Shows how others see your status */}

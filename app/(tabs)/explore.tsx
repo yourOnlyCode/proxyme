@@ -70,7 +70,6 @@ export default function ProfileScreen() {
         .eq('user_id', user.id)
         .order('display_order');
 
-    // Fetch stats
     const { data: statsData } = await supabase.rpc('get_user_connection_stats', { target_user_id: user.id });
     if (statsData) setStats(statsData);
 
@@ -159,7 +158,7 @@ export default function ProfileScreen() {
                 {/* Connection Stats (Clickable) */}
                 {stats && stats.total > 0 && (
                     <TouchableOpacity 
-                        onPress={() => router.push('/interests')}
+                        onPress={() => router.push(`/connections/${user?.id}`)}
                         className="flex-row mt-6 bg-white p-3 rounded-xl justify-between border border-gray-100 shadow-sm"
                     >
                         <View className="items-center flex-1 justify-center">

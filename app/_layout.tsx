@@ -1,3 +1,5 @@
+import { TutorialProvider } from '@/components/TutorialProvider';
+import { ToastProvider } from '@/components/ui/ToastProvider';
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -8,8 +10,6 @@ import { AuthProvider, useAuth } from '../lib/auth';
 import { LocationProvider } from '../lib/location'; // New Import
 import { registerForPushNotificationsAsync } from '../lib/push';
 import { supabase } from '../lib/supabase';
-import { ToastProvider } from '@/components/ui/ToastProvider';
-import { TutorialProvider } from '@/components/TutorialProvider';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -68,6 +68,7 @@ function InitialLayout() {
         <Stack.Screen name="(settings)" options={{ headerShown: false }} />
         <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="requests" options={{ headerShown: false }} />
+        <Stack.Screen name="inbox" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="dark" />
     </ThemeProvider>

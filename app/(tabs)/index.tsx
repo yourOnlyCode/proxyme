@@ -22,7 +22,11 @@ const MICRO_RANGE = 92; // 300 feet
 export default function HomeScreen() {
   const { signOut, user } = useAuth();
   const { isProxyActive, toggleProxy, location, address } = useProxyLocation();
-  const { openModal, openCamera, currentStatus, deleteStatus } = useStatus();
+  const { openModal, openCamera, activeStatuses, deleteStatus } = useStatus();
+  const currentStatus = activeStatuses && activeStatuses.length > 0 ? activeStatuses[0] : null;
+  // StatusItem has: id, content, type, caption, created_at, expires_at
+  const currentStatusImage = currentStatus && currentStatus.type === 'image' ? currentStatus.content : null;
+  const currentStatusText = currentStatus?.caption || (currentStatus && currentStatus.type === 'text' ? currentStatus.content : null);
   const [feed, setFeed] = useState<FeedProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -319,19 +323,44 @@ export default function HomeScreen() {
     return common;
   };
 
-  // Swipe gesture handler (left to right to open camera)
+  // Track initial touch position for swipe detection
+  const initialTouchX = useRef<number | null>(null);
+
+  // Swipe gesture handler (swipe left for inbox, swipe right for camera)
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // Only respond to horizontal swipes from left edge
-        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && gestureState.dx > 50 && evt.nativeEvent.pageX < 30;
+        // Store initial touch position
+        if (initialTouchX.current === null) {
+          initialTouchX.current = evt.nativeEvent.pageX;
+        }
+        
+        // Only respond to horizontal swipes
+        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasEnoughMovement = Math.abs(gestureState.dx) > 30;
+        
+        return isHorizontal && hasEnoughMovement;
       },
       onPanResponderRelease: (evt, gestureState) => {
-        // Left to right swipe (dx > 0) from left edge
-        if (gestureState.dx > 100 && evt.nativeEvent.pageX < 50) {
-          openCamera();
+        const startX = initialTouchX.current ?? evt.nativeEvent.pageX;
+        const isFromLeftEdge = startX < 100;
+        
+        // Swipe left (dx < 0) to open inbox
+        if (gestureState.dx < -100) {
+          router.push('/inbox');
         }
+        // Swipe right from left edge (dx > 0) to open camera
+        else if (gestureState.dx > 100 && isFromLeftEdge) {
+          openCamera(true); // Pass true to indicate it's from swipe
+        }
+        
+        // Reset initial touch position
+        initialTouchX.current = null;
+      },
+      onPanResponderTerminate: () => {
+        // Reset on cancel
+        initialTouchX.current = null;
       },
     })
   ).current;
@@ -401,7 +430,7 @@ export default function HomeScreen() {
                 >
                     {item.status_image_url ? (
                         <View className="w-5 h-5 rounded-full overflow-hidden mr-1.5 border border-green-100">
-                            <FeedImage path={item.status_image_url} />
+                            <FeedImage path={item.status_image_url} resizeMode="cover" />
                         </View>
                     ) : (
                         <IconSymbol name="bubble.left.fill" size={12} color="#10B981" style={{ marginRight: 4 }} />
@@ -583,9 +612,9 @@ export default function HomeScreen() {
               >
                   <View className="flex-row justify-between items-start">
                       <View className={`w-10 h-10 rounded-full items-center justify-center border ${currentStatus ? 'border-green-400 bg-gray-100' : 'border-gray-200 border-dashed bg-gray-50'}`}>
-                          {currentStatus?.image ? (
+                          {currentStatusImage ? (
                               <View className="w-full h-full rounded-full overflow-hidden">
-                                  <FeedImage path={currentStatus.image} />
+                                  <FeedImage path={currentStatusImage} resizeMode="cover" />
                               </View>
                           ) : (
                               <IconSymbol name="plus" size={20} color="#9CA3AF" />
@@ -601,7 +630,7 @@ export default function HomeScreen() {
                   <View>
                       <Text className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">My Status</Text>
                       <Text className={`font-bold text-xs leading-4 ${currentStatus ? 'text-ink' : 'text-gray-400 italic'}`} numberOfLines={2}>
-                          {currentStatus?.text ? `"${currentStatus.text}"` : "What're you up to?"}
+                          {currentStatusText ? `"${currentStatusText}"` : "What're you up to?"}
                       </Text>
                   </View>
               </TouchableOpacity>

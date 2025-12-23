@@ -1,10 +1,10 @@
+import { ProfileData, ProfileModal } from '@/components/ProfileModal';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, Image, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { ProfileModal, ProfileData } from '@/components/ProfileModal';
 
 type Interest = {
   id: string;
@@ -189,7 +189,7 @@ function Avatar({ path }: { path: string | null }) {
     return (
       <View className="w-12 h-12 bg-gray-300 rounded-full overflow-hidden">
          {url ? (
-             <Image source={{ uri: url }} className="w-full h-full" />
+             <Image source={{ uri: url }} className="w-full h-full" resizeMode="cover" />
          ) : (
              <View className="w-full h-full items-center justify-center bg-gray-200">
                  <Text className="text-gray-400 font-bold">?</Text>
