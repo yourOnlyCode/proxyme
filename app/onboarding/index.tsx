@@ -13,7 +13,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const RELATIONSHIP_OPTS = ['Romance', 'Friendship', 'Business'];
+const RELATIONSHIP_OPTS = ['Romance', 'Friendship', 'Professional'];
 
 type SocialLinks = {
     instagram?: string;
@@ -185,7 +185,7 @@ export default function CompleteProfileScreen() {
       switch(goal) {
           case 'Romance': return isSelected ? 'bg-romance border-romance' : 'border-romance/30 bg-white';
           case 'Friendship': return isSelected ? 'bg-friendship border-friendship' : 'border-friendship/30 bg-white';
-          case 'Business': return isSelected ? 'bg-business border-business' : 'border-business/30 bg-white';
+          case 'Professional': return isSelected ? 'bg-business border-business' : 'border-business/30 bg-white';
           default: return isSelected ? 'bg-black border-black' : 'border-gray-300 bg-white';
       }
   };
@@ -195,7 +195,7 @@ export default function CompleteProfileScreen() {
       switch(goal) {
           case 'Romance': return 'text-romance';
           case 'Friendship': return 'text-friendship';
-          case 'Business': return 'text-business';
+          case 'Professional': return 'text-business';
           default: return 'text-gray-700';
       }
   };

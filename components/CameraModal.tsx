@@ -2,7 +2,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useState, useRef } from 'react';
-import { Modal, View, TouchableOpacity, Text, Image, Dimensions, Platform } from 'react-native';
+import { Modal, View, TouchableOpacity, Text, Image, Dimensions } from 'react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -66,12 +66,56 @@ export function CameraModal({
                     skipProcessing: false,
                 });
                 if (photo) {
+                    // Get image dimensions to crop to screen aspect ratio
+                    const { width: imgWidth, height: imgHeight } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+                        Image.getSize(photo.uri, (w, h) => resolve({ width: w, height: h }), reject);
+                    });
+                    
+                    // Screen aspect ratio (portrait)
+                    const screenAspect = SCREEN_HEIGHT / SCREEN_WIDTH;
+                    const imageAspect = imgHeight / imgWidth;
+                    
+                    let manipulations: any[] = [];
+                    
+                    // If image is wider than screen aspect, crop width (remove side borders)
+                    if (imageAspect < screenAspect) {
+                        const targetHeight = imgHeight;
+                        const targetWidth = imgHeight / screenAspect;
+                        const cropX = (imgWidth - targetWidth) / 2;
+                        manipulations.push({
+                            crop: {
+                                originX: cropX,
+                                originY: 0,
+                                width: targetWidth,
+                                height: targetHeight,
+                            }
+                        });
+                    }
+                    // If image is taller than screen aspect, crop height (remove top/bottom borders)
+                    else if (imageAspect > screenAspect) {
+                        const targetWidth = imgWidth;
+                        const targetHeight = imgWidth * screenAspect;
+                        const cropY = (imgHeight - targetHeight) / 2;
+                        manipulations.push({
+                            crop: {
+                                originX: 0,
+                                originY: cropY,
+                                width: targetWidth,
+                                height: targetHeight,
+                            }
+                        });
+                    }
+                    
                     // If using front camera, mirror the image to match preview
-                    let finalUri = photo.uri;
                     if (facing === 'front') {
+                        manipulations.push({ flip: ImageManipulator.FlipType.Horizontal });
+                    }
+                    
+                    let finalUri = photo.uri;
+                    if (manipulations.length > 0) {
                         const manipulated = await ImageManipulator.manipulateAsync(
                             photo.uri,
-                            [{ flip: ImageManipulator.FlipType.Horizontal }],
+                            manipulations,
                             { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
                         );
                         finalUri = manipulated.uri;
@@ -141,29 +185,30 @@ export function CameraModal({
                 />
                 
                 {/* Top Controls */}
-                <View className="absolute top-12 left-0 right-0 flex-row justify-between items-center px-4">
+                <View className="absolute top-12 left-0 right-0 flex-row justify-start items-center px-4">
                     <TouchableOpacity 
                         onPress={onClose}
                         className="bg-black/50 p-3 rounded-full"
                     >
                         <IconSymbol name="xmark" size={24} color="white" />
                     </TouchableOpacity>
-                    <TouchableOpacity 
-                        onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
-                        className="bg-black/50 p-3 rounded-full"
-                    >
-                        <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
-                    </TouchableOpacity>
                 </View>
 
                 {/* Bottom Controls */}
-                <View className="absolute bottom-12 left-0 right-0 items-center">
+                <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
+                    <TouchableOpacity 
+                        onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+                        className="bg-black/50 p-3 rounded-full mr-8"
+                    >
+                        <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
+                    </TouchableOpacity>
                     <TouchableOpacity 
                         onPress={takePicture}
                         className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 items-center justify-center"
                     >
                         <View className="w-16 h-16 rounded-full bg-white" />
                     </TouchableOpacity>
+                    <View className="w-20" /> {/* Spacer for symmetry */}
                 </View>
             </View>
         </Modal>

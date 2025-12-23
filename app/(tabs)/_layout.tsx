@@ -1,12 +1,94 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Tabs } from 'expo-router';
-import { Platform, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, View, Text } from 'react-native';
 import { StatusFloatingButton } from '@/components/StatusFloatingButton';
 import { useProxyLocation } from '@/lib/location';
 import { StatusProvider } from '@/components/StatusProvider';
+import { useAuth } from '@/lib/auth';
+import { supabase } from '@/lib/supabase';
 
 export default function TabLayout() {
   const { address } = useProxyLocation();
+  const { user } = useAuth();
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+
+  // Fetch pending requests count
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchPendingRequests = async () => {
+      const { count } = await supabase
+        .from('interests')
+        .select('*', { count: 'exact', head: true })
+        .eq('receiver_id', user.id)
+        .eq('status', 'pending');
+      
+      setPendingRequestsCount(count || 0);
+    };
+
+    fetchPendingRequests();
+
+    // Subscribe to changes
+    const subscription = supabase
+      .channel('pending-requests')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'interests',
+        filter: `receiver_id=eq.${user.id}`
+      }, () => {
+        fetchPendingRequests();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, [user]);
+
+  // Fetch unread messages count
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchUnreadMessages = async () => {
+      // Check for unread messages in connections
+      const { data: connections } = await supabase
+        .from('interests')
+        .select('id')
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+        .eq('status', 'accepted');
+
+      if (connections && connections.length > 0) {
+        const connectionIds = connections.map(c => c.id);
+        
+        // Note: Messages table doesn't have a 'read' field yet
+        // For now, we'll set unread count to 0
+        // This can be updated when read tracking is implemented
+        setUnreadMessagesCount(0);
+      }
+    };
+
+    fetchUnreadMessages();
+
+    // Subscribe to message changes
+    const subscription = supabase
+      .channel('unread-messages')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${user.id}`
+      }, () => {
+        fetchUnreadMessages();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, [user]);
 
   return (
     <StatusProvider>
@@ -51,7 +133,16 @@ export default function TabLayout() {
           name="interests"
           options={{
             title: 'Connections',
-            tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.2.fill" color={color} />,
+            tabBarIcon: ({ color }) => (
+              <View>
+                <IconSymbol size={28} name="person.2.fill" color={color} />
+                {pendingRequestsCount > 0 && (
+                  <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 items-center justify-center border-2 border-white">
+                    <Text className="text-white text-[10px] font-bold">{pendingRequestsCount > 9 ? '9+' : String(pendingRequestsCount)}</Text>
+                  </View>
+                )}
+              </View>
+            ),
           }}
         />
         <Tabs.Screen

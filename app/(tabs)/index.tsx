@@ -39,6 +39,7 @@ export default function HomeScreen() {
       extrapolateLeft: 'clamp',
   });
 
+  // @ts-ignore - diffClamp is available but TypeScript types may not include it
   const diffClamp = Animated.diffClamp(clampedScrollY, 0, HEADER_HEIGHT);
   const translateY = diffClamp.interpolate({
     inputRange: [0, HEADER_HEIGHT],
@@ -55,6 +56,7 @@ export default function HomeScreen() {
   const [previewStatusProfile, setPreviewStatusProfile] = useState<FeedProfile | null>(null);
   const [myInterests, setMyInterests] = useState<Record<string, string[]> | null>(null);
   const [myGoals, setMyGoals] = useState<string[] | null>(null);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   useEffect(() => {
     if (user) {
@@ -69,7 +71,42 @@ export default function HomeScreen() {
 
         // Fetch My Status
         fetchMyStatus();
+        
+        // Fetch pending requests
+        fetchPendingRequests();
     }
+  }, [user]);
+
+  const fetchPendingRequests = async () => {
+    if (!user) return;
+    const { count } = await supabase
+      .from('interests')
+      .select('*', { count: 'exact', head: true })
+      .eq('receiver_id', user.id)
+      .eq('status', 'pending');
+    
+    setPendingRequestsCount(count || 0);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    // Subscribe to changes
+    const subscription = supabase
+      .channel('pending-requests-proxy')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'interests',
+        filter: `receiver_id=eq.${user.id}`
+      }, () => {
+        fetchPendingRequests();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [user]);
 
   const fetchMyStatus = async () => {
@@ -110,7 +147,42 @@ export default function HomeScreen() {
       if (filtered.length !== (data || []).length) {
           console.warn(`Filtered ${data.length - filtered.length} users who were out of range.`);
       }
-      setFeed(filtered);
+      
+      // Fetch pending requests for each user
+      const userIds = filtered.map((u: FeedProfile) => u.id);
+      if (userIds.length > 0 && user) {
+          const { data: pendingData } = await supabase
+              .from('interests')
+              .select('id, sender_id, receiver_id, status')
+              .in('sender_id', [user.id, ...userIds])
+              .in('receiver_id', [user.id, ...userIds])
+              .in('status', ['pending']);
+          
+          // Create a map of user_id -> pending interest
+          const pendingMap = new Map<string, { id: string; isReceived: boolean }>();
+          pendingData?.forEach((interest: any) => {
+              if (interest.sender_id === user.id) {
+                  // User sent request to this person
+                  pendingMap.set(interest.receiver_id, { id: interest.id, isReceived: false });
+              } else if (interest.receiver_id === user.id) {
+                  // User received request from this person
+                  pendingMap.set(interest.sender_id, { id: interest.id, isReceived: true });
+              }
+          });
+          
+          // Add pending request info to each user
+          const enrichedFeed = filtered.map((u: FeedProfile) => {
+              const pending = pendingMap.get(u.id);
+              return {
+                  ...u,
+                  pending_request: pending ? { id: pending.id, is_received: pending.isReceived } : null
+              } as FeedProfile & { pending_request?: { id: string; is_received: boolean } | null };
+          });
+          
+          setFeed(enrichedFeed);
+      } else {
+          setFeed(filtered);
+      }
     }
     setLoading(false);
   };
@@ -155,6 +227,35 @@ export default function HomeScreen() {
           }
       } else {
           toast.show('Interest sent successfully', 'success');
+          fetchProxyFeed(); // Refresh feed to update UI
+      }
+  };
+
+  const handleAcceptRequest = async (interestId: string) => {
+      const { error } = await supabase
+          .from('interests')
+          .update({ status: 'accepted' })
+          .eq('id', interestId);
+      
+      if (error) {
+          toast.show(error.message, 'error');
+      } else {
+          toast.show('Request accepted!', 'success');
+          fetchProxyFeed(); // Refresh feed
+      }
+  };
+
+  const handleDeclineRequest = async (interestId: string) => {
+      const { error } = await supabase
+          .from('interests')
+          .update({ status: 'declined' })
+          .eq('id', interestId);
+      
+      if (error) {
+          toast.show(error.message, 'error');
+      } else {
+          toast.show('Request declined', 'info');
+          fetchProxyFeed(); // Refresh feed
       }
   };
 
@@ -170,7 +271,7 @@ export default function HomeScreen() {
     switch(goal) {
         case 'Romance': return { bg: 'bg-romance/5', border: 'border-romance/30', text: 'text-romance', badgeBg: 'bg-romance/10' };
         case 'Friendship': return { bg: 'bg-friendship/5', border: 'border-friendship/30', text: 'text-friendship', badgeBg: 'bg-friendship/10' };
-        case 'Business': return { bg: 'bg-business/5', border: 'border-business/30', text: 'text-business', badgeBg: 'bg-business/10' };
+        case 'Professional': return { bg: 'bg-business/5', border: 'border-business/30', text: 'text-business', badgeBg: 'bg-business/10' };
         default: return { bg: 'bg-white', border: 'border-gray-200', text: 'text-ink', badgeBg: 'bg-gray-100' };
     }
   };
@@ -186,6 +287,36 @@ export default function HomeScreen() {
     if (myCatCount === 0) return 0;
     const maxScore = myCatCount * 16; // 1 for cat + 3*5 for items
     return Math.round((score / maxScore) * 100);
+  };
+
+  // Find common interests between my interests and user's interests
+  const getCommonInterests = (userInterests: Record<string, string[]> | null): string[] => {
+    if (!myInterests || !userInterests) return [];
+    const common: string[] = [];
+    
+    Object.keys(myInterests).forEach(cat => {
+      if (userInterests[cat]) {
+        // Check for matching sub-interests
+        const myTags = myInterests[cat].map(t => t.toLowerCase().trim());
+        const userTags = userInterests[cat].map(t => t.toLowerCase().trim());
+        const matchingTags = userTags.filter(tag => myTags.includes(tag));
+        
+        if (matchingTags.length > 0) {
+          // Add category and matching tags
+          matchingTags.forEach(tag => {
+            const originalTag = userInterests[cat].find(t => t.toLowerCase().trim() === tag);
+            if (originalTag) {
+              common.push(`${cat}: ${originalTag}`);
+            }
+          });
+        } else {
+          // Just category match
+          common.push(cat);
+        }
+      }
+    });
+    
+    return common;
   };
 
   // Swipe gesture handler (left to right to open camera)
@@ -228,6 +359,9 @@ export default function HomeScreen() {
             }
         });
     }
+
+    // Get common interests
+    const commonInterests = getCommonInterests(item.detailed_interests);
 
     return (
       <View className={`mb-6 rounded-3xl overflow-hidden border ${isConnected ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100 shadow-sm'}`}>
@@ -309,6 +443,19 @@ export default function HomeScreen() {
 
         {/* Footer: Interests & Actions */}
         <View className="p-4 pt-3">
+            {/* Common Interests */}
+            {commonInterests.length > 0 && (
+                <View className="flex-row items-center flex-wrap mb-3">
+                    <IconSymbol name="star.fill" size={14} color="#FFD700" style={{ marginRight: 6 }} />
+                    <Text className="text-gray-700 text-xs font-bold mr-2">Common interests:</Text>
+                    {commonInterests.map((interest, idx) => (
+                        <Text key={idx} className="text-gray-600 text-xs font-medium mr-2">
+                            {interest.split(': ').pop()}{idx < commonInterests.length - 1 ? ',' : ''}
+                        </Text>
+                    ))}
+                </View>
+            )}
+
             {/* Interests */}
             {topInterests.length > 0 && (
                 <View className="flex-row flex-wrap mb-4">
@@ -332,6 +479,28 @@ export default function HomeScreen() {
                     <IconSymbol name="bubble.left.fill" size={16} color="#4B5563" style={{ marginRight: 8 }} />
                     <Text className="text-gray-700 font-bold text-sm">Message</Text>
                 </TouchableOpacity>
+            ) : (item as any).pending_request ? (
+                // Show Accept/Decline if there's a pending request
+                (item as any).pending_request.is_received ? (
+                    <View className="flex-row space-x-3">
+                        <TouchableOpacity 
+                            className="flex-1 bg-green-500 py-3 rounded-xl items-center shadow-md active:scale-[0.98]"
+                            onPress={() => handleAcceptRequest((item as any).pending_request.id)}
+                        >
+                            <Text className="text-white font-bold text-sm">Accept</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            className="flex-1 bg-red-500 py-3 rounded-xl items-center shadow-md active:scale-[0.98]"
+                            onPress={() => handleDeclineRequest((item as any).pending_request.id)}
+                        >
+                            <Text className="text-white font-bold text-sm">Decline</Text>
+                        </TouchableOpacity>
+                    </View>
+                ) : (
+                    <View className="w-full bg-gray-100 py-3 rounded-xl items-center">
+                        <Text className="text-gray-500 font-bold text-sm">Request Sent</Text>
+                    </View>
+                )
             ) : (
                 <View className="flex-row space-x-3">
                     <TouchableOpacity 
@@ -394,7 +563,14 @@ export default function HomeScreen() {
             </View>
             <View className="flex-row items-center space-x-4">
                 <TouchableOpacity onPress={() => router.push('/requests')} className="mr-4">
-                    <IconSymbol name="tray.fill" size={24} color="#2D3748" />
+                    <View>
+                        <IconSymbol name="tray.fill" size={24} color="#2D3748" />
+                        {pendingRequestsCount > 0 && (
+                            <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 items-center justify-center border-2 border-white">
+                                <Text className="text-white text-[10px] font-bold">{pendingRequestsCount > 9 ? '9+' : String(pendingRequestsCount)}</Text>
+                            </View>
+                        )}
+                    </View>
                 </TouchableOpacity>
             </View>
           </View>

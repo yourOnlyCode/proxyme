@@ -26,10 +26,46 @@ export default function ConnectionsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
-    if (user) fetchData();
+    if (user) {
+      fetchData();
+      fetchPendingRequests();
+    }
+  }, [user]);
+
+  const fetchPendingRequests = async () => {
+    if (!user) return;
+    const { count } = await supabase
+      .from('interests')
+      .select('*', { count: 'exact', head: true })
+      .eq('receiver_id', user.id)
+      .eq('status', 'pending');
+    
+    setPendingRequestsCount(count || 0);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    // Subscribe to changes
+    const subscription = supabase
+      .channel('pending-requests-interests')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'interests',
+        filter: `receiver_id=eq.${user.id}`
+      }, () => {
+        fetchPendingRequests();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [user]);
 
   const fetchData = async () => {
@@ -146,7 +182,14 @@ export default function ConnectionsScreen() {
       <View className="flex-row justify-between items-center mb-6">
           <Text className="text-3xl font-bold">Connections</Text>
           <TouchableOpacity onPress={() => router.push('/requests')}>
-              <IconSymbol name="tray.fill" size={28} color="#2D3748" />
+              <View>
+                  <IconSymbol name="tray.fill" size={28} color="#2D3748" />
+                  {pendingRequestsCount > 0 && (
+                      <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 items-center justify-center border-2 border-white">
+                          <Text className="text-white text-[10px] font-bold">{pendingRequestsCount > 9 ? '9+' : String(pendingRequestsCount)}</Text>
+                      </View>
+                  )}
+              </View>
           </TouchableOpacity>
       </View>
 

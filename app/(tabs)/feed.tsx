@@ -2,7 +2,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, Image, RefreshControl, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { Alert, Animated, FlatList, Image, PanResponder, RefreshControl, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
@@ -86,7 +86,41 @@ export default function CityFeedScreen() {
           });
       }
 
-      setFeed(filtered);
+      // 3. Fetch pending requests for each user
+      const userIds = filtered.map((u: FeedProfile) => u.id);
+      if (userIds.length > 0 && user) {
+          const { data: pendingData } = await supabase
+              .from('interests')
+              .select('id, sender_id, receiver_id, status')
+              .in('sender_id', [user.id, ...userIds])
+              .in('receiver_id', [user.id, ...userIds])
+              .in('status', ['pending']);
+          
+          // Create a map of user_id -> pending interest
+          const pendingMap = new Map<string, { id: string; isReceived: boolean }>();
+          pendingData?.forEach((interest: any) => {
+              if (interest.sender_id === user.id) {
+                  // User sent request to this person
+                  pendingMap.set(interest.receiver_id, { id: interest.id, isReceived: false });
+              } else if (interest.receiver_id === user.id) {
+                  // User received request from this person
+                  pendingMap.set(interest.sender_id, { id: interest.id, isReceived: true });
+              }
+          });
+          
+          // Add pending request info to each user
+          const enrichedFeed = filtered.map((u: FeedProfile) => {
+              const pending = pendingMap.get(u.id);
+              return {
+                  ...u,
+                  pending_request: pending ? { id: pending.id, is_received: pending.isReceived } : null
+              } as FeedProfile & { pending_request?: { id: string; is_received: boolean } | null };
+          });
+          
+          setFeed(enrichedFeed);
+      } else {
+          setFeed(filtered);
+      }
     }
     setLoading(false);
   };
@@ -104,6 +138,36 @@ export default function CityFeedScreen() {
           }
       });
       return score;
+  };
+
+  // Find common interests between my interests and user's interests
+  const getCommonInterests = (userInterests: Record<string, string[]> | null): string[] => {
+      if (!myInterests || !userInterests) return [];
+      const common: string[] = [];
+      
+      Object.keys(myInterests).forEach(cat => {
+          if (userInterests[cat]) {
+              // Check for matching sub-interests
+              const myTags = myInterests[cat].map((t: string) => t.toLowerCase().trim());
+              const userTags = userInterests[cat].map((t: string) => t.toLowerCase().trim());
+              const matchingTags = userTags.filter(tag => myTags.includes(tag));
+              
+              if (matchingTags.length > 0) {
+                  // Add category and matching tags
+                  matchingTags.forEach(tag => {
+                      const originalTag = userInterests[cat].find((t: string) => t.toLowerCase().trim() === tag);
+                      if (originalTag) {
+                          common.push(`${cat}: ${originalTag}`);
+                      }
+                  });
+              } else {
+                  // Just category match
+                  common.push(cat);
+              }
+          }
+      });
+      
+      return common;
   };
 
   // Initial load & Re-sort when interests load
@@ -128,6 +192,35 @@ export default function CityFeedScreen() {
           }
       } else {
           Alert.alert('Sent!', 'Interest sent successfully.');
+          fetchFeed(); // Refresh feed
+      }
+  };
+
+  const handleAcceptRequest = async (interestId: string) => {
+      const { error } = await supabase
+          .from('interests')
+          .update({ status: 'accepted' })
+          .eq('id', interestId);
+      
+      if (error) {
+          Alert.alert('Error', error.message);
+      } else {
+          Alert.alert('Accepted!', 'Request accepted!');
+          fetchFeed(); // Refresh feed
+      }
+  };
+
+  const handleDeclineRequest = async (interestId: string) => {
+      const { error } = await supabase
+          .from('interests')
+          .update({ status: 'declined' })
+          .eq('id', interestId);
+      
+      if (error) {
+          Alert.alert('Error', error.message);
+      } else {
+          Alert.alert('Declined', 'Request declined.');
+          fetchFeed(); // Refresh feed
       }
   };
 
@@ -168,6 +261,9 @@ export default function CityFeedScreen() {
                 handleSafety={handleSafety} 
                 openProfile={openProfile}
                 percentage={calculateMatchPercentage(item.shared_interests_count || 0)}
+                getCommonInterests={getCommonInterests}
+                handleAcceptRequest={handleAcceptRequest}
+                handleDeclineRequest={handleDeclineRequest}
             />
         )}
         keyExtractor={item => item.id}
@@ -223,7 +319,10 @@ function CityFeedCard({
     sendInterest, 
     handleSafety, 
     openProfile,
-    percentage 
+    percentage,
+    getCommonInterests,
+    handleAcceptRequest,
+    handleDeclineRequest
 }: { 
     item: FeedProfile, 
     width: number, 
@@ -233,67 +332,261 @@ function CityFeedCard({
     sendInterest: (id: string) => void, 
     handleSafety: (id: string) => void,
     openProfile: (profile: FeedProfile) => void,
-    percentage: number
+    percentage: number,
+    getCommonInterests: (userInterests: Record<string, string[]> | null) => string[];
+    handleAcceptRequest: (interestId: string) => void;
+    handleDeclineRequest: (interestId: string) => void;
 }) {
     const [activeIndex, setActiveIndex] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
+    const [showProfilePrompt, setShowProfilePrompt] = useState(false);
     const statuses = item.statuses || [];
-    const currentStatus = statuses[activeIndex];
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+    
+    // Animated progress bars for each status
+    const progressAnimsRef = useRef<Animated.Value[]>([]);
+    
+    // Initialize progress animations when statuses change
+    useEffect(() => {
+        if (statuses.length !== progressAnimsRef.current.length) {
+            progressAnimsRef.current = statuses.map(() => new Animated.Value(0));
+        }
+    }, [statuses.length]);
+    
+    // Show profile prompt slide after last status
+    const isShowingProfilePrompt = showProfilePrompt && activeIndex >= statuses.length;
+    const currentStatus = isShowingProfilePrompt ? null : statuses[activeIndex];
+    const lastImageStatus = statuses.filter(s => s.type === 'image').pop();
+
+    // Animate progress bar for current status
+    useEffect(() => {
+        if (isPaused || isShowingProfilePrompt || activeIndex >= statuses.length || !progressAnimsRef.current[activeIndex]) {
+            // Pause animation
+            progressAnimsRef.current[activeIndex]?.stopAnimation();
+            return;
+        }
+
+        // Reset and animate current progress bar
+        progressAnimsRef.current[activeIndex].setValue(0);
+        const anim = Animated.timing(progressAnimsRef.current[activeIndex], {
+            toValue: 1,
+            duration: 5000,
+            useNativeDriver: false, // Width animation doesn't support native driver
+        });
+
+        anim.start(({ finished }) => {
+            if (finished && !isPaused) {
+                if (activeIndex < statuses.length - 1) {
+                    setActiveIndex(activeIndex + 1);
+                } else {
+                    // After last status, show profile prompt
+                    setShowProfilePrompt(true);
+                    setActiveIndex(statuses.length);
+                }
+            }
+        });
+
+        return () => {
+            anim.stop();
+        };
+    }, [activeIndex, isPaused, statuses.length, isShowingProfilePrompt]);
+
+    // Reset when item changes
+    useEffect(() => {
+        setActiveIndex(0);
+        setShowProfilePrompt(false);
+        setIsPaused(false);
+        // Reset all progress bars
+        progressAnimsRef.current.forEach(anim => anim.setValue(0));
+    }, [item.id]);
 
     const handleTap = (evt: any) => {
+        if (isShowingProfilePrompt) {
+            openProfile(item);
+            return;
+        }
+
         const x = evt.nativeEvent.locationX;
         if (x < width * 0.3) {
             // Previous
-            if (activeIndex > 0) setActiveIndex(activeIndex - 1);
+            if (activeIndex > 0) {
+                setActiveIndex(activeIndex - 1);
+                setShowProfilePrompt(false);
+            }
         } else {
             // Next
-            if (activeIndex < statuses.length - 1) setActiveIndex(activeIndex + 1);
-            else {
-                // If last, open profile? or just stop?
-                // openProfile(item);
+            if (activeIndex < statuses.length - 1) {
+                setActiveIndex(activeIndex + 1);
+                setShowProfilePrompt(false);
+            } else {
+                // If last, show profile prompt
+                setShowProfilePrompt(true);
+                setActiveIndex(statuses.length);
             }
         }
     };
 
+    const handlePressIn = () => {
+        setIsPaused(true);
+    };
+
+    const handlePressOut = () => {
+        setIsPaused(false);
+    };
+
+    // Slide down gesture to open profile
+    const panResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => false,
+            onMoveShouldSetPanResponder: (evt, gestureState) => {
+                // Only trigger on downward swipes (dy > dx and dy > 50px)
+                return Math.abs(gestureState.dy) > Math.abs(gestureState.dx) && gestureState.dy > 50;
+            },
+            onPanResponderRelease: (evt, gestureState) => {
+                // If swiped down more than 100px, open profile
+                if (gestureState.dy > 100) {
+                    openProfile(item);
+                }
+            },
+        })
+    ).current;
+
     const primaryGoal = item.relationship_goals?.[0];
     const theme = getTheme(primaryGoal);
     const isConnected = !!item.connection_id;
+    
+    // Get common interests
+    const commonInterests = getCommonInterests ? getCommonInterests(item.detailed_interests) : [];
 
-    if (!currentStatus) return null; // Should not happen due to filter
+    if (!currentStatus && !isShowingProfilePrompt) return null;
 
     return (
       <View style={{ height: listHeight, width: width }} className="bg-black relative shadow-2xl overflow-hidden">
         
-        {/* Status Progress Bars */}
-        <View className="absolute top-14 left-2 right-2 flex-row gap-1 z-50 h-1">
-            {statuses.map((_, i) => (
-                <View 
-                    key={i} 
-                    className={`flex-1 h-full rounded-full ${i <= activeIndex ? 'bg-white' : 'bg-white/30'}`}
-                />
-            ))}
-        </View>
+        {/* Status Progress Bars with Animation */}
+        {!isShowingProfilePrompt && (
+            <View className="absolute top-14 left-2 right-2 flex-row gap-1 z-50 h-1">
+                {statuses.map((_, i) => {
+                    const progressAnim = progressAnimsRef.current[i];
+                    const progressWidth = progressAnim ? progressAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['0%', '100%'],
+                    }) : '0%';
+                    
+                    return (
+                        <View 
+                            key={i} 
+                            className="flex-1 h-full rounded-full bg-white/30 overflow-hidden"
+                        >
+                            {i === activeIndex && progressAnim ? (
+                                <Animated.View
+                                    style={{
+                                        width: progressWidth,
+                                        height: '100%',
+                                        backgroundColor: 'white',
+                                        borderRadius: 999,
+                                    }}
+                                />
+                            ) : i < activeIndex ? (
+                                <View className="w-full h-full bg-white rounded-full" />
+                            ) : null}
+                        </View>
+                    );
+                })}
+            </View>
+        )}
 
-        {/* Content Area (Tap to Advance) */}
-        <TouchableWithoutFeedback onPress={handleTap}>
-            <View style={{ width, height: listHeight }}>
-                {currentStatus.type === 'image' ? (
-                    <FeedImage path={currentStatus.content} containerHeight={listHeight} containerWidth={width} />
-                ) : (
-                    <View className="w-full h-full items-center justify-center bg-ink p-8">
-                         <Text className="text-white text-2xl font-bold italic text-center leading-9">
-                             "{currentStatus.content}"
-                         </Text>
+        {/* Content Area (Tap to Advance / Hold to Pause / Slide Down for Profile) */}
+        <View 
+            style={{ width, height: listHeight }}
+            {...panResponder.panHandlers}
+        >
+            <TouchableWithoutFeedback 
+                onPress={handleTap}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+            >
+                <View style={{ width, height: listHeight }}>
+                {isShowingProfilePrompt ? (
+                    // Profile Prompt Slide - Blurred last photo
+                    <View style={{ width, height: listHeight, position: 'relative' }}>
+                        {lastImageStatus ? (
+                            <>
+                                <FeedImage path={lastImageStatus.content} containerHeight={listHeight} containerWidth={width} />
+                                {/* Strong blur effect using multiple dark overlays */}
+                                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.85)' }} />
+                                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.3)' }} />
+                            </>
+                        ) : (
+                            <View className="w-full h-full bg-ink" />
+                        )}
+                        <View 
+                            style={{ 
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                paddingHorizontal: 32,
+                                paddingVertical: 32
+                            }}
+                        >
+                            <View style={{ alignItems: 'center' }}>
+                                <View className="w-32 h-32 rounded-full overflow-hidden mb-4 border-4 border-white/50">
+                                    <FeedImage path={item.avatar_url} containerHeight={128} containerWidth={128} />
+                                </View>
+                                <Text className="text-white text-3xl font-bold mb-2 text-center shadow-lg">
+                                    View {item.full_name}'s Profile
+                                </Text>
+                                <Text className="text-white/80 text-lg text-center mb-6 shadow-md">
+                                    Tap to see more
+                                </Text>
+                                <TouchableOpacity
+                                    onPress={() => openProfile(item)}
+                                    className="bg-white px-8 py-4 rounded-full shadow-xl mb-4"
+                                >
+                                    <Text className="text-black font-bold text-lg">View Profile</Text>
+                                </TouchableOpacity>
+                                {/* Replay Button - Circular Arrow Icon */}
+                                <TouchableOpacity
+                                    onPress={(e) => {
+                                        e.stopPropagation();
+                                        setActiveIndex(0);
+                                        setShowProfilePrompt(false);
+                                    }}
+                                    className="w-14 h-14 bg-white/20 rounded-full items-center justify-center border-2 border-white/50 backdrop-blur-md shadow-xl"
+                                >
+                                    <IconSymbol name="arrow.counterclockwise" size={24} color="white" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
                     </View>
-                )}
-                {/* Gradient Overlay for Text Visibility if Image */}
-                {currentStatus.type === 'image' && (
-                    <View className="absolute inset-0 bg-black/10" />
-                )}
+                ) : currentStatus ? (
+                    <>
+                        {currentStatus.type === 'image' ? (
+                            <FeedImage path={currentStatus.content} containerHeight={listHeight} containerWidth={width} />
+                        ) : (
+                            <View className="w-full h-full items-center justify-center bg-ink p-8">
+                                <Text className="text-white text-2xl font-bold italic text-center leading-9">
+                                    "{currentStatus.content}"
+                                </Text>
+                            </View>
+                        )}
+                        {/* Gradient Overlay for Text Visibility if Image */}
+                        {currentStatus.type === 'image' && (
+                            <View className="absolute inset-0 bg-black/10" />
+                        )}
+                    </>
+                ) : null}
             </View>
         </TouchableWithoutFeedback>
+        </View>
             
         {/* Top Overlay: Compact Header */}
-        <View className="absolute top-0 left-0 right-0 pt-16 pb-4 px-4 pointer-events-none">
+        {!isShowingProfilePrompt && (
+            <View className="absolute top-0 left-0 right-0 pt-16 pb-4 px-4 pointer-events-none">
             <View className="flex-row items-center mt-4">
                  <TouchableOpacity onPress={() => openProfile(item)} className="flex-row items-center">
                     {/* Small Avatar next to name */}
@@ -325,20 +618,22 @@ function CityFeedCard({
             </View>
             {percentage > 0 && (
                  <View className="self-start mt-2 bg-white/20 px-2 py-0.5 rounded-full backdrop-blur-md border border-white/10">
-                      <Text className="text-white text-[10px] font-bold">{percentage}% Match</Text>
+                      <Text className="text-white text-xs font-bold">{percentage}% Match</Text>
                  </View>
             )}
         </View>
+        )}
 
         {/* Bottom Overlay: Caption/Bio & Actions */}
-        <View className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 pt-12" style={{ paddingBottom: tabBarHeight + 8 }}>
+        {!isShowingProfilePrompt && (
+            <View className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 pt-12" style={{ paddingBottom: tabBarHeight - 8 }}>
             <View className="flex-row items-end justify-between">
                 {/* Left Column: Text Content */}
                 <View className="flex-1 mr-4">
-                    {/* If Image, show Caption or Text status */}
-                    {currentStatus.caption && (
-                        <Text className="text-white text-base font-medium italic mb-2 leading-6 shadow-sm">
-                            "{currentStatus.caption}"
+                    {/* If Image, show Caption or Text status - Big text at top */}
+                    {currentStatus?.caption && (
+                        <Text className="text-white text-2xl font-bold mb-3 leading-8 shadow-lg">
+                            {currentStatus.caption}
                         </Text>
                     )}
                     
@@ -353,6 +648,19 @@ function CityFeedCard({
                                     </View>
                                 );
                             })}
+                        </View>
+                    )}
+
+                    {/* Common Interests */}
+                    {commonInterests.length > 0 && (
+                        <View className="flex-row items-center flex-wrap mb-2">
+                            <IconSymbol name="star.fill" size={12} color="#FFD700" style={{ marginRight: 4 }} />
+                            <Text className="text-white text-xs font-bold mr-1.5 shadow-sm">Common interests:</Text>
+                            {commonInterests.map((interest, idx) => (
+                                <Text key={idx} className="text-white/90 text-xs font-medium mr-1.5 shadow-sm">
+                                    {interest.split(': ').pop()}{idx < commonInterests.length - 1 ? ',' : ''}
+                                </Text>
+                            ))}
                         </View>
                     )}
 
@@ -409,6 +717,7 @@ function CityFeedCard({
                 </View>
             </View>
         </View>
+        )}
       </View>
     );
 }
@@ -417,7 +726,7 @@ const getTheme = (goal?: string) => {
     switch(goal) {
         case 'Romance': return { button: 'bg-romance', badge: 'bg-romance/20', text: 'text-romance', border: 'border-romance/50' };
         case 'Friendship': return { button: 'bg-friendship', badge: 'bg-friendship/20', text: 'text-friendship', border: 'border-friendship/50' };
-        case 'Business': return { button: 'bg-business', badge: 'bg-business/20', text: 'text-business', border: 'border-business/50' };
+        case 'Professional': return { button: 'bg-business', badge: 'bg-business/20', text: 'text-business', border: 'border-business/50' };
         default: return { button: 'bg-white', badge: 'bg-white/20', text: 'text-white', border: 'border-white/20' };
     }
 };

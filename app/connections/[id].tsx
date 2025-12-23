@@ -23,7 +23,7 @@ export default function UserConnectionsScreen() {
     
     const [connections, setConnections] = useState<ConnectedUser[]>([]);
     const [loading, setLoading] = useState(false);
-    const [filter, setFilter] = useState<'All' | 'Romance' | 'Friendship' | 'Business'>('All');
+    const [filter, setFilter] = useState<'All' | 'Romance' | 'Friendship' | 'Professional'>('All');
     
     const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
@@ -99,7 +99,7 @@ export default function UserConnectionsScreen() {
 
             {/* Filter Tabs */}
             <View className="flex-row mb-6 bg-gray-100 p-1 rounded-xl">
-                {['All', 'Romance', 'Friendship', 'Business'].map((t) => (
+                {['All', 'Romance', 'Friendship', 'Professional'].map((t) => (
                     <TouchableOpacity 
                         key={t}
                         onPress={() => setFilter(t as any)}

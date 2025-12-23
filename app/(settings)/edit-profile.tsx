@@ -1,8 +1,9 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { FontAwesome, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/profile/Avatar';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
@@ -12,7 +13,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const RELATIONSHIP_OPTS = ['Romance', 'Friendship', 'Business'];
+const RELATIONSHIP_OPTS = ['Romance', 'Friendship', 'Professional'];
 
 type SocialLinks = {
     instagram?: string;
@@ -32,6 +33,7 @@ const SOCIAL_PLATFORMS = [
 
 export default function EditProfileScreen() {
   const { user, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -148,7 +150,7 @@ export default function EditProfileScreen() {
       switch(goal) {
           case 'Romance': return isSelected ? 'bg-romance border-romance' : 'border-romance/30 bg-white';
           case 'Friendship': return isSelected ? 'bg-friendship border-friendship' : 'border-friendship/30 bg-white';
-          case 'Business': return isSelected ? 'bg-business border-business' : 'border-business/30 bg-white';
+          case 'Professional': return isSelected ? 'bg-business border-business' : 'border-business/30 bg-white';
           default: return isSelected ? 'bg-black border-black' : 'border-gray-300 bg-white';
       }
   };
@@ -158,7 +160,7 @@ export default function EditProfileScreen() {
       switch(goal) {
           case 'Romance': return 'text-romance';
           case 'Friendship': return 'text-friendship';
-          case 'Business': return 'text-business';
+          case 'Professional': return 'text-business';
           default: return 'text-gray-700';
       }
   };
@@ -261,7 +263,7 @@ export default function EditProfileScreen() {
   return (
     <View className="flex-1 bg-white">
       {/* Custom Header */}
-      <View className="px-4 py-4 flex-row items-center justify-between bg-white border-b border-gray-100">
+      <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: insets.top + 12, paddingBottom: 12 }}>
           <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
               <IconSymbol name="chevron.left" size={28} color="#1A1A1A" />
           </TouchableOpacity>
@@ -298,7 +300,7 @@ export default function EditProfileScreen() {
         <View className="items-center mb-8">
           <Avatar
             url={avatarUrl}
-            size={120}
+            size={160}
             onUpload={(url) => setAvatarUrl(url)}
             editable
           />

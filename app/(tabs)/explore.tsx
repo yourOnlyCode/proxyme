@@ -105,7 +105,7 @@ export default function ProfileScreen() {
       switch(goal) {
           case 'Romance': return { bg: 'bg-romance/10', text: 'text-romance', border: 'border-romance/30', badge: 'bg-romance/20', icon: '#E07A5F' };
           case 'Friendship': return { bg: 'bg-friendship/10', text: 'text-friendship', border: 'border-friendship/30', badge: 'bg-friendship/20', icon: '#81B29A' };
-          case 'Business': return { bg: 'bg-business/10', text: 'text-business', border: 'border-business/30', badge: 'bg-business/20', icon: '#3D405B' };
+          case 'Professional': return { bg: 'bg-business/10', text: 'text-business', border: 'border-business/30', badge: 'bg-business/20', icon: '#3D405B' };
           default: return { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', badge: 'bg-gray-200', icon: '#718096' };
       }
   };
@@ -121,8 +121,8 @@ export default function ProfileScreen() {
             refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchProfile} />}
             contentContainerStyle={{ paddingBottom: 40 }}
         >
-            {/* Header / Cover Area */}
-            <View className={`h-64 relative ${theme.bg}`}>
+            {/* Header / Cover Area - Taller */}
+            <View className={`h-80 relative ${theme.bg}`}>
                 {profile?.photos && profile.photos.length > 0 ? (
                     <ProfileImage path={profile.photos[0].url} style={{ width: '100%', height: '100%' }} />
                 ) : (
@@ -141,8 +141,8 @@ export default function ProfileScreen() {
             </View>
 
             {/* Profile Info */}
-            <View className="px-5 -mt-12">
-                <View className="border-4 border-paper rounded-full w-28 h-28 overflow-hidden bg-white shadow-md">
+            <View className="px-5 -mt-16">
+                <View className="border-4 border-paper rounded-full w-36 h-36 overflow-hidden bg-white shadow-md">
                      <ProfileImage path={profile?.avatar_url || null} style={{ width: '100%', height: '100%' }} />
                 </View>
                 

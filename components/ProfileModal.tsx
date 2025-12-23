@@ -1,7 +1,7 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Dimensions, Image, Linking, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -63,6 +63,21 @@ export function ProfileModal({
     const [sent, setSent] = useState(false);
     const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number, hidden?: boolean } | null>(null);
     const [fetchedPhotos, setFetchedPhotos] = useState<{ url: string; order: number }[] | null>(null);
+    const [fullScreenVisible, setFullScreenVisible] = useState(false);
+    const [fullScreenIndex, setFullScreenIndex] = useState(0);
+    const fullScreenScrollRef = useRef<ScrollView>(null);
+
+    // Scroll to correct photo when full-screen opens
+    useEffect(() => {
+        if (fullScreenVisible && fullScreenScrollRef.current) {
+            setTimeout(() => {
+                fullScreenScrollRef.current?.scrollTo({
+                    x: fullScreenIndex * width,
+                    animated: false
+                });
+            }, 100);
+        }
+    }, [fullScreenVisible, fullScreenIndex]);
 
     useEffect(() => {
         if (profile?.id && visible) {
@@ -195,8 +210,8 @@ export function ProfileModal({
         >
             <View className="flex-1 bg-white">
                  <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
-                    {/* Header Image */}
-                    <View className="w-full h-96 bg-gray-200 relative">
+                    {/* Header Image - Much Taller */}
+                    <View className="w-full h-[600px] bg-gray-200 relative">
                         {displayPhotos.length > 1 ? (
                             <ScrollView 
                                 horizontal 
@@ -205,13 +220,30 @@ export function ProfileModal({
                                 className="w-full h-full"
                             >
                                 {displayPhotos.map((photo, index) => (
-                                    <View key={index} style={{ width: width, height: 384 }}>
+                                    <TouchableOpacity 
+                                        key={index} 
+                                        activeOpacity={1}
+                                        onPress={() => {
+                                            setFullScreenIndex(index);
+                                            setFullScreenVisible(true);
+                                        }}
+                                        style={{ width: width, height: 600 }}
+                                    >
                                         <ProfileImage path={photo.url} />
-                                    </View>
+                                    </TouchableOpacity>
                                 ))}
                             </ScrollView>
                         ) : (
-                            <ProfileImage path={displayPhotos[0].url} />
+                            <TouchableOpacity 
+                                activeOpacity={1}
+                                onPress={() => {
+                                    setFullScreenIndex(0);
+                                    setFullScreenVisible(true);
+                                }}
+                                style={{ width: width, height: 600 }}
+                            >
+                                <ProfileImage path={displayPhotos[0].url} />
+                            </TouchableOpacity>
                         )}
                         
                         <TouchableOpacity 
@@ -402,6 +434,71 @@ export function ProfileModal({
                     )}
                  </View>
             </View>
+
+            {/* Full Screen Photo Viewer */}
+            <Modal
+                visible={fullScreenVisible}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setFullScreenVisible(false)}
+            >
+                <View className="flex-1 bg-black">
+                    {/* Close Button */}
+                    <TouchableOpacity
+                        onPress={() => setFullScreenVisible(false)}
+                        className="absolute top-12 right-4 z-50 bg-black/50 p-3 rounded-full"
+                    >
+                        <IconSymbol name="xmark" size={24} color="white" />
+                    </TouchableOpacity>
+
+                    {/* Photo Carousel */}
+                    <ScrollView
+                        ref={fullScreenScrollRef}
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        onMomentumScrollEnd={(event) => {
+                            const newIndex = Math.round(event.nativeEvent.contentOffset.x / width);
+                            setFullScreenIndex(newIndex);
+                        }}
+                        className="flex-1"
+                    >
+                        {displayPhotos.map((photo, index) => (
+                            <View 
+                                key={index} 
+                                style={{ 
+                                    width: width, 
+                                    height: height,
+                                    justifyContent: 'center',
+                                    alignItems: 'center'
+                                }}
+                            >
+                                <TouchableOpacity
+                                    activeOpacity={1}
+                                    onPress={() => setFullScreenVisible(false)}
+                                    style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
+                                >
+                                    <FullScreenProfileImage path={photo.url} />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
+                    </ScrollView>
+
+                    {/* Page Indicator */}
+                    {displayPhotos.length > 1 && (
+                        <View className="absolute bottom-20 left-0 right-0 flex-row justify-center space-x-2">
+                            {displayPhotos.map((_, i) => (
+                                <View 
+                                    key={i} 
+                                    className={`w-2 h-2 rounded-full ${
+                                        i === fullScreenIndex ? 'bg-white' : 'bg-white/50'
+                                    }`} 
+                                />
+                            ))}
+                        </View>
+                    )}
+                </View>
+            </Modal>
         </Modal>
     );
 }
@@ -422,6 +519,26 @@ function ProfileImage({ path }: { path: string | null }) {
         source={{ uri: url }} 
         style={{ width: '100%', height: '100%' }}
         resizeMode="cover"
+      />
+    );
+}
+
+function FullScreenProfileImage({ path }: { path: string | null }) {
+    const [url, setUrl] = useState<string | null>(null);
+  
+    useEffect(() => {
+      if (!path) return;
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+      setUrl(data.publicUrl);
+    }, [path]);
+  
+    if (!url) return <View className="w-full h-full bg-black" />;
+  
+    return (
+      <Image 
+        source={{ uri: url }} 
+        style={{ width: '100%', height: '100%' }}
+        resizeMode="contain"
       />
     );
 }
