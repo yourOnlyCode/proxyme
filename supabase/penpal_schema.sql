@@ -28,13 +28,14 @@ begin
   end if;
 
   -- 2. Find random target
+  -- Algorithm: First try to find user outside city, if none exists, fallback to ANY user
   -- Candidates must:
   -- - Not be me
-  -- - Be in different city
   -- - Not already connected/blocked
   -- - Have space for a penpal (0 if not verified, unlimited if verified)
   
-  with candidates as (
+  -- First attempt: Try to find user outside city
+  with out_of_city_candidates as (
       select p.id, p.is_verified
       from public.profiles p
       where p.id != me_id
@@ -50,14 +51,44 @@ begin
              or (b.blocker_id = p.id and b.blocked_id = me_id)
       )
   ),
-  qualified_candidates as (
+  qualified_out_of_city as (
       select c.id
-      from candidates c
+      from out_of_city_candidates c
       left join public.interests i on (i.sender_id = c.id or i.receiver_id = c.id) and i.type = 'penpal' and i.status = 'accepted'
       group by c.id, c.is_verified
       having (c.is_verified = true or count(i.id) < 1)
+  ),
+  out_of_city_result as (
+      select id from qualified_out_of_city order by random() limit 1
   )
-  select id into target_id from qualified_candidates order by random() limit 1;
+  select id into target_id from out_of_city_result;
+  
+  -- Fallback: If no out-of-city user found, try ANY user in database
+  if target_id is null then
+      with all_candidates as (
+          select p.id, p.is_verified
+          from public.profiles p
+          where p.id != me_id
+          and not exists (
+              select 1 from public.interests i 
+              where (i.sender_id = me_id and i.receiver_id = p.id)
+                 or (i.sender_id = p.id and i.receiver_id = me_id)
+          )
+          and not exists (
+              select 1 from public.blocks b
+              where (b.blocker_id = me_id and b.blocked_id = p.id)
+                 or (b.blocker_id = p.id and b.blocked_id = me_id)
+          )
+      ),
+      qualified_all as (
+          select c.id
+          from all_candidates c
+          left join public.interests i on (i.sender_id = c.id or i.receiver_id = c.id) and i.type = 'penpal' and i.status = 'accepted'
+          group by c.id, c.is_verified
+          having (c.is_verified = true or count(i.id) < 1)
+      )
+      select id into target_id from qualified_all order by random() limit 1;
+  end if;
 
   if target_id is null then
      return jsonb_build_object('success', false, 'error', 'no_users_found');
