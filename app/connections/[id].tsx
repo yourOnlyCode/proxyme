@@ -1,5 +1,5 @@
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -143,9 +143,10 @@ function Avatar({ path }: { path: string | null }) {
     const [url, setUrl] = useState<string | null>(null);
     useEffect(() => {
       if (!path) return;
-      supabase.storage.from('avatars').getPublicUrl(path).then(({ data }) => {
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+      if (data) {
           setUrl(data.publicUrl);
-      });
+      }
     }, [path]);
   
     if (!url) return <View className="w-full h-full bg-gray-200" />;

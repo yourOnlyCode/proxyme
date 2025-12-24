@@ -67,6 +67,7 @@ function InitialLayout() {
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(settings)" options={{ headerShown: false }} />
         <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="clubs/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="requests" options={{ headerShown: false }} />
         <Stack.Screen name="inbox" options={{ headerShown: false }} />
       </Stack>

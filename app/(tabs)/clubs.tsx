@@ -2,7 +2,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, RefreshControl, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Modal, RefreshControl, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { supabase } from '../../lib/supabase';
@@ -74,6 +74,18 @@ export default function ClubsScreen() {
                 return;
             }
 
+            // First, fetch user's club memberships to exclude them
+            const { data: myMemberships, error: membershipError } = await supabase
+                .from('club_members')
+                .select('club_id')
+                .eq('user_id', user.id)
+                .eq('status', 'accepted');
+
+            if (membershipError) throw membershipError;
+
+            const myClubIds = new Set((myMemberships || []).map((m: any) => m.club_id));
+
+            // Fetch all clubs in city
             const { data, error } = await supabase
                 .from('clubs')
                 .select('*')
@@ -81,21 +93,8 @@ export default function ClubsScreen() {
 
             if (error) throw error;
 
-            // Check membership for these clubs
-            // Ideally use a join or separate query, but for simple MVP:
-            // We want to exclude clubs I'm already in? Or show them? 
-            // "Hub for the city" -> maybe show all.
-            // But let's check membership to tag them.
-            
-            // To properly filter or tag, we need to know which ones I'm in.
-            // I'll reuse myClubs IDs if available, or fetch.
-            
-            const myClubIds = new Set(myClubs.map(c => c.id));
-            
-            const clubs = data.map((c: any) => ({
-                ...c,
-                is_member: myClubIds.has(c.id)
-            }));
+            // Filter out clubs user is already a member of
+            const clubs = (data || []).filter((c: any) => !myClubIds.has(c.id));
             
             setCityClubs(clubs);
         }
@@ -234,7 +233,7 @@ export default function ClubsScreen() {
   return (
     <View className="flex-1 bg-gray-50 pt-12 px-4">
         <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-3xl font-bold text-ink">Clubs</Text>
+            <Text className="text-3xl font-bold text-ink">Social Clubs</Text>
             {/* Create Button - verify limit logic handled in backend or assume UI check needed? */}
             <TouchableOpacity 
                 onPress={() => setCreateModalVisible(true)}
@@ -310,6 +309,9 @@ export default function ClubsScreen() {
                     onChangeText={setNewClubName}
                     placeholder="e.g. Downtown Runners"
                     className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 font-semibold text-lg"
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => Keyboard.dismiss()}
                 />
 
                 <Text className="font-bold text-gray-500 mb-2">Description</Text>
@@ -321,6 +323,9 @@ export default function ClubsScreen() {
                     numberOfLines={4}
                     className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 text-base h-32"
                     style={{ textAlignVertical: 'top' }}
+                    returnKeyType="done"
+                    blurOnSubmit={true}
+                    onSubmitEditing={() => Keyboard.dismiss()}
                 />
 
                 <TouchableOpacity 
@@ -348,9 +353,10 @@ function ClubImage({ path }: { path: string }) {
     const [url, setUrl] = useState<string | null>(null);
     useEffect(() => {
         if (!path) return;
-        supabase.storage.from('avatars').getPublicUrl(path).then(({ data }) => {
+        const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+        if (data) {
             setUrl(data.publicUrl);
-        });
+        }
     }, [path]);
 
     if (!url) return <View className="w-full h-full bg-gray-200" />;

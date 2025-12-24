@@ -1,3 +1,4 @@
+import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -187,10 +188,11 @@ export default function ChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1 bg-white"
-    >
+    <>
+      <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          className="flex-1 bg-white"
+      >
       <ProfileModal 
          visible={modalVisible}
          profile={partner}
@@ -269,14 +271,18 @@ export default function ChatScreen() {
                   placeholder="Type a message..."
                   placeholderTextColor="#6b7280"
                   className="flex-1 py-3 text-base text-ink"
+                  returnKeyType="send"
                   onSubmitEditing={sendMessage}
+                  blurOnSubmit={false}
               />
               <TouchableOpacity onPress={sendMessage} disabled={!newMessage.trim()}>
                   <Text className={`font-bold ${newMessage.trim() ? 'text-business' : 'text-gray-400'}`}>Send</Text>
               </TouchableOpacity>
           </View>
       </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+      <KeyboardToolbar />
+    </>
   );
 }
 

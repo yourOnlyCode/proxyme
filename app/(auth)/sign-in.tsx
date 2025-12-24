@@ -1,6 +1,6 @@
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Image, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Keyboard, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
 export default function SignIn() {
@@ -31,7 +31,8 @@ export default function SignIn() {
   }
 
   return (
-    <View className="flex-1 justify-center px-8 bg-white">
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <View className="flex-1 justify-center px-8 bg-white">
       <View className="items-center mb-8">
         <Image 
           source={require('../../assets/images/icon.png')} 
@@ -48,6 +49,9 @@ export default function SignIn() {
           autoCapitalize="none"
           value={email}
           onChangeText={setEmail}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => Keyboard.dismiss()}
         />
         <TextInput
           className="border border-gray-300 rounded-lg p-4 text-base mb-6 text-black"
@@ -56,6 +60,12 @@ export default function SignIn() {
           secureTextEntry
           value={password}
           onChangeText={setPassword}
+          returnKeyType="done"
+          blurOnSubmit={true}
+          onSubmitEditing={() => {
+            Keyboard.dismiss();
+            signInWithEmail();
+          }}
         />
         
         <TouchableOpacity 
@@ -79,6 +89,7 @@ export default function SignIn() {
           </Link>
         </View>
       </View>
-    </View>
+      </View>
+    </TouchableWithoutFeedback>
   );
 }

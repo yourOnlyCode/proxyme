@@ -1,8 +1,9 @@
+import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, UIManager, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/profile/Avatar';
 import ProfileGallery from '../../components/profile/ProfileGallery';
@@ -261,7 +262,8 @@ export default function EditProfileScreen() {
   const currentPlatformConfig = SOCIAL_PLATFORMS.find(p => p.id === selectedPlatform);
 
   return (
-    <View className="flex-1 bg-white">
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <View className="flex-1 bg-white">
       {/* Custom Header */}
       <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: insets.top + 12, paddingBottom: 12 }}>
           <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
@@ -312,6 +314,9 @@ export default function EditProfileScreen() {
               value={username}
               onChangeText={setUsername}
               className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
+              returnKeyType="done"
+              blurOnSubmit={true}
+              onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>
 
@@ -321,6 +326,9 @@ export default function EditProfileScreen() {
               value={fullName}
               onChangeText={setFullName}
               className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
+              returnKeyType="done"
+              blurOnSubmit={true}
+              onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>
 
@@ -333,6 +341,9 @@ export default function EditProfileScreen() {
               numberOfLines={4}
               className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base h-24 text-ink"
               style={{ textAlignVertical: 'top' }}
+              returnKeyType="done"
+              blurOnSubmit={true}
+              onSubmitEditing={() => Keyboard.dismiss()}
           />
         </View>
 
@@ -492,6 +503,9 @@ export default function EditProfileScreen() {
                                 value={tempLink}
                                 onChangeText={setTempLink}
                                 autoCapitalize="none"
+                                returnKeyType="done"
+                                blurOnSubmit={true}
+                                onSubmitEditing={() => Keyboard.dismiss()}
                                 className="bg-gray-50 p-5 rounded-2xl text-lg mb-6 border border-gray-200 text-ink"
                                 autoFocus
                             />
@@ -514,7 +528,9 @@ export default function EditProfileScreen() {
                   </ScrollView>
               </View>
           </KeyboardAvoidingView>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+      <KeyboardToolbar />
+    </TouchableWithoutFeedback>
   );
 }

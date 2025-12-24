@@ -1,12 +1,14 @@
+import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import Avatar from '../../components/profile/Avatar';
-import ProfileGallery from '../../components/profile/ProfileGallery';
 import { InterestSelector } from '../../components/profile/InterestSelector';
+import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
+import { useProxyLocation } from '../../lib/location';
 import { supabase } from '../../lib/supabase';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -38,10 +40,20 @@ const STEPS = [
     { title: 'Interests', subtitle: 'What are you into? Add specific favorites.' },
     { title: 'Connect', subtitle: 'Add your socials so others can follow you.' },
     { title: 'Gallery', subtitle: 'Show off your best photos.' },
+    { title: 'Clubs', subtitle: 'Join clubs in your city to connect with others.' },
 ];
+
+type Club = {
+  id: string;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  city: string;
+};
 
 export default function CompleteProfileScreen() {
   const { user } = useAuth();
+  const { address } = useProxyLocation();
   const router = useRouter();
   
   const [loading, setLoading] = useState(true);
@@ -63,9 +75,20 @@ export default function CompleteProfileScreen() {
   const [tempLink, setTempLink] = useState('');
   const [savingSocial, setSavingSocial] = useState(false);
 
+  // Clubs State
+  const [cityClubs, setCityClubs] = useState<Club[]>([]);
+  const [loadingClubs, setLoadingClubs] = useState(false);
+  const [joinedClubs, setJoinedClubs] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (user) getProfile();
   }, [user]);
+
+  useEffect(() => {
+    if (step === 6 && user && address?.city) {
+      fetchCityClubs();
+    }
+  }, [step, user, address?.city]);
 
   async function getProfile() {
     try {
@@ -118,6 +141,7 @@ export default function CompleteProfileScreen() {
               return;
           }
       }
+      // Step 6 (Clubs) is optional, no validation needed
 
       if (step < STEPS.length - 1) {
           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -237,6 +261,60 @@ export default function CompleteProfileScreen() {
       await supabase.from('profiles').update({ social_links: newSocials }).eq('id', user.id);
   };
 
+  const fetchCityClubs = async () => {
+      if (!user || !address?.city) return;
+      setLoadingClubs(true);
+      try {
+          // Fetch user's existing club memberships
+          const { data: myMemberships } = await supabase
+              .from('club_members')
+              .select('club_id')
+              .eq('user_id', user.id)
+              .eq('status', 'accepted');
+
+          const myClubIds = new Set((myMemberships || []).map((m: any) => m.club_id));
+          setJoinedClubs(myClubIds);
+
+          // Fetch clubs in city, excluding ones user is already a member of
+          const { data, error } = await supabase
+              .from('clubs')
+              .select('*')
+              .eq('city', address.city);
+
+          if (error) throw error;
+
+          // Filter out clubs user is already a member of
+          const clubs = (data || []).filter((c: any) => !myClubIds.has(c.id));
+          setCityClubs(clubs);
+      } catch (error) {
+          console.error('Error fetching clubs:', error);
+      } finally {
+          setLoadingClubs(false);
+      }
+  };
+
+  const handleJoinClub = async (clubId: string) => {
+      if (!user) return;
+      try {
+          // Request to join (invite-only, so this creates a pending request)
+          const { error } = await supabase
+              .from('club_members')
+              .insert({
+                  club_id: clubId,
+                  user_id: user.id,
+                  role: 'member',
+                  status: 'pending'
+              });
+
+          if (error) throw error;
+
+          setJoinedClubs(new Set([...joinedClubs, clubId]));
+          Alert.alert('Success', 'Join request sent! The club owner will review your request.');
+      } catch (error: any) {
+          Alert.alert('Error', error.message || 'Failed to join club');
+      }
+  };
+
   if (loading) return <View className="flex-1 justify-center"><ActivityIndicator /></View>;
 
   const currentPlatformConfig = SOCIAL_PLATFORMS.find(p => p.id === selectedPlatform);
@@ -286,6 +364,9 @@ export default function CompleteProfileScreen() {
                         className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg text-ink"
                         placeholder="Unique username"
                         autoCapitalize="none"
+                        returnKeyType="next"
+                        blurOnSubmit={false}
+                        onSubmitEditing={() => Keyboard.dismiss()}
                     />
                 </View>
 
@@ -296,6 +377,9 @@ export default function CompleteProfileScreen() {
                         onChangeText={setFullName}
                         className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg text-ink"
                         placeholder="Your name"
+                        returnKeyType="next"
+                        blurOnSubmit={false}
+                        onSubmitEditing={() => Keyboard.dismiss()}
                     />
                 </View>
 
@@ -307,6 +391,9 @@ export default function CompleteProfileScreen() {
                         multiline
                         numberOfLines={4}
                         className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg h-32 text-ink"
+                        returnKeyType="done"
+                        blurOnSubmit={true}
+                        onSubmitEditing={() => Keyboard.dismiss()}
                         style={{ textAlignVertical: 'top' }}
                         placeholder="Tell us about yourself..."
                     />
@@ -382,6 +469,78 @@ export default function CompleteProfileScreen() {
                   userId={user.id} 
                   onSetAvatar={handleSetCover} 
                 />
+            </View>
+        )}
+
+        {/* Step 6: Clubs */}
+        {step === 6 && (
+            <View className="mt-4">
+                {!address?.city ? (
+                    <View className="items-center py-12">
+                        <IconSymbol name="location.slash" size={48} color="#CBD5E0" />
+                        <Text className="text-gray-500 mt-4 text-center font-medium">
+                            We need your location to show clubs in your city.
+                        </Text>
+                        <Text className="text-gray-400 mt-2 text-center text-sm">
+                            You can join clubs later from the Clubs tab.
+                        </Text>
+                    </View>
+                ) : loadingClubs ? (
+                    <View className="items-center py-12">
+                        <ActivityIndicator size="large" color="#1A1A1A" />
+                        <Text className="text-gray-500 mt-4">Loading clubs...</Text>
+                    </View>
+                ) : cityClubs.length === 0 ? (
+                    <View className="items-center py-12">
+                        <IconSymbol name="person.3.fill" size={48} color="#CBD5E0" />
+                        <Text className="text-gray-500 mt-4 text-center font-medium">
+                            No clubs found in {address.city}. Create the first!
+                        </Text>
+                        <Text className="text-gray-400 mt-2 text-center text-sm">
+                            You can create or join clubs later from the Clubs tab.
+                        </Text>
+                    </View>
+                ) : (
+                    <FlatList
+                        data={cityClubs}
+                        keyExtractor={(item) => item.id}
+                        scrollEnabled={false}
+                        renderItem={({ item }) => (
+                            <View className="bg-white rounded-2xl mb-4 shadow-sm overflow-hidden border border-gray-100">
+                                <View className="h-32 bg-gray-200">
+                                    {item.image_url ? (
+                                        <ClubImage path={item.image_url} />
+                                    ) : (
+                                        <View className="w-full h-full items-center justify-center bg-gray-300">
+                                            <IconSymbol name="person.3.fill" size={40} color="#9CA3AF" />
+                                        </View>
+                                    )}
+                                    <View className="absolute top-2 right-2 bg-black/50 px-2 py-1 rounded-md">
+                                        <Text className="text-white text-xs font-bold uppercase">{item.city}</Text>
+                                    </View>
+                                </View>
+                                <View className="p-4">
+                                    <Text className="text-xl font-bold text-ink mb-1" numberOfLines={1}>{item.name}</Text>
+                                    <Text className="text-gray-500 text-sm mb-3" numberOfLines={2}>{item.description || 'No description'}</Text>
+                                    
+                                    {joinedClubs.has(item.id) ? (
+                                        <View className="flex-row items-center">
+                                            <IconSymbol name="checkmark.circle.fill" size={16} color="#10B981" />
+                                            <Text className="text-emerald-600 font-bold text-xs ml-1">Request Sent</Text>
+                                        </View>
+                                    ) : (
+                                        <TouchableOpacity
+                                            onPress={() => handleJoinClub(item.id)}
+                                            className="bg-black py-3 rounded-xl items-center"
+                                        >
+                                            <Text className="text-white font-bold">Join Club</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            </View>
+                        )}
+                    />
+                )}
             </View>
         )}
 
@@ -474,6 +633,9 @@ export default function CompleteProfileScreen() {
                                 value={tempLink}
                                 onChangeText={setTempLink}
                                 autoCapitalize="none"
+                                returnKeyType="done"
+                                blurOnSubmit={true}
+                                onSubmitEditing={() => Keyboard.dismiss()}
                                 className="bg-gray-50 p-5 rounded-2xl text-lg mb-6 border border-gray-200 text-ink"
                                 autoFocus
                             />
@@ -497,6 +659,21 @@ export default function CompleteProfileScreen() {
               </View>
           </KeyboardAvoidingView>
       </Modal>
+      <KeyboardToolbar />
     </View>
   );
+}
+
+function ClubImage({ path }: { path: string }) {
+    const [url, setUrl] = useState<string | null>(null);
+    useEffect(() => {
+        if (!path) return;
+        const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+        if (data) {
+            setUrl(data.publicUrl);
+        }
+    }, [path]);
+
+    if (!url) return <View className="w-full h-full bg-gray-200" />;
+    return <Image source={{ uri: url }} className="w-full h-full" resizeMode="cover" />;
 }

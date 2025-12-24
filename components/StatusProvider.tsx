@@ -516,6 +516,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                             className="bg-gray-50 p-4 rounded-xl text-ink text-lg min-h-[64px] mb-6"
                             returnKeyType="done"
                             blurOnSubmit={true}
+                            onSubmitEditing={() => Keyboard.dismiss()}
                         />
 
                         <Text className="text-gray-400 text-xs text-center mb-6">
