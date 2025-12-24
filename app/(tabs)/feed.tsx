@@ -1,7 +1,7 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, FlatList, Image, PanResponder, RefreshControl, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
@@ -170,10 +170,27 @@ export default function CityFeedScreen() {
       return common;
   };
 
-  // Initial load & Re-sort when interests load
+  // Fetch feed when:
+  // 1. Component mounts (opening tab)
+  // 2. Tab comes into focus
+  // 3. Manual refresh (pull-to-refresh)
+  // 4. Interests change (for re-sorting)
+  
+  // Initial fetch on mount and when interests change
   useEffect(() => {
-    fetchFeed();
-  }, [location, myInterests]);
+    if (location) {
+      fetchFeed();
+    }
+  }, [myInterests]); // Only re-fetch when interests change (for re-sorting)
+
+  // Refresh when tab comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (location) {
+        fetchFeed();
+      }
+    }, [location])
+  );
 
   const sendInterest = async (targetUserId: string) => {
       const { error } = await supabase

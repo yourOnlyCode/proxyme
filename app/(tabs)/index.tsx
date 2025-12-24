@@ -1,8 +1,8 @@
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, FlatList, Image, LayoutAnimation, Modal, PanResponder, Platform, RefreshControl, Switch, Text, TouchableOpacity, UIManager, View } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
@@ -191,28 +191,29 @@ export default function HomeScreen() {
     setLoading(false);
   };
 
+  // Fetch feed when:
+  // 1. Component mounts (opening app)
+  // 2. Proxy is toggled
+  // 3. Tab comes into focus
+  // 4. Manual refresh (pull-to-refresh)
+  
+  // Initial fetch when proxy is enabled
   useEffect(() => {
     if (isProxyActive && location) {
       fetchProxyFeed();
-
-      const subscription = supabase
-        .channel('public:profiles')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'profiles' },
-          (payload) => {
-            fetchProxyFeed(); 
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(subscription);
-      };
     } else {
       setFeed([]);
     }
-  }, [isProxyActive, location]);
+  }, [isProxyActive]); // Only fetch when proxy is toggled
+
+  // Refresh when tab comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (isProxyActive && location) {
+        fetchProxyFeed();
+      }
+    }, [isProxyActive, location])
+  );
 
   const sendInterest = async (targetUserId: string) => {
       const { error } = await supabase

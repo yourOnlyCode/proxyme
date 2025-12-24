@@ -1,243 +1,23 @@
 import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import Avatar from '@/components/profile/Avatar';
+import ClubForumTab from '@/components/club/ClubForumTab';
+import ClubEventsTab from '@/components/club/ClubEventsTab';
+import ClubMembersTab from '@/components/club/ClubMembersTab';
+import ClubSettingsTab from '@/components/club/ClubSettingsTab';
+import EventCard from '@/components/club/EventCard';
+import { ClubDetail, ClubMember, ForumTopic, ForumReply, ClubEvent } from '@/lib/types';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Calendar from 'expo-calendar';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
-type ClubDetail = {
-  id: string;
-  name: string;
-  description: string;
-  image_url: string | null;
-  city: string;
-  owner_id: string;
-  max_member_count: number | null;
-};
-
-type ClubMember = {
-  id: string; // member id
-  user_id: string;
-  role: 'owner' | 'admin' | 'member';
-  status: 'accepted' | 'invited' | 'pending';
-  profile: {
-      username: string;
-      full_name: string;
-      avatar_url: string | null;
-  }
-};
-
-type ForumTopic = {
-    id: string;
-    title: string;
-    content: string;
-    created_at: string;
-    updated_at: string;
-    reply_count: number;
-    last_reply_at: string | null;
-    is_pinned: boolean;
-    is_locked: boolean;
-    is_edited: boolean;
-    edited_at: string | null;
-    created_by: string;
-    creator: {
-        username: string;
-        full_name: string | null;
-        avatar_url: string | null;
-    }
-    support_count?: number;
-    oppose_count?: number;
-    user_reaction?: 'support' | 'oppose' | null;
-};
-
-type ForumReply = {
-    id: string;
-    content: string;
-    created_at: string;
-    updated_at: string;
-    is_edited: boolean;
-    edited_at: string | null;
-    parent_reply_id: string | null;
-    created_by: string;
-    creator: {
-        username: string;
-        full_name: string | null;
-        avatar_url: string | null;
-    }
-    support_count?: number;
-    oppose_count?: number;
-    user_reaction?: 'support' | 'oppose' | null;
-    replies?: ForumReply[]; // Nested replies
-};
-
-type ClubEvent = {
-    id: string;
-    title: string;
-    description: string | null;
-    event_date: string;
-    location: string | null;
-    created_by: string;
-    created_at: string;
-    creator: {
-        username: string;
-        full_name: string | null;
-    }
-    rsvp_counts?: {
-        going: number;
-        maybe: number;
-        cant: number;
-    };
-    user_rsvp?: 'going' | 'maybe' | 'cant' | null;
-};
-
-// Avatar component helper (must be defined before ReplyItem)
-function Avatar({ path }: { path: string | null }) {
-    const [url, setUrl] = useState<string | null>(null);
-    useEffect(() => {
-        if (!path) return;
-        const { data } = supabase.storage.from('avatars').getPublicUrl(path);
-        if (data) {
-            setUrl(data.publicUrl);
-        }
-    }, [path]);
-
-    if (!url) return <View className="w-full h-full bg-gray-200" />;
-    return <Image source={{ uri: url }} className="w-full h-full" resizeMode="cover" />;
-}
-
-// ReplyItem component for nested replies
-function ReplyItem({ 
-    reply, 
-    user, 
-    onReply, 
-    onEdit, 
-    onDelete,
-    onToggleReaction,
-    onViewProfile,
-    depth 
-}: { 
-    reply: ForumReply; 
-    user: any; 
-    onReply: (replyId: string) => void; 
-    onEdit: (reply: ForumReply) => void;
-    onDelete: (replyId: string) => void;
-    onToggleReaction: (replyId: string, type: 'support' | 'oppose') => void;
-    onViewProfile: (userId: string) => void;
-    depth: number;
-}) {
-    const maxDepth = 5;
-    const indent = Math.min(depth, maxDepth) * 16;
-    
-    return (
-        <View className="mb-4 pb-4 border-b border-gray-100" style={{ marginLeft: indent }}>
-            <View className="flex-row items-center justify-between mb-2">
-                <View className="flex-row items-center flex-1">
-                    <TouchableOpacity 
-                        onPress={() => onViewProfile(reply.created_by)}
-                        className="w-8 h-8 rounded-full overflow-hidden mr-2"
-                    >
-                        <Avatar path={reply.creator.avatar_url} />
-                    </TouchableOpacity>
-                    <View className="flex-1">
-                        <TouchableOpacity onPress={() => onViewProfile(reply.created_by)}>
-                            <Text className="text-sm font-semibold text-ink">
-                                {reply.creator.full_name || reply.creator.username}
-                            </Text>
-                        </TouchableOpacity>
-                        <Text className="text-xs text-gray-500">
-                            {new Date(reply.created_at).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit'
-                            })}
-                            {reply.is_edited && (
-                                <Text className="text-gray-400 italic"> • edited</Text>
-                            )}
-                        </Text>
-                    </View>
-                </View>
-                {reply.created_by === user?.id && (
-                    <View className="flex-row gap-2">
-                        <TouchableOpacity 
-                            onPress={() => onEdit(reply)}
-                            className="px-2 py-1 bg-gray-100 rounded"
-                        >
-                            <Text className="text-xs text-gray-600">Edit</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                            onPress={() => onDelete(reply.id)}
-                            className="px-2 py-1 bg-red-100 rounded"
-                        >
-                            <IconSymbol name="trash.fill" size={12} color="#EF4444" />
-                        </TouchableOpacity>
-                    </View>
-                )}
-            </View>
-            <Text className="text-ink leading-6 mb-2">{reply.content}</Text>
-            
-            {/* Support/Oppose and Reply Buttons */}
-            <View className="flex-row items-center gap-4 mt-2">
-                <TouchableOpacity 
-                    onPress={() => onToggleReaction(reply.id, 'support')}
-                    className={`flex-row items-center px-2 py-1 rounded-full ${
-                        reply.user_reaction === 'support' ? 'bg-green-100' : 'bg-gray-100'
-                    }`}
-                >
-                    <IconSymbol name="hand.thumbsup.fill" size={14} color={reply.user_reaction === 'support' ? '#10B981' : '#6B7280'} />
-                    <Text className={`text-xs ml-1 ${reply.user_reaction === 'support' ? 'text-green-600 font-semibold' : 'text-gray-600'}`}>
-                        {reply.support_count || 0}
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    onPress={() => onToggleReaction(reply.id, 'oppose')}
-                    className={`flex-row items-center px-2 py-1 rounded-full ${
-                        reply.user_reaction === 'oppose' ? 'bg-red-100' : 'bg-gray-100'
-                    }`}
-                >
-                    <IconSymbol name="hand.thumbsdown.fill" size={14} color={reply.user_reaction === 'oppose' ? '#EF4444' : '#6B7280'} />
-                    <Text className={`text-xs ml-1 ${reply.user_reaction === 'oppose' ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
-                        {reply.oppose_count || 0}
-                    </Text>
-                </TouchableOpacity>
-                {depth < maxDepth && (
-                    <TouchableOpacity 
-                        onPress={() => onReply(reply.id)}
-                        className="flex-row items-center px-2 py-1"
-                    >
-                        <IconSymbol name="arrowshape.turn.up.left" size={14} color="#6B7280" />
-                        <Text className="text-xs text-gray-600 ml-1">Reply</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
-            
-            {/* Nested Replies */}
-            {reply.replies && reply.replies.length > 0 && (
-                <View className="mt-3">
-                    {reply.replies.map((nestedReply) => (
-                        <ReplyItem
-                            key={nestedReply.id}
-                            reply={nestedReply}
-                            user={user}
-                            onReply={onReply}
-                            onEdit={onEdit}
-                            onDelete={onDelete}
-                            onToggleReaction={onToggleReaction}
-                            onViewProfile={onViewProfile}
-                            depth={depth + 1}
-                        />
-                    ))}
-                </View>
-            )}
-        </View>
-    );
-}
 
 export default function ClubDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -307,6 +87,10 @@ export default function ClubDetailScreen() {
   const [settingsMaxMembers, setSettingsMaxMembers] = useState<string>('');
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // Store subscription references for cleanup
+  const forumSubscriptionRef = useRef<any>(null);
+  const rsvpSubscriptionRef = useRef<any>(null);
+
   useEffect(() => {
     if (id && user) {
         fetchClubDetails();
@@ -315,7 +99,14 @@ export default function ClubDetailScreen() {
     
     return () => {
         // Cleanup subscriptions when component unmounts
-        supabase.removeChannel(supabase.channel(`club-forum-${id}`));
+        if (forumSubscriptionRef.current) {
+            supabase.removeChannel(forumSubscriptionRef.current);
+            forumSubscriptionRef.current = null;
+        }
+        if (rsvpSubscriptionRef.current) {
+            supabase.removeChannel(rsvpSubscriptionRef.current);
+            rsvpSubscriptionRef.current = null;
+        }
     };
   }, [id, user]);
 
@@ -403,6 +194,11 @@ export default function ClubDetailScreen() {
   };
 
   const subscribeToRSVPs = () => {
+      // Clean up existing subscription if any
+      if (rsvpSubscriptionRef.current) {
+          supabase.removeChannel(rsvpSubscriptionRef.current);
+      }
+      
       const sub = supabase
         .channel(`club-rsvps-${id}`)
         .on('postgres_changes', {
@@ -415,9 +211,7 @@ export default function ClubDetailScreen() {
         })
         .subscribe();
 
-      return () => {
-          supabase.removeChannel(sub);
-      };
+      rsvpSubscriptionRef.current = sub;
   };
 
   const fetchTopics = async () => {
@@ -514,6 +308,11 @@ export default function ClubDetailScreen() {
   };
 
   const subscribeToForum = () => {
+      // Clean up existing subscription if any
+      if (forumSubscriptionRef.current) {
+          supabase.removeChannel(forumSubscriptionRef.current);
+      }
+      
       const sub = supabase
         .channel(`club-forum-${id}`)
         .on('postgres_changes', {
@@ -538,7 +337,7 @@ export default function ClubDetailScreen() {
         })
         .subscribe();
         
-      return () => { supabase.removeChannel(sub); };
+      forumSubscriptionRef.current = sub;
   };
 
   const createTopic = async () => {
@@ -1395,9 +1194,9 @@ export default function ClubDetailScreen() {
                                     <View className="flex-row items-center mb-3">
                                         <TouchableOpacity 
                                             onPress={() => viewUserProfile(selectedTopic.created_by)}
-                                            className="w-8 h-8 rounded-full overflow-hidden mr-2"
+                                            className="mr-2"
                                         >
-                                            <Avatar path={selectedTopic.creator.avatar_url} />
+                                            <Avatar url={selectedTopic.creator.avatar_url} size={32} onUpload={() => {}} editable={false} />
                                         </TouchableOpacity>
                                         <View className="flex-1">
                                             <TouchableOpacity onPress={() => viewUserProfile(selectedTopic.created_by)}>
@@ -1577,8 +1376,8 @@ export default function ClubDetailScreen() {
                                                 onPress={() => viewUserProfile(item.created_by)}
                                                 className="flex-row items-center"
                                             >
-                                                <View className="w-6 h-6 rounded-full overflow-hidden mr-2">
-                                                    <Avatar path={item.creator.avatar_url} />
+                                                <View className="mr-2">
+                                                    <Avatar url={item.creator.avatar_url} size={24} onUpload={() => {}} editable={false} />
                                                 </View>
                                                 <Text className="text-xs text-gray-500">
                                                     {item.creator.full_name || item.creator.username}
@@ -1623,142 +1422,18 @@ export default function ClubDetailScreen() {
                         <FlatList
                             data={events}
                             keyExtractor={item => item.id}
-                            renderItem={({ item }) => {
-                                const eventDate = new Date(item.event_date);
-                                const isPast = eventDate < new Date();
-                                
-                                return (
-                                    <View className={`p-4 bg-white border-b border-gray-50 ${isPast ? 'opacity-60' : ''}`}>
-                                        <View className="flex-row justify-between items-start mb-2">
-                                            <Text className="font-bold text-lg text-ink flex-1">{item.title}</Text>
-                                            <View className="flex-row items-center gap-2">
-                                                {isPast && (
-                                                    <View className="bg-gray-200 px-2 py-1 rounded">
-                                                        <Text className="text-xs text-gray-600 font-bold">Past</Text>
-                                                    </View>
-                                                )}
-                                                {isAdmin && (
-                                                    <View className="relative">
-                                                        <TouchableOpacity 
-                                                            onPress={() => {
-                                                                if (selectedEventId === item.id && eventMenuVisible) {
-                                                                    setEventMenuVisible(false);
-                                                                    setSelectedEventId(null);
-                                                                } else {
-                                                                    setSelectedEventId(item.id);
-                                                                    setEventMenuVisible(true);
-                                                                }
-                                                            }}
-                                                            className="p-1"
-                                                        >
-                                                            <IconSymbol name="ellipsis" size={20} color="#6B7280" />
-                                                        </TouchableOpacity>
-                                                        {eventMenuVisible && selectedEventId === item.id && (
-                                                            <View className="absolute right-0 top-8 bg-white rounded-xl shadow-lg border border-gray-200 z-50" style={{ width: 150 }}>
-                                                                <TouchableOpacity
-                                                                    onPress={() => openEditEvent(item)}
-                                                                    className="flex-row items-center py-3 px-4 border-b border-gray-100"
-                                                                >
-                                                                    <IconSymbol name="pencil" size={18} color="#1A1A1A" />
-                                                                    <Text className="text-ink font-medium ml-3">Edit</Text>
-                                                                </TouchableOpacity>
-                                                                <TouchableOpacity
-                                                                    onPress={() => {
-                                                                        deleteEvent(item.id);
-                                                                    }}
-                                                                    className="flex-row items-center py-3 px-4"
-                                                                >
-                                                                    <IconSymbol name="trash.fill" size={18} color="#DC2626" />
-                                                                    <Text className="text-red-600 font-medium ml-3">Delete</Text>
-                                                                </TouchableOpacity>
-                                                            </View>
-                                                        )}
-                                                    </View>
-                                                )}
-                                            </View>
-                                        </View>
-                                        {item.description && (
-                                            <Text className="text-gray-600 text-sm mb-3">{item.description}</Text>
-                                        )}
-                                        <View className="flex-row items-center mb-2">
-                                            <IconSymbol name="calendar" size={16} color="#6B7280" />
-                                            <Text className="text-gray-600 text-sm ml-2">
-                                                {eventDate.toLocaleDateString('en-US', { 
-                                                    weekday: 'short', 
-                                                    month: 'short', 
-                                                    day: 'numeric',
-                                                    year: 'numeric',
-                                                    hour: 'numeric',
-                                                    minute: '2-digit'
-                                                })}
-                                            </Text>
-                                        </View>
-                                        {item.location && (
-                                            <View className="flex-row items-center mb-2">
-                                                <IconSymbol name="location.fill" size={16} color="#6B7280" />
-                                                <Text className="text-gray-600 text-sm ml-2">{item.location}</Text>
-                                            </View>
-                                        )}
-                                        {/* RSVP Section */}
-                                        {!isPast && (
-                                            <View className="mt-4 pt-3 border-t border-gray-100">
-                                                <View className="flex-row gap-2 mb-2">
-                                                    <TouchableOpacity
-                                                        onPress={() => updateRSVP(item.id, 'going')}
-                                                        className={`flex-1 flex-row items-center justify-center py-2 px-3 rounded-lg ${
-                                                            item.user_rsvp === 'going' ? 'bg-green-100 border-2 border-green-500' : 'bg-gray-100'
-                                                        }`}
-                                                    >
-                                                        <IconSymbol name="checkmark.circle.fill" size={16} color={item.user_rsvp === 'going' ? '#10B981' : '#6B7280'} />
-                                                        <Text className={`text-xs font-semibold ml-1 ${item.user_rsvp === 'going' ? 'text-green-700' : 'text-gray-600'}`}>
-                                                            Going ({item.rsvp_counts?.going || 0})
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        onPress={() => updateRSVP(item.id, 'maybe')}
-                                                        className={`flex-1 flex-row items-center justify-center py-2 px-3 rounded-lg ${
-                                                            item.user_rsvp === 'maybe' ? 'bg-yellow-100 border-2 border-yellow-500' : 'bg-gray-100'
-                                                        }`}
-                                                    >
-                                                        <IconSymbol name="questionmark.circle.fill" size={16} color={item.user_rsvp === 'maybe' ? '#F59E0B' : '#6B7280'} />
-                                                        <Text className={`text-xs font-semibold ml-1 ${item.user_rsvp === 'maybe' ? 'text-yellow-700' : 'text-gray-600'}`}>
-                                                            Maybe ({item.rsvp_counts?.maybe || 0})
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        onPress={() => updateRSVP(item.id, 'cant')}
-                                                        className={`flex-1 flex-row items-center justify-center py-2 px-3 rounded-lg ${
-                                                            item.user_rsvp === 'cant' ? 'bg-red-100 border-2 border-red-500' : 'bg-gray-100'
-                                                        }`}
-                                                    >
-                                                        <IconSymbol name="xmark.circle.fill" size={16} color={item.user_rsvp === 'cant' ? '#EF4444' : '#6B7280'} />
-                                                        <Text className={`text-xs font-semibold ml-1 ${item.user_rsvp === 'cant' ? 'text-red-700' : 'text-gray-600'}`}>
-                                                            Can't ({item.rsvp_counts?.cant || 0})
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </View>
-                                        )}
-                                        
-                                        <View className="flex-row justify-between items-center mt-3">
-                                            <TouchableOpacity onPress={() => viewUserProfile(item.created_by)}>
-                                                <Text className="text-xs text-gray-400">
-                                                    Created by {item.creator.full_name || item.creator.username}
-                                                </Text>
-                                            </TouchableOpacity>
-                                            {!isPast && (
-                                                <TouchableOpacity 
-                                                    onPress={() => addToCalendar(item)}
-                                                    className="flex-row items-center bg-blue-50 px-3 py-1.5 rounded-full"
-                                                >
-                                                    <IconSymbol name="calendar.badge.plus" size={14} color="#2563EB" />
-                                                    <Text className="text-blue-600 text-xs font-semibold ml-1">Add to Calendar</Text>
-                                                </TouchableOpacity>
-                                            )}
-                                        </View>
-                                    </View>
-                                );
-                            }}
+                            renderItem={({ item }) => (
+                                <EventCard
+                                    event={item}
+                                    isAdmin={isAdmin}
+                                    currentUserId={user?.id}
+                                    onEdit={openEditEvent}
+                                    onDelete={deleteEvent}
+                                    onRSVP={updateRSVP}
+                                    onAddToCalendar={addToCalendar}
+                                    onViewProfile={viewUserProfile}
+                                />
+                            )}
                             ListEmptyComponent={
                                 <View className="items-center mt-20 opacity-50">
                                     <IconSymbol name="calendar" size={48} color="#CBD5E0" />
@@ -1785,8 +1460,8 @@ export default function ClubDetailScreen() {
                             keyExtractor={item => item.id}
                             renderItem={({ item }) => (
                                 <View className="flex-row items-center p-4 bg-white border-b border-gray-50">
-                                    <View className="w-10 h-10 mr-3 rounded-full overflow-hidden">
-                                        <Avatar path={item.profile.avatar_url} />
+                                    <View className="mr-3">
+                                        <Avatar url={item.profile.avatar_url} size={40} onUpload={() => {}} editable={false} />
                                     </View>
                                     <View className="flex-1">
                                         <Text className="font-bold text-ink">{item.profile.full_name || item.profile.username}</Text>
