@@ -262,8 +262,9 @@ export default function EditProfileScreen() {
   const currentPlatformConfig = SOCIAL_PLATFORMS.find(p => p.id === selectedPlatform);
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-      <View className="flex-1 bg-white">
+    <View className="flex-1 bg-white">
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View className="flex-1">
       {/* Custom Header */}
       <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: insets.top + 12, paddingBottom: 12 }}>
           <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
@@ -529,8 +530,9 @@ export default function EditProfileScreen() {
               </View>
           </KeyboardAvoidingView>
         </Modal>
-      </View>
+        </View>
+      </TouchableWithoutFeedback>
       <KeyboardToolbar />
-    </TouchableWithoutFeedback>
+    </View>
   );
 }

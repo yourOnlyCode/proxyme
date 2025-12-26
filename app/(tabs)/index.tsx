@@ -1,3 +1,4 @@
+import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -501,52 +502,17 @@ export default function HomeScreen() {
             )}
 
             {/* Buttons */}
-            {isConnected ? (
-                <TouchableOpacity 
-                    className="w-full bg-white border border-gray-300 py-3 rounded-xl items-center flex-row justify-center shadow-sm"
-                    onPress={() => router.push(`/chat/${item.connection_id}`)}
-                >
-                    <IconSymbol name="bubble.left.fill" size={16} color="#4B5563" style={{ marginRight: 8 }} />
-                    <Text className="text-gray-700 font-bold text-sm">Message</Text>
-                </TouchableOpacity>
-            ) : (item as any).pending_request ? (
-                // Show Accept/Decline if there's a pending request
-                (item as any).pending_request.is_received ? (
-                    <View className="flex-row space-x-3">
-                        <TouchableOpacity 
-                            className="flex-1 bg-green-500 py-3 rounded-xl items-center shadow-md active:scale-[0.98]"
-                            onPress={() => handleAcceptRequest((item as any).pending_request.id)}
-                        >
-                            <Text className="text-white font-bold text-sm">Accept</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                            className="flex-1 bg-red-500 py-3 rounded-xl items-center shadow-md active:scale-[0.98]"
-                            onPress={() => handleDeclineRequest((item as any).pending_request.id)}
-                        >
-                            <Text className="text-white font-bold text-sm">Decline</Text>
-                        </TouchableOpacity>
-                    </View>
-                ) : (
-                    <View className="w-full bg-gray-100 py-3 rounded-xl items-center">
-                        <Text className="text-gray-500 font-bold text-sm">Request Sent</Text>
-                    </View>
-                )
-            ) : (
-                <View className="flex-row space-x-3">
-                    <TouchableOpacity 
-                        className="flex-1 bg-black py-3 rounded-xl items-center shadow-md active:scale-[0.98]"
-                        onPress={() => sendInterest(item.id)}
-                    >
-                        <Text className="text-white font-bold text-sm">Connect</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                        className="flex-1 bg-white border border-gray-200 py-3 rounded-xl items-center active:scale-[0.98]"
-                        onPress={() => openProfile(item)}
-                    >
-                        <Text className="text-ink font-bold text-sm">View Profile</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
+            <ProfileActionButtons
+                profile={item}
+                variant="card"
+                myGoals={myGoals}
+                onStateChange={() => {
+                    // Refresh feed when state changes
+                    if (isProxyActive && location) {
+                        fetchProxyFeed();
+                    }
+                }}
+            />
         </View>
       </View>
     );
@@ -709,7 +675,12 @@ export default function HomeScreen() {
          onClose={() => setModalVisible(false)}
          myInterests={myInterests}
          myGoals={myGoals}
-         mode="send_interest"
+         onStateChange={() => {
+             // Refresh feed when state changes
+             if (isProxyActive && location) {
+                 fetchProxyFeed();
+             }
+         }}
       />
     </View>
   );

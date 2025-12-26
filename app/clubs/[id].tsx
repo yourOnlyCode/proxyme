@@ -2034,6 +2034,9 @@ export default function ClubDetailScreen() {
         visible={profileModalVisible}
         profile={selectedProfile}
         onClose={() => setProfileModalVisible(false)}
+        onStateChange={() => {
+            // Refresh if needed
+        }}
       />
 
       {/* Event Menu Modal */}

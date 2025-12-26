@@ -21,8 +21,8 @@ export function CameraModal({
     slideFromRight?: boolean;
 }) {
     const [screenDimensions, setScreenDimensions] = useState(getScreenDimensions());
-    const SCREEN_WIDTH = screenDimensions.width;
-    const SCREEN_HEIGHT = screenDimensions.height;
+    const SCREEN_WIDTH = Math.max(Number(screenDimensions.width) || 0, 1);
+    const SCREEN_HEIGHT = Math.max(Number(screenDimensions.height) || 0, 1);
     
     const [facing, setFacing] = useState<CameraType>('back');
     const [permission, requestPermission] = useCameraPermissions();
@@ -33,7 +33,10 @@ export function CameraModal({
     // Update screen dimensions on mount and when window changes
     useEffect(() => {
         const subscription = Dimensions.addEventListener('change', ({ window }) => {
-            setScreenDimensions({ width: window.width || 0, height: window.height || 0 });
+            setScreenDimensions({ 
+                width: Math.max(Number(window.width) || 0, 1), 
+                height: Math.max(Number(window.height) || 0, 1) 
+            });
         });
         return () => subscription?.remove();
     }, []);
@@ -68,7 +71,7 @@ export function CameraModal({
     }
 
     // Ensure screen dimensions are valid before rendering
-    if (!SCREEN_WIDTH || !SCREEN_HEIGHT || SCREEN_WIDTH === 0 || SCREEN_HEIGHT === 0) {
+    if (!SCREEN_WIDTH || !SCREEN_HEIGHT || SCREEN_WIDTH === 0 || SCREEN_HEIGHT === 0 || isNaN(SCREEN_WIDTH) || isNaN(SCREEN_HEIGHT)) {
         return (
             <Modal visible={visible} animationType="none" transparent>
                 <View className="flex-1 bg-black items-center justify-center">
@@ -242,14 +245,14 @@ export function CameraModal({
                     >
                         <Image 
                             source={{ uri: capturedPhoto }} 
-                            style={{ width: Number(SCREEN_WIDTH) || 0, height: Number(SCREEN_HEIGHT) || 0 }}
+                            style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
                             resizeMode="contain"
                         />
                         <View className="absolute bottom-0 left-0 right-0 bg-black/60 p-6 pb-12">
-                            <View className="flex-row justify-center space-x-6">
+                            <View className="flex-row justify-center">
                                 <TouchableOpacity 
                                     onPress={handleRetake}
-                                    className="bg-white/20 px-6 py-3 rounded-full"
+                                    className="bg-white/20 px-6 py-3 rounded-full mr-6"
                                 >
                                     <Text className="text-white font-bold">Retake</Text>
                                 </TouchableOpacity>
@@ -270,14 +273,14 @@ export function CameraModal({
                 <View className="flex-1 bg-black">
                     <Image 
                         source={{ uri: capturedPhoto }} 
-                        style={{ width: Number(SCREEN_WIDTH) || 0, height: Number(SCREEN_HEIGHT) || 0 }}
+                        style={{ width: Math.max(Number(SCREEN_WIDTH) || 0, 1), height: Math.max(Number(SCREEN_HEIGHT) || 0, 1) }}
                         resizeMode="contain"
                     />
                     <View className="absolute bottom-0 left-0 right-0 bg-black/60 p-6 pb-12">
-                        <View className="flex-row justify-center space-x-6">
+                        <View className="flex-row justify-center">
                             <TouchableOpacity 
                                 onPress={handleRetake}
-                                className="bg-white/20 px-6 py-3 rounded-full"
+                                className="bg-white/20 px-6 py-3 rounded-full mr-6"
                             >
                                 <Text className="text-white font-bold">Retake</Text>
                             </TouchableOpacity>
@@ -308,7 +311,7 @@ export function CameraModal({
                 >
                     <CameraView
                         ref={cameraRef}
-                        style={{ flex: 1, width: Number(SCREEN_WIDTH) || 0, height: Number(SCREEN_HEIGHT) || 0 }}
+                        style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
                         facing={facing}
                     />
                     
@@ -336,7 +339,7 @@ export function CameraModal({
                         >
                             <View className="w-16 h-16 rounded-full bg-white" />
                         </TouchableOpacity>
-                        <View className="w-20" /> {/* Spacer for symmetry */}
+                        <View className="w-20" />
                     </View>
                 </Animated.View>
             </Modal>
@@ -353,7 +356,7 @@ export function CameraModal({
             <View className="flex-1 bg-black">
                 <CameraView
                     ref={cameraRef}
-                    style={{ flex: 1, width: Number(SCREEN_WIDTH) || 0, height: Number(SCREEN_HEIGHT) || 0 }}
+                    style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
                     facing={facing}
                 />
                 
@@ -381,7 +384,7 @@ export function CameraModal({
                     >
                         <View className="w-16 h-16 rounded-full bg-white" />
                     </TouchableOpacity>
-                    <View className="w-20" /> {/* Spacer for symmetry */}
+                    <View className="w-20" />
                 </View>
             </View>
         </Modal>

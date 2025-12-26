@@ -328,7 +328,11 @@ export default function CityFeedScreen() {
          onClose={() => setModalVisible(false)}
          myInterests={myInterests}
          myGoals={myGoals}
-         mode="send_interest"
+         onStateChange={() => {
+             if (location) {
+                 fetchFeed();
+             }
+         }}
       />
     </View>
   );

@@ -133,7 +133,9 @@ export default function UserConnectionsScreen() {
                 visible={modalVisible}
                 profile={selectedProfile}
                 onClose={() => setModalVisible(false)}
-                mode="send_interest"
+                onStateChange={() => {
+                    // Refresh connections
+                }}
             />
         </View>
     );

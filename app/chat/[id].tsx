@@ -197,6 +197,9 @@ export default function ChatScreen() {
          visible={modalVisible}
          profile={partner}
          onClose={() => setModalVisible(false)}
+         onStateChange={() => {
+             // Refresh if needed
+         }}
       />
 
       {/* Header */}

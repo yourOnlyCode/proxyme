@@ -1,3 +1,4 @@
+import { ReferralProvider } from '@/components/ReferralProvider';
 import { TutorialProvider } from '@/components/TutorialProvider';
 import { ToastProvider } from '@/components/ui/ToastProvider';
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -82,7 +83,9 @@ export default function RootLayout() {
       <AuthProvider>
         <LocationProvider>
           <TutorialProvider>
-            <InitialLayout />
+            <ReferralProvider>
+              <InitialLayout />
+            </ReferralProvider>
           </TutorialProvider>
         </LocationProvider>
       </AuthProvider>

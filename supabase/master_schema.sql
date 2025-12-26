@@ -65,6 +65,16 @@ begin
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'status_created_at') then
         alter table public.profiles add column status_created_at timestamptz;
     end if;
+    -- Referral system columns
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'friend_code') then
+        alter table public.profiles add column friend_code text UNIQUE;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'referral_count') then
+        alter table public.profiles add column referral_count int DEFAULT 0;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'referred_by') then
+        alter table public.profiles add column referred_by uuid REFERENCES public.profiles(id);
+    end if;
 end $$;
 
 -- RLS for profiles
@@ -147,18 +157,102 @@ create policy "Receiver can update status"
   on public.interests for update
   using ( (SELECT auth.uid()) = receiver_id );
 
--- Function to handle new user signup
+-- Function to generate unique 6-digit friend code
+create or replace function public.generate_friend_code()
+returns text
+language plpgsql
+as $$
+declare
+    new_code text;
+    exists_code boolean;
+begin
+    loop
+        -- Generate 6 digit random number
+        new_code := lpad(floor(random() * 1000000)::text, 6, '0');
+        
+        -- Check if exists
+        select exists (select 1 from public.profiles where friend_code = new_code) into exists_code;
+        
+        exit when not exists_code;
+    end loop;
+    return new_code;
+end;
+$$;
+
+-- Function to handle new user signup with referral processing
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  ref_code text;
+  referrer_id uuid;
+  current_count int;
 begin
-  insert into public.profiles (id, username, full_name, avatar_url)
-  values (new.id, new.raw_user_meta_data->>'username', new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url');
+  -- Get friend code from metadata (safely)
+  begin
+    ref_code := new.raw_user_meta_data->>'friend_code';
+  exception when others then
+    ref_code := null;
+  end;
+  
+  -- Insert profile with generated friend code
+  insert into public.profiles (id, username, full_name, avatar_url, friend_code)
+  values (
+    new.id, 
+    new.raw_user_meta_data->>'username', 
+    new.raw_user_meta_data->>'full_name', 
+    new.raw_user_meta_data->>'avatar_url',
+    public.generate_friend_code()
+  );
+
+  -- Process referral if friend code exists
+  if ref_code is not null and ref_code <> '' then
+      select id into referrer_id from public.profiles where friend_code = ref_code;
+      
+      if referrer_id is not null then
+          -- Link user
+          update public.profiles set referred_by = referrer_id where id = new.id;
+          
+          -- Increment count
+          update public.profiles 
+          set referral_count = referral_count + 1 
+          where id = referrer_id
+          returning referral_count into current_count;
+          
+          -- Unlock verification automatically at 10 referrals
+          if current_count >= 10 then
+              update public.profiles set is_verified = true where id = referrer_id;
+          end if;
+      end if;
+  end if;
+
   return new;
 end;
 $$;
+
+-- Trigger to ensure friend_code is set on profile insert
+create or replace function public.ensure_friend_code()
+returns trigger
+language plpgsql
+as $$
+begin
+    if new.friend_code is null then
+        new.friend_code := public.generate_friend_code();
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists ensure_friend_code_trigger on public.profiles;
+create trigger ensure_friend_code_trigger
+    before insert on public.profiles
+    for each row
+    execute function public.ensure_friend_code();
+
+-- Backfill existing users with friend codes
+update public.profiles set friend_code = public.generate_friend_code() where friend_code is null;
 
 -- Trigger the function every time a user is created
 drop trigger if exists on_auth_user_created on auth.users;
@@ -526,6 +620,9 @@ end $$;
 -- ==========================================
 
 -- Get Nearby Users (Discovery)
+-- Drop existing function if it exists to allow return type changes
+drop function if exists public.get_nearby_users(float, float, int);
+
 create or replace function public.get_nearby_users(
   lat float,
   long float,
@@ -568,6 +665,9 @@ end;
 $$;
 
 -- Get City Users (Detailed Discovery)
+-- Drop existing function if it exists to allow return type changes
+drop function if exists public.get_city_users(float, float, int);
+
 create or replace function public.get_city_users(
   lat float,
   long float,
@@ -678,6 +778,9 @@ end;
 $$;
 
 -- Get Feed Users
+-- Drop existing function if it exists to allow return type changes
+drop function if exists public.get_feed_users(float, float, int);
+
 create or replace function public.get_feed_users(
   lat float,
   long float,
@@ -727,7 +830,30 @@ begin
 end;
 $$;
 
+-- Get city user count (for referral popup eligibility)
+-- Drop existing function if it exists to allow return type changes
+drop function if exists public.get_city_user_count(text);
+
+CREATE OR REPLACE FUNCTION get_city_user_count(check_city text)
+RETURNS int
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    user_count int;
+BEGIN
+    -- Count users where city matches
+    SELECT count(*) INTO user_count 
+    FROM public.profiles 
+    WHERE city IS NOT NULL AND city = check_city;
+    RETURN user_count;
+END;
+$$;
+
 -- Get User Connection Stats
+-- Drop existing function if it exists to allow return type changes
+drop function if exists public.get_user_connection_stats(uuid);
+
 CREATE OR REPLACE FUNCTION get_user_connection_stats(target_user_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER AS $$
@@ -777,6 +903,9 @@ END;
 $$;
 
 -- Get User Connections List (for Club Invites etc)
+-- Drop existing function if it exists to allow return type changes
+drop function if exists public.get_user_connections_list(uuid, text);
+
 CREATE OR REPLACE FUNCTION get_user_connections_list(
   target_user_id uuid, 
   filter_intent text DEFAULT NULL

@@ -1,8 +1,10 @@
+import { ProfileActionButtons } from '@/components/ProfileActionButtons';
+import { useConnectionState } from '@/hooks/useConnectionState';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Dimensions, Image, Linking, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Image, Linking, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
@@ -32,18 +34,13 @@ export type ProfileData = {
   has_received_interest?: boolean;
 };
 
-type ModalMode = 'view' | 'send_interest' | 'request' | 'connection';
-
 type ProfileModalProps = {
   visible: boolean;
   profile: ProfileData | null;
   onClose: () => void;
   myInterests?: Record<string, string[]> | null;
-  mode?: ModalMode;
-  onAccept?: () => void;
-  onDecline?: () => void;
-  onMessage?: () => void;
   myGoals?: string[] | null;
+  onStateChange?: () => void; // Callback when connection state changes
 };
 
 export function ProfileModal({ 
@@ -52,15 +49,10 @@ export function ProfileModal({
     onClose, 
     myInterests,
     myGoals,
-    mode = 'send_interest',
-    onAccept,
-    onDecline,
-    onMessage
+    onStateChange,
 }: ProfileModalProps) {
     const { user } = useAuth();
     const router = useRouter();
-    const [sending, setSending] = useState(false);
-    const [sent, setSent] = useState(false);
     const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number, hidden?: boolean } | null>(null);
     const [fetchedPhotos, setFetchedPhotos] = useState<{ url: string; order: number }[] | null>(null);
     const [fullScreenVisible, setFullScreenVisible] = useState(false);
@@ -102,41 +94,11 @@ export function ProfileModal({
         }
     }, [profile?.id, visible]);
 
+    // Use connection state hook - MUST be called before any early returns
+    const connectionState = useConnectionState(profile);
+    const isTrulyConnected = connectionState.state === 'already_connected';
+
     if (!profile) return null;
-
-    // True connection check
-    const isTrulyConnected = !!profile.connection_id;
-    // Pending check (fallback if connection_id is not passed, rely on old flags or sent state)
-    const isPending = (profile.has_sent_interest || sent) && !isTrulyConnected;
-
-    const sendInterest = async () => {
-        if (!user) return;
-        setSending(true);
-        
-        const connectionType = myGoals && myGoals.length > 0 ? myGoals[0] : null;
-
-        const { error } = await supabase
-          .from('interests')
-          .insert({
-              sender_id: user.id,
-              receiver_id: profile.id,
-              status: 'pending',
-              connection_type: connectionType
-          });
-        
-        setSending(false);
-        if (error) {
-            if (error.code === '23505') { // Unique violation
-                Alert.alert('Already Connected', 'You have already sent an interest to this person.');
-                setSent(true);
-            } else {
-                Alert.alert('Error', error.message);
-            }
-        } else {
-            Alert.alert('Sent!', 'Interest sent successfully.');
-            setSent(true);
-        }
-    };
     
     const getGoalColors = (goal?: string) => {
         switch(goal) {
@@ -393,45 +355,12 @@ export function ProfileModal({
 
                  {/* Sticky Footer */}
                  <View className="p-4 bg-white border-t border-gray-100 shadow-lg pb-8">
-                    {mode === 'request' ? (
-                        <View className="flex-row space-x-4">
-                            <TouchableOpacity 
-                                className="flex-1 bg-gray-100 py-4 rounded-2xl items-center border border-gray-200"
-                                onPress={onDecline}
-                            >
-                                <Text className="text-gray-700 font-bold text-lg">Decline</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                className="flex-1 bg-ink py-4 rounded-2xl items-center shadow-md"
-                                onPress={onAccept}
-                            >
-                                <Text className="text-white font-bold text-lg">Accept</Text>
-                            </TouchableOpacity>
-                        </View>
-                    ) : (mode === 'connection' || isTrulyConnected) ? (
-                        <TouchableOpacity 
-                            className="py-4 rounded-2xl items-center bg-ink shadow-md active:opacity-90"
-                            onPress={onMessage}
-                        >
-                            <Text className="text-white font-bold text-lg">Message</Text>
-                        </TouchableOpacity>
-                    ) : isPending ? (
-                        <View className="py-4 rounded-2xl items-center bg-gray-100 border border-gray-200">
-                             <Text className="text-gray-500 font-bold text-lg">Interest Sent</Text>
-                        </View>
-                    ) : (
-                         <TouchableOpacity 
-                            className={`py-4 rounded-2xl items-center shadow-md active:opacity-90 ${colors.bg} ${colors.border} border`}
-                            onPress={sendInterest}
-                            disabled={sending}
-                         >
-                            {sending ? (
-                                 <Text className={`${colors.text} font-bold text-lg`}>Sending...</Text>
-                            ) : (
-                                 <Text className={`${colors.text} font-bold text-lg`}>Send Interest</Text>
-                            )}
-                         </TouchableOpacity>
-                    )}
+                    <ProfileActionButtons
+                        profile={profile}
+                        variant="modal"
+                        myGoals={myGoals}
+                        onStateChange={onStateChange}
+                    />
                  </View>
             </View>
 

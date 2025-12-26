@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 export default function SignUp() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [friendCode, setFriendCode] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -14,6 +15,11 @@ export default function SignUp() {
     const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          friend_code: friendCode.trim() || null,
+        },
+      },
     });
 
     if (error) {
@@ -50,12 +56,24 @@ export default function SignUp() {
           onSubmitEditing={() => Keyboard.dismiss()}
         />
         <TextInput
-          className="border border-gray-300 rounded-lg p-4 text-base mb-6 text-black"
+          className="border border-gray-300 rounded-lg p-4 text-base mb-4 text-black"
           placeholder="Password"
           placeholderTextColor="#6b7280"
           secureTextEntry
           value={password}
           onChangeText={setPassword}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => Keyboard.dismiss()}
+        />
+        <TextInput
+          className="border border-gray-300 rounded-lg p-4 text-base mb-6 text-black"
+          placeholder="Friend Code (Optional)"
+          placeholderTextColor="#6b7280"
+          value={friendCode}
+          onChangeText={setFriendCode}
+          maxLength={6}
+          keyboardType="number-pad"
           returnKeyType="done"
           blurOnSubmit={true}
           onSubmitEditing={() => {

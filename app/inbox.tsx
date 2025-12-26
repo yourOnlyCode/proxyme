@@ -334,13 +334,13 @@ export default function InboxScreen() {
 
   return (
     <View className="flex-1 bg-gray-50 pt-12 px-4">
-      <ProfileModal 
+      <ProfileModal
         visible={modalVisible}
         profile={selectedProfile}
         onClose={() => setModalVisible(false)}
-        mode="request"
-        onAccept={() => selectedInterestId && handleResponse(selectedInterestId, 'accepted')}
-        onDecline={() => selectedInterestId && handleResponse(selectedInterestId, 'declined')}
+        onStateChange={() => {
+            // Refresh inbox
+        }}
       />
       
       <View className="flex-row justify-between items-center mb-6">

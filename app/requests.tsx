@@ -145,9 +145,9 @@ export default function RequestsScreen() {
          visible={modalVisible}
          profile={selectedProfile}
          onClose={() => setModalVisible(false)}
-         mode="request"
-         onAccept={() => selectedInterestId && handleResponse(selectedInterestId, 'accepted')}
-         onDecline={() => selectedInterestId && handleResponse(selectedInterestId, 'declined')}
+         onStateChange={() => {
+             // Refresh requests list
+         }}
       />
       
       <View className="flex-row justify-between items-center mb-6">
