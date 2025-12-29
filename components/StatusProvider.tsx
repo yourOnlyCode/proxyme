@@ -4,14 +4,19 @@ import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Animated,
     Dimensions,
+    FlatList,
     Image,
     Keyboard,
     KeyboardAvoidingView,
     Modal,
+    PanResponder,
     Platform,
     ScrollView,
     Text,
@@ -23,7 +28,8 @@ import {
 } from 'react-native';
 import { CameraModal } from './CameraModal';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+const LAST_STATUS_TAB_KEY = 'last_status_tab';
 
 export type StatusItem = {
     id: string;
@@ -36,7 +42,7 @@ export type StatusItem = {
 
 type StatusContextType = {
     openModal: () => void;
-    openCamera: (fromSwipe?: boolean) => void;
+    openCamera: (fromSwipe?: boolean, source?: 'proxy' | 'status') => void;
     closeModal: () => void;
     activeStatuses: StatusItem[];
     fetchStatus: () => void;
@@ -48,20 +54,119 @@ const StatusContext = createContext<StatusContextType | undefined>(undefined);
 export function StatusProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const toast = useToast();
+  const router = useRouter();
   
   const [modalVisible, setModalVisible] = useState(false);
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
   const [cameraFromSwipe, setCameraFromSwipe] = useState(false);
+  const [cameraSource, setCameraSource] = useState<'proxy' | 'status'>('status');
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewStartIndex, setPreviewStartIndex] = useState(0);
   const [updating, setUpdating] = useState(false);
   const [userProfile, setUserProfile] = useState<{ avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null>(null);
   const [relationshipGoal, setRelationshipGoal] = useState<string | null>(null);
+  // Tab order: Penpal (0), My Status (1), My Clubs (2) - My Status is center
+  const tabs = ['penpal', 'status', 'clubs'] as const;
+  type TabType = typeof tabs[number];
+  const [activeTab, setActiveTab] = useState<TabType>('status');
+  const tabScrollX = useRef(new Animated.Value(0)).current;
+  const tabIndexRef = useRef(1); // Start at index 1 (My Status)
   
   // Status Data
   const [statusText, setStatusText] = useState('');
   const [statusImage, setStatusImage] = useState<string | null>(null);
   const [activeStatuses, setActiveStatuses] = useState<StatusItem[]>([]);
+  
+  // Penpal Data
+  const [penpalMessage, setPenpalMessage] = useState('');
+  const [sendingPenpal, setSendingPenpal] = useState(false);
+
+  // Clubs Data
+  const [selectedClub, setSelectedClub] = useState<any | null>(null);
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [forumTitle, setForumTitle] = useState('');
+  const [forumContent, setForumContent] = useState('');
+  const [creatingPost, setCreatingPost] = useState(false);
+
+  const sendPenpal = async () => {
+    if (!penpalMessage.trim()) {
+      toast.show('Message Required', 'error');
+      return;
+    }
+    setSendingPenpal(true);
+    try {
+      const { data, error } = await supabase.rpc('send_penpal_message', { content: penpalMessage });
+      if (error) throw error;
+      if (data.success) {
+        setPenpalMessage('');
+        toast.show('Penpal message sent!', 'success');
+        router.push(`/chat/${data.connection_id}`);
+        closeModal();
+      } else {
+        if (data.error === 'limit_reached') {
+          toast.show('You can only have one penpal at a time. Get verified for more!', 'error');
+        } else if (data.error === 'no_users_found') {
+          toast.show('No penpals found. Try again later!', 'error');
+        }
+      }
+    } catch (e: any) {
+      toast.show(e.message || 'Failed to send penpal message', 'error');
+    } finally {
+      setSendingPenpal(false);
+    }
+  };
+
+  const fetchUpcomingEvents = async (clubId: string) => {
+    if (!user) return;
+    setLoadingEvents(true);
+    try {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('club_events')
+        .select('*')
+        .eq('club_id', clubId)
+        .gte('event_date', now)
+        .order('event_date', { ascending: true })
+        .limit(5);
+      
+      if (error) throw error;
+      setUpcomingEvents(data || []);
+    } catch (e: any) {
+      toast.show('Failed to load events', 'error');
+    } finally {
+      setLoadingEvents(false);
+    }
+  };
+
+  const createForumPost = async () => {
+    if (!selectedClub || !forumTitle.trim() || !forumContent.trim() || !user) {
+      toast.show('Title and content are required', 'error');
+      return;
+    }
+
+    setCreatingPost(true);
+    try {
+      const { error } = await supabase
+        .from('club_forum_topics')
+        .insert({
+          club_id: selectedClub.id,
+          created_by: user.id,
+          title: forumTitle.trim(),
+          content: forumContent.trim()
+        });
+
+      if (error) throw error;
+
+      setForumTitle('');
+      setForumContent('');
+      toast.show('Forum post created!', 'success');
+    } catch (e: any) {
+      toast.show(e.message || 'Failed to create post', 'error');
+    } finally {
+      setCreatingPost(false);
+    }
+  };
 
   const modalTranslateY = useRef(new Animated.Value(0)).current;
   
@@ -190,6 +295,98 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       }
   };
 
+  // Load last used tab
+  useEffect(() => {
+    if (modalVisible) {
+      AsyncStorage.getItem(LAST_STATUS_TAB_KEY).then((lastTab) => {
+        if (lastTab && tabs.includes(lastTab as TabType)) {
+          const index = tabs.indexOf(lastTab as TabType);
+          setActiveTab(lastTab as TabType);
+          tabIndexRef.current = index;
+          tabScrollX.setValue(-index * SCREEN_WIDTH);
+        } else {
+          // Default to My Status (index 1)
+          setActiveTab('status');
+          tabIndexRef.current = 1;
+          tabScrollX.setValue(-1 * SCREEN_WIDTH);
+        }
+      });
+    }
+  }, [modalVisible]);
+
+  // Handle tab change with animation and save
+  const changeTab = (newTab: TabType, index: number) => {
+    setActiveTab(newTab);
+    tabIndexRef.current = index;
+    AsyncStorage.setItem(LAST_STATUS_TAB_KEY, newTab);
+    Animated.spring(tabScrollX, {
+      toValue: -index * SCREEN_WIDTH,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 7,
+    }).start();
+  };
+
+  // PanResponder for swipe gestures
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Only respond to horizontal swipes that are more horizontal than vertical
+        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasEnoughMovement = Math.abs(gestureState.dx) > 15;
+        return isHorizontalSwipe && hasEnoughMovement;
+      },
+      onPanResponderGrant: () => {
+        // Stop any ongoing animations
+        tabScrollX.stopAnimation();
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const currentOffset = -tabIndexRef.current * SCREEN_WIDTH;
+        const newOffset = currentOffset + gestureState.dx;
+        // Clamp between first and last tab
+        const minOffset = -(tabs.length - 1) * SCREEN_WIDTH;
+        const maxOffset = 0;
+        const clampedOffset = Math.max(minOffset, Math.min(maxOffset, newOffset));
+        tabScrollX.setValue(clampedOffset);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const threshold = SCREEN_WIDTH * 0.25; // Lower threshold for easier swiping
+        const velocity = Math.abs(gestureState.vx);
+        
+        // Consider both distance and velocity
+        if (Math.abs(gestureState.dx) > threshold || velocity > 0.5) {
+          // Swipe to next/prev tab
+          if (gestureState.dx > 0 && tabIndexRef.current > 0) {
+            // Swipe right - go to previous tab
+            const newIndex = tabIndexRef.current - 1;
+            changeTab(tabs[newIndex], newIndex);
+          } else if (gestureState.dx < 0 && tabIndexRef.current < tabs.length - 1) {
+            // Swipe left - go to next tab
+            const newIndex = tabIndexRef.current + 1;
+            changeTab(tabs[newIndex], newIndex);
+          } else {
+            // Snap back to current tab
+            Animated.spring(tabScrollX, {
+              toValue: -tabIndexRef.current * SCREEN_WIDTH,
+              useNativeDriver: true,
+              tension: 50,
+              friction: 7,
+            }).start();
+          }
+        } else {
+          // Snap back to current tab
+          Animated.spring(tabScrollX, {
+            toValue: -tabIndexRef.current * SCREEN_WIDTH,
+            useNativeDriver: true,
+            tension: 50,
+            friction: 7,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
   const openModal = (preserveImage: boolean = false) => {
       modalTranslateY.setValue(0);
       setModalVisible(true);
@@ -200,8 +397,9 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       }
   };
 
-  const openCamera = (fromSwipe: boolean = false) => {
+  const openCamera = (fromSwipe: boolean = false, source: 'proxy' | 'status' = 'status') => {
       setCameraFromSwipe(fromSwipe);
+      setCameraSource(source);
       setCameraModalVisible(true);
   };
 
@@ -366,57 +564,14 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       }
   };
 
-  return (
-    <StatusContext.Provider value={{ openModal, openCamera, closeModal, activeStatuses, fetchStatus, deleteStatus }}>
-      {children}
-      
-      {/* Status Modal */}
-      <Modal 
-        visible={modalVisible && !cameraModalVisible} 
-        transparent 
-        animationType="fade"
-      >
-          <Animated.View style={{ flex: 1, transform: [{ translateY: modalTranslateY }] }}>
-              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                  <KeyboardAvoidingView 
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    className="flex-1 justify-end bg-black/60"
-                  >
-                      <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()} accessible={false}>
-                          <View className="bg-white rounded-t-3xl p-6 pb-10 max-h-[90%]">
-                        {/* Header */}
-                        <View className="flex-row justify-between items-center mb-6">
-                            <Text className="text-2xl font-bold text-ink">My Status</Text>
-                            <View className="flex-row gap-2">
-                                {activeStatuses.length > 0 && (
-                                    <TouchableOpacity 
-                                        onPress={async () => {
-                                            console.log('Eye icon clicked, activeStatuses:', activeStatuses.length, 'userProfile:', userProfile);
-                                            // Ensure profile is loaded before opening preview
-                                            if (!userProfile) {
-                                                console.log('Fetching user profile...');
-                                                await fetchUserProfile();
-                                            }
-                                            // Close status modal and open preview
-                                            closeModal();
-                                            console.log('Opening preview modal');
-                                            setPreviewModalVisible(true);
-                                        }} 
-                                        className="p-2 bg-gray-100 rounded-full"
-                                    >
-                                        <IconSymbol name="eye.fill" size={20} color="#1A1A1A" />
-                                    </TouchableOpacity>
-                                )}
-                                <TouchableOpacity onPress={closeModal} className="p-2 bg-gray-100 rounded-full">
-                                    <IconSymbol name="xmark" size={20} color="#1A1A1A" />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-
+  // Render Status Tab Content
+  const renderStatusTab = () => {
+    return (
+      <ScrollView showsVerticalScrollIndicator={false}>
                         {/* Active Statuses List */}
                         {activeStatuses.length > 0 && (
                             <View className="mb-6" style={{ width: '100%' }}>
-                                <Text className="text-xs font-bold text-gray-400 uppercase mb-2">Active Updates</Text>
+                                <Text className="text-xs font-bold text-slate-400 uppercase mb-2">Active Updates</Text>
                                 <ScrollView 
                                     horizontal 
                                     showsHorizontalScrollIndicator={true}
@@ -448,7 +603,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                             }}
                                             activeOpacity={0.8}
                                         >
-                                            <View className="h-32 w-24 rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
+                                            <View className="h-32 w-24 rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
                                                 {item.type === 'image' ? (
                                                     <PreviewImage path={item.content || ''} />
                                                 ) : (
@@ -456,7 +611,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                                         {item.content && item.content.trim() ? (
                                                             <Text numberOfLines={4} className="text-[10px] text-center font-medium italic">"{item.content}"</Text>
                                                         ) : (
-                                                            <Text className="text-[10px] text-center font-medium italic text-gray-400">No content</Text>
+                                                            <Text className="text-[10px] text-center font-medium italic text-slate-400">No content</Text>
                                                         )}
                                                     </View>
                                                 )}
@@ -471,7 +626,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                             >
                                                 <IconSymbol name="xmark" size={12} color="white" />
                                             </TouchableOpacity>
-                                            <Text className="text-[10px] text-gray-400 mt-1 text-center">
+                                            <Text className="text-[10px] text-slate-400 mt-1 text-center">
                                                 {new Date(item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                                             </Text>
                                         </TouchableOpacity>
@@ -481,13 +636,13 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                         )}
                         
                         {/* New Status Input */}
-                        <Text className="text-sm font-bold text-gray-500 mb-3 ml-1">Add to Status</Text>
+                        <Text className="text-sm font-bold text-slate-500 mb-3 ml-1">Add to Status</Text>
                         
                         {/* Photo/Camera Buttons */}
                         <View className="flex-row mb-4">
                             {statusImage ? (
                                 <TouchableOpacity onPress={pickImage} className="flex-1">
-                                    <View className="w-full h-16 rounded-2xl overflow-hidden border border-gray-200 relative">
+                                    <View className="w-full h-16 rounded-2xl overflow-hidden border border-slate-200 relative">
                                         <Image source={{ uri: statusImage }} className="w-full h-full" resizeMode="cover" />
                                         <View className="absolute inset-0 bg-black/20 items-center justify-center">
                                             <IconSymbol name="pencil" size={18} color="white" />
@@ -498,7 +653,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                 <>
                                     <TouchableOpacity 
                                         onPress={pickImage} 
-                                        className="flex-1 h-16 rounded-2xl bg-gray-100 items-center justify-center border border-gray-200"
+                                        className="flex-1 h-16 rounded-2xl bg-slate-100 items-center justify-center border border-slate-200"
                                         style={{ marginRight: 8 }}
                                     >
                                         <IconSymbol name="photo.fill" size={22} color="#9CA3AF" />
@@ -506,9 +661,9 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                     <TouchableOpacity 
                                         onPress={() => {
                                             console.log('Camera button pressed');
-                                            setCameraModalVisible(true);
+                                            openCamera(false, 'status');
                                         }} 
-                                        className="flex-1 h-16 rounded-2xl bg-gray-100 items-center justify-center border border-gray-200"
+                                        className="flex-1 h-16 rounded-2xl bg-slate-100 items-center justify-center border border-slate-200"
                                         style={{ marginLeft: 8 }}
                                     >
                                         <IconSymbol name="camera.fill" size={22} color="#9CA3AF" />
@@ -524,47 +679,533 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                             placeholder="What're you up to?"
                             placeholderTextColor="#9CA3AF"
                             multiline
-                            className="bg-gray-50 p-4 rounded-xl text-ink text-lg min-h-[64px] mb-6"
+                            className="bg-slate-50 p-4 rounded-xl text-slate-900 text-lg min-h-[64px] mb-6"
                             returnKeyType="done"
                             blurOnSubmit={true}
                             onSubmitEditing={() => Keyboard.dismiss()}
                         />
 
-                        <Text className="text-gray-400 text-xs text-center mb-6">
+                        <Text className="text-slate-400 text-xs text-center mb-6">
                             Updates last 24 hours. Use the + button to add more.
                         </Text>
+      </ScrollView>
+    );
+  };
 
-                        <View className="self-center items-center justify-center">
-                            {/* Radiating ring animation */}
-                            {!updating && (
+  // Render Penpal Tab Content
+  const renderPenpalTab = () => {
+    const [myPenpals, setMyPenpals] = useState<any[]>([]);
+
+    useEffect(() => {
+      if (modalVisible && activeTab === 'penpal' && user) {
+        fetchMyPenpals();
+      }
+    }, [modalVisible, activeTab, user]);
+
+    const fetchMyPenpals = async () => {
+      if (!user) return;
+      const { data } = await supabase
+        .from('interests')
+        .select(`
+          id,
+          type,
+          status,
+          sender:profiles!interests_sender_id_fkey(id, username, full_name, avatar_url, city),
+          receiver:profiles!interests_receiver_id_fkey(id, username, full_name, avatar_url, city)
+        `)
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+        .eq('type', 'penpal')
+        .eq('status', 'accepted');
+      
+      if (data) {
+        const penpals = data.map((p: any) => ({
+          id: p.id,
+          partner: p.sender_id === user.id ? p.receiver : p.sender,
+        }));
+        setMyPenpals(penpals);
+      }
+    };
+
+    return (
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View className="mb-6">
+          <Text className="text-lg font-bold text-slate-900 mb-2">Send to Random Penpal</Text>
+          <Text className="text-slate-500 text-sm mb-4">
+            Send a message to a random person in a different city. You can only have one active penpal at a time unless verified.
+          </Text>
+          <TextInput
+            value={penpalMessage}
+            onChangeText={setPenpalMessage}
+            placeholder="Say hello from your city..."
+            placeholderTextColor="#9CA3AF"
+            multiline
+            className="bg-slate-50 p-4 rounded-xl text-slate-900 text-lg min-h-[120px] mb-4"
+            textAlignVertical="top"
+          />
+        </View>
+
+        {myPenpals.length > 0 && (
+          <View className="mt-6">
+            <Text className="text-lg font-bold text-slate-900 mb-4">My Penpals</Text>
+            {myPenpals.map((penpal) => (
+              <TouchableOpacity
+                key={penpal.id}
+                onPress={() => {
+                  router.push(`/chat/${penpal.id}`);
+                  closeModal();
+                }}
+                className="bg-slate-50 rounded-xl p-4 mb-3 flex-row items-center"
+              >
+                {penpal.partner?.avatar_url ? (
+                  <Image source={{ uri: penpal.partner.avatar_url }} className="w-12 h-12 rounded-full mr-3" />
+                ) : (
+                  <View className="w-12 h-12 rounded-full bg-gray-300 mr-3 items-center justify-center">
+                    <IconSymbol name="person.fill" size={20} color="#9CA3AF" />
+                  </View>
+                )}
+                <View className="flex-1">
+                  <Text className="font-bold text-slate-900">{penpal.partner?.full_name || penpal.partner?.username || 'Unknown'}</Text>
+                  {penpal.partner?.city && <Text className="text-slate-500 text-sm">{penpal.partner.city}</Text>}
+                </View>
+                <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    );
+  };
+
+  // Render Clubs Tab Content
+  const renderClubsTab = () => {
+    const [myClubs, setMyClubs] = useState<any[]>([]);
+    const [loadingClubs, setLoadingClubs] = useState(false);
+
+    useEffect(() => {
+      if (modalVisible && activeTab === 'clubs' && user) {
+        fetchMyClubs();
+        if (selectedClub) {
+          fetchUpcomingEvents(selectedClub.id);
+        }
+      }
+    }, [modalVisible, activeTab, user]);
+
+    useEffect(() => {
+      if (selectedClub && modalVisible && activeTab === 'clubs') {
+        fetchUpcomingEvents(selectedClub.id);
+      }
+    }, [selectedClub, modalVisible, activeTab]);
+
+    const fetchMyClubs = async () => {
+      if (!user) return;
+      setLoadingClubs(true);
+      try {
+        const { data, error } = await supabase
+          .from('club_members')
+          .select(`
+            role,
+            club:clubs (
+              id, name, description, image_url, city
+            )
+          `)
+          .eq('user_id', user.id)
+          .eq('status', 'accepted');
+        
+        if (error) throw error;
+        const clubs = (data || []).map((item: any) => ({
+          ...item.club,
+          role: item.role,
+        }));
+        setMyClubs(clubs);
+      } catch (e: any) {
+        toast.show('Failed to load clubs', 'error');
+      } finally {
+        setLoadingClubs(false);
+      }
+    };
+
+
+    const formatEventDate = (dateString: string) => {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
+      });
+    };
+
+    const formatEventTime = (dateString: string) => {
+      const date = new Date(dateString);
+      return date.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      });
+    };
+
+    if (selectedClub) {
+      return (
+        <ScrollView 
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled={true}
+        >
+          {/* Header with back button */}
+          <View className="flex-row items-center mb-6">
+            <TouchableOpacity
+              onPress={() => setSelectedClub(null)}
+              className="mr-3"
+            >
+              <IconSymbol name="chevron.left" size={24} color="#2962FF" />
+            </TouchableOpacity>
+            <View className="flex-1">
+              <Text className="text-lg font-bold text-slate-900">{selectedClub.name}</Text>
+              {selectedClub.city && (
+                <Text className="text-slate-500 text-sm">{selectedClub.city}</Text>
+              )}
+            </View>
+          </View>
+
+          {/* Upcoming Events Section */}
+          <View className="mb-6">
+            <Text className="text-base font-bold text-slate-900 mb-3">Upcoming Events</Text>
+            {loadingEvents ? (
+              <View className="items-center py-4">
+                <ActivityIndicator size="small" color="#2962FF" />
+              </View>
+            ) : upcomingEvents.length === 0 ? (
+              <View className="bg-slate-50 rounded-xl p-4">
+                <Text className="text-slate-500 text-sm text-center">No upcoming events</Text>
+              </View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingRight: 24 }}
+                style={{ flexGrow: 0 }}
+                nestedScrollEnabled={true}
+                scrollEventThrottle={16}
+                bounces={false}
+                decelerationRate="fast"
+              >
+                {upcomingEvents.map((event) => (
+                  <View key={event.id} className="bg-slate-50 rounded-xl p-4 mr-3" style={{ width: 280 }}>
+                    <Text className="text-slate-900 font-bold text-base mb-1">{event.title}</Text>
+                    {event.description && (
+                      <Text className="text-slate-600 text-sm mb-2" numberOfLines={2}>
+                        {event.description}
+                      </Text>
+                    )}
+                    <View className="flex-row items-center mt-2">
+                      <IconSymbol name="calendar" size={16} color="#6B7280" />
+                      <Text className="text-slate-600 text-sm ml-2 flex-1" numberOfLines={1}>
+                        {formatEventDate(event.event_date)} at {formatEventTime(event.event_date)}
+                      </Text>
+                    </View>
+                    {event.location && (
+                      <View className="flex-row items-center mt-1">
+                        <IconSymbol name="location.fill" size={16} color="#6B7280" />
+                        <Text className="text-slate-600 text-sm ml-2 flex-1" numberOfLines={1}>{event.location}</Text>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+
+          {/* Create Forum Post Section */}
+          <View className="mb-6">
+            <Text className="text-base font-bold text-slate-900 mb-3">Create Forum Post</Text>
+            <View className="bg-slate-50 rounded-xl p-4">
+              <TextInput
+                placeholder="Post title"
+                value={forumTitle}
+                onChangeText={setForumTitle}
+                className="bg-white rounded-lg p-3 mb-3 text-slate-900"
+                placeholderTextColor="#9CA3AF"
+              />
+              <TextInput
+                placeholder="What's on your mind?"
+                value={forumContent}
+                onChangeText={setForumContent}
+                multiline
+                numberOfLines={4}
+                className="bg-white rounded-lg p-3 text-slate-900"
+                placeholderTextColor="#9CA3AF"
+                textAlignVertical="top"
+              />
+            </View>
+          </View>
+        </ScrollView>
+      );
+    }
+
+    return (
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View className="mb-6">
+          <View className="flex-row items-center justify-between mb-2">
+            <Text className="text-lg font-bold text-slate-900">My Clubs</Text>
+            <TouchableOpacity
+              onPress={() => {
+                router.push('/(tabs)/clubs');
+                closeModal();
+              }}
+              className="flex-row items-center bg-blue-600 px-4 py-2 rounded-lg"
+            >
+              <IconSymbol name="arrow.right.circle.fill" size={16} color="white" />
+              <Text className="text-white font-semibold ml-2">Go to Clubs</Text>
+            </TouchableOpacity>
+          </View>
+          <Text className="text-slate-500 text-sm mb-4">
+            Select a club to view events and create forum posts.
+          </Text>
+        </View>
+
+        {loadingClubs ? (
+          <View className="items-center py-8">
+            <ActivityIndicator size="large" color="#2962FF" />
+          </View>
+        ) : myClubs.length === 0 ? (
+          <View className="items-center py-8">
+            <IconSymbol name="person.3.fill" size={48} color="#9CA3AF" />
+            <Text className="text-slate-500 mt-4 text-center">You're not a member of any clubs yet.</Text>
+            <TouchableOpacity
+              onPress={() => {
+                router.push('/(tabs)/clubs');
+                closeModal();
+              }}
+              className="mt-4 bg-blue-600 px-6 py-3 rounded-xl"
+            >
+              <Text className="text-white font-bold">Discover Clubs</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View>
+            {myClubs.map((club) => (
+              <TouchableOpacity
+                key={club.id}
+                onPress={() => setSelectedClub(club)}
+                className="bg-slate-50 rounded-xl p-4 mb-3"
+              >
+                <View className="flex-row items-center">
+                  {club.image_url ? (
+                    <Image source={{ uri: club.image_url }} className="w-16 h-16 rounded-xl mr-4" />
+                  ) : (
+                    <View className="w-16 h-16 rounded-xl bg-gray-300 mr-4 items-center justify-center">
+                      <IconSymbol name="person.3.fill" size={24} color="#9CA3AF" />
+                    </View>
+                  )}
+                  <View className="flex-1">
+                    <Text className="font-bold text-slate-900 text-lg">{club.name}</Text>
+                    {club.description && <Text className="text-slate-500 text-sm mt-1" numberOfLines={2}>{club.description}</Text>}
+                    {club.city && <Text className="text-slate-400 text-xs mt-1">{club.city}</Text>}
+                  </View>
+                  <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+    );
+  };
+
+  return (
+    <StatusContext.Provider value={{ openModal, openCamera, closeModal, activeStatuses, fetchStatus, deleteStatus }}>
+      {children}
+      
+      {/* Status Modal */}
+      <Modal 
+        visible={modalVisible && !cameraModalVisible} 
+        transparent 
+        animationType="fade"
+      >
+          <Animated.View style={{ flex: 1, transform: [{ translateY: modalTranslateY }] }}>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                  <KeyboardAvoidingView 
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    className="flex-1 justify-end bg-black/60"
+                  >
+                      <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()} accessible={false}>
+                          <View className="bg-white rounded-t-3xl max-h-[90%] flex-1">
+                        {/* Header */}
+                        <View className="flex-row justify-between items-center p-6 pb-4">
+                            <Text className="text-2xl font-bold text-slate-900">Manager</Text>
+                            <TouchableOpacity onPress={closeModal} className="p-2 bg-slate-100 rounded-full">
+                                <IconSymbol name="xmark" size={20} color="#1A1A1A" />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Tab Content Carousel - Swipeable */}
+                        <View style={{ flex: 1, overflow: 'hidden', width: SCREEN_WIDTH }}>
+                            <Animated.View 
+                                {...panResponder.panHandlers}
+                                style={{
+                                    flexDirection: 'row',
+                                    width: SCREEN_WIDTH * tabs.length,
+                                    height: '100%',
+                                    transform: [{ translateX: tabScrollX }],
+                                }}
+                            >
+                                {/* Tab order: Penpal (0), My Status (1), My Clubs (2) */}
+                                <View style={{ width: SCREEN_WIDTH, paddingHorizontal: 24 }}>
+                                    {renderPenpalTab()}
+                                </View>
+                                <View style={{ width: SCREEN_WIDTH, paddingHorizontal: 24 }}>
+                                    {renderStatusTab()}
+                                </View>
+                                <View style={{ width: SCREEN_WIDTH, paddingHorizontal: 24 }}>
+                                    {renderClubsTab()}
+                                </View>
+                            </Animated.View>
+                        </View>
+
+                        {/* Send Buttons - Above Tabs */}
+                        {activeTab === 'status' && (
+                            <View className="mx-6 mb-4 items-center">
+                                {/* Radiating ring animation */}
+                                {!updating && (
+                                    <Animated.View
+                                        style={{
+                                            position: 'absolute',
+                                            width: 64,
+                                            height: 64,
+                                            borderRadius: 32,
+                                            borderWidth: 2,
+                                            borderColor: getButtonColor(),
+                                            opacity: pulseAnim.interpolate({
+                                                inputRange: [1, 1.15],
+                                                outputRange: [0.3, 0],
+                                            }),
+                                            transform: [{ scale: pulseAnim }],
+                                        }}
+                                    />
+                                )}
+                                
+                                <TouchableOpacity 
+                                    onPress={submitStatus}
+                                    disabled={updating}
+                                    className="w-16 h-16 rounded-full items-center justify-center shadow-lg active:scale-95"
+                                    style={{
+                                        backgroundColor: getButtonColor(),
+                                        transform: [{ scale: pulseScale }],
+                                    }}
+                                >
+                                    <IconSymbol name="arrow.up" size={28} color="white" />
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                        
+                        {activeTab === 'clubs' && selectedClub && (
+                            <View className="mx-6 mb-4">
+                                <TouchableOpacity
+                                    onPress={createForumPost}
+                                    disabled={creatingPost || !forumTitle.trim() || !forumContent.trim()}
+                                    className="bg-blue-600 w-full py-4 rounded-xl items-center shadow-lg"
+                                    style={{
+                                        opacity: (!forumTitle.trim() || !forumContent.trim()) ? 0.5 : 1
+                                    }}
+                                >
+                                    {creatingPost ? (
+                                        <ActivityIndicator size="small" color="white" />
+                                    ) : (
+                                        <Text className="text-white font-bold text-base">Post to Forum</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                        {activeTab === 'penpal' && (
+                            <View className="mx-6 mb-4">
+                                <TouchableOpacity
+                                    onPress={sendPenpal}
+                                    disabled={sendingPenpal}
+                                    className="bg-indigo-600 w-full py-4 rounded-xl items-center shadow-lg"
+                                >
+                                    {sendingPenpal ? (
+                                        <ActivityIndicator color="white" />
+                                    ) : (
+                                        <Text className="text-white font-bold text-lg">Send to Random Penpal</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
+                        {/* Tab Selector - Glassy Slider at Bottom */}
+                        <View 
+                            className="mx-6 mb-6 rounded-2xl overflow-hidden"
+                            style={{
+                                backgroundColor: '#F8FAFC', // Slate-50
+                                borderWidth: 1,
+                                borderColor: '#E2E8F0', // Slate-200
+                                shadowColor: '#64748B', // Slate-500
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.05,
+                                shadowRadius: 8,
+                                elevation: 2,
+                            }}
+                        >
+                            <View className="flex-row relative" style={{ padding: 4 }}>
+                                {/* Glassy sliding indicator */}
                                 <Animated.View
                                     style={{
                                         position: 'absolute',
-                                        width: 64,
-                                        height: 64,
-                                        borderRadius: 32,
-                                        borderWidth: 2,
-                                        borderColor: getButtonColor(),
-                                        opacity: pulseAnim.interpolate({
-                                            inputRange: [1, 1.15],
-                                            outputRange: [0.3, 0],
-                                        }),
-                                        transform: [{ scale: pulseAnim }],
+                                        top: 4,
+                                        bottom: 4,
+                                        width: (SCREEN_WIDTH - 48 - 8) / tabs.length,
+                                        backgroundColor: '#FFFFFF',
+                                        borderRadius: 14, // Slightly rounded
+                                        borderWidth: 1,
+                                        borderColor: '#E2E8F0', // Slate-200
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 1 },
+                                        shadowOpacity: 0.05,
+                                        shadowRadius: 2,
+                                        elevation: 1,
+                                        transform: [{
+                                            translateX: tabScrollX.interpolate({
+                                                // inputRange must be ascending: from last tab to first tab
+                                                inputRange: [
+                                                    -(tabs.length - 1) * SCREEN_WIDTH, // clubs
+                                                    -1 * SCREEN_WIDTH, // status
+                                                    0 // penpal
+                                                ],
+                                                // outputRange: indicator position for each tab
+                                                outputRange: [
+                                                    2 * ((SCREEN_WIDTH - 48 - 8) / tabs.length) + 4, // clubs position
+                                                    1 * ((SCREEN_WIDTH - 48 - 8) / tabs.length) + 4, // status position
+                                                    4 // penpal position
+                                                ],
+                                                extrapolate: 'clamp',
+                                            })
+                                        }],
                                     }}
                                 />
-                            )}
-                            
-                            <TouchableOpacity 
-                                onPress={submitStatus}
-                                disabled={updating}
-                                className="w-16 h-16 rounded-full items-center justify-center shadow-lg active:scale-95"
-                                style={{
-                                    backgroundColor: getButtonColor(),
-                                    transform: [{ scale: pulseScale }],
-                                }}
-                            >
-                                <IconSymbol name="arrow.up" size={28} color="white" />
-                            </TouchableOpacity>
+                                
+                                {/* Tab buttons */}
+                                {tabs.map((tab, index) => {
+                                    const isActive = activeTab === tab;
+                                    const tabNames = {
+                                        penpal: 'Penpal',
+                                        status: 'My Status',
+                                        clubs: 'My Clubs'
+                                    };
+                                    return (
+                                        <TouchableOpacity
+                                            key={tab}
+                                            onPress={() => changeTab(tab, index)}
+                                            className="flex-1 py-3 items-center"
+                                            activeOpacity={0.7}
+                                            style={{ zIndex: 1 }}
+                                        >
+                                            <Text className={`text-sm ${
+                                                isActive ? 'font-bold text-slate-900' : 'font-medium text-slate-600'
+                                            }`}>
+                                                {tabNames[tab]}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
                         </View>
                       </View>
                   </TouchableWithoutFeedback>
@@ -582,6 +1223,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
         }}
         onPhotoTaken={handleCameraPhoto}
         slideFromRight={cameraFromSwipe}
+        source={cameraSource}
       />
 
       {/* Status Preview Modal - Shows how others see your status */}
@@ -763,7 +1405,7 @@ function StatusPreviewModal({
                                 <View className="flex-row items-center">
                                     <Text className="text-gray-300 text-[10px] font-semibold shadow-sm">@{displayProfile.username}</Text>
                                     {currentStatus && (
-                                        <Text className="text-gray-400 text-[9px] ml-2 shadow-sm">
+                                        <Text className="text-slate-400 text-[9px] ml-2 shadow-sm">
                                             • {formatTimeAgo(currentStatus.created_at)}
                                         </Text>
                                     )}

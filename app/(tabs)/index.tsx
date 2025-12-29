@@ -2,6 +2,7 @@ import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, FlatList, Image, LayoutAnimation, Modal, PanResponder, Platform, RefreshControl, Switch, Text, TouchableOpacity, UIManager, View } from 'react-native';
@@ -35,7 +36,9 @@ export default function HomeScreen() {
 
   // Scroll Animation
   const scrollY = useRef(new Animated.Value(0)).current;
-  const HEADER_HEIGHT = 280;
+  const STICKY_HEADER_HEIGHT = Platform.OS === 'ios' ? 86 : 56; // Height of fixed sticky header (reduced paddingBottom)
+  const ANIMATED_HEADER_HEIGHT = 140; // Height of scrollable animated header section (reduced from 220)
+  const HEADER_HEIGHT = STICKY_HEADER_HEIGHT + ANIMATED_HEADER_HEIGHT; // Total header height
   
   // Fix for bounce: clamp scrollY to non-negative
   const clampedScrollY = scrollY.interpolate({
@@ -45,10 +48,10 @@ export default function HomeScreen() {
   });
 
   // @ts-ignore - diffClamp is available but TypeScript types may not include it
-  const diffClamp = Animated.diffClamp(clampedScrollY, 0, HEADER_HEIGHT);
+  const diffClamp = Animated.diffClamp(clampedScrollY, 0, ANIMATED_HEADER_HEIGHT);
   const translateY = diffClamp.interpolate({
-    inputRange: [0, HEADER_HEIGHT],
-    outputRange: [0, -HEADER_HEIGHT],
+    inputRange: [0, ANIMATED_HEADER_HEIGHT],
+    outputRange: [0, -ANIMATED_HEADER_HEIGHT],
   });
 
   // Status Preview State
@@ -354,7 +357,7 @@ export default function HomeScreen() {
         }
         // Swipe right from left edge (dx > 0) to open camera
         else if (gestureState.dx > 100 && isFromLeftEdge) {
-          openCamera(true); // Pass true to indicate it's from swipe
+          openCamera(true, 'proxy'); // Pass true to indicate it's from swipe, and 'proxy' as source
         }
         
         // Reset initial touch position
@@ -395,9 +398,26 @@ export default function HomeScreen() {
     const commonInterests = getCommonInterests(item.detailed_interests);
 
     return (
-      <View className={`mb-6 rounded-3xl overflow-hidden border ${isConnected ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-100 shadow-sm'}`}>
+      <View 
+        className={`mb-6 rounded-3xl overflow-hidden ${isConnected ? 'bg-gray-50' : 'bg-white'} shadow-sm`}
+        style={{
+          borderWidth: 1,
+          borderColor: 'rgba(148, 163, 184, 0.2)', // Slate-400 with low opacity for glass effect
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+          elevation: 2,
+        }}
+      >
         {/* Header: Name, Intent, Status */}
-        <View className="px-4 py-3 flex-row items-center justify-between bg-white/50 border-b border-gray-50">
+        <View 
+          className="px-4 py-3 flex-row items-center justify-between bg-white/50"
+          style={{
+            borderBottomWidth: 1,
+            borderBottomColor: 'rgba(148, 163, 184, 0.15)', // Glass morphism border
+          }}
+        >
             <View className="flex-1 pr-2 justify-center">
                 <View className="flex-row items-center mb-1">
                     <TouchableOpacity onPress={() => openProfile(item)}>
@@ -491,7 +511,19 @@ export default function HomeScreen() {
             {topInterests.length > 0 && (
                 <View className="flex-row flex-wrap mb-4">
                     {topInterests.slice(0, 3).map((tag, idx) => (
-                        <View key={idx} className="bg-white px-2 py-1 rounded-md mr-2 mb-1 border border-gray-200">
+                        <View 
+                          key={idx} 
+                          className="bg-white px-2 py-1 rounded-md mr-2 mb-1"
+                          style={{
+                            borderWidth: 1,
+                            borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: 1 },
+                            shadowOpacity: 0.05,
+                            shadowRadius: 3,
+                            elevation: 1,
+                          }}
+                        >
                             <Text className="text-gray-600 text-xs font-medium">#{tag.split(': ').pop()}</Text>
                         </View>
                     ))}
@@ -534,48 +566,118 @@ export default function HomeScreen() {
   };
 
   return (
-    <View className="flex-1 bg-paper" {...panResponder.panHandlers}>
-      {/* Animated Header */}
-      <Animated.View 
+    <View className="flex-1 bg-white" {...panResponder.panHandlers}>
+      {/* Fixed Sticky Header - Always Visible */}
+      <View 
         style={{ 
             position: 'absolute', 
             top: 0, 
             left: 0, 
             right: 0, 
+            zIndex: 200,
+            paddingTop: Platform.OS === 'ios' ? 50 : 20,
+            paddingBottom: 8,
+            paddingHorizontal: 16,
+            backgroundColor: '#F8FAFC', // Slate-50 background
+            overflow: 'hidden',
+            borderBottomWidth: 0,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.05,
+            shadowRadius: 3,
+        }}
+      >
+          {/* Clean Modern Gradient Backdrop - Subtle Overlay */}
+          <LinearGradient
+            colors={[
+              '#FFFFFF',
+              '#F1F5F9',
+              '#E2E8F0',
+              '#F1F5F9',
+              '#FFFFFF',
+            ]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            locations={[0, 0.3, 0.5, 0.7, 1]}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+            }}
+          />
+
+          <View className="flex-row items-center" style={{ position: 'relative', minHeight: 40, zIndex: 1 }}>
+            {/* Camera Icon (Left) - Fixed width */}
+            <TouchableOpacity 
+              onPress={() => openCamera(true, 'proxy')}
+              className="w-10 h-10 items-center justify-center"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+                <IconSymbol name="camera.fill" size={24} color="#2D3748" />
+            </TouchableOpacity>
+            
+            {/* Proxme Title (Center) - Absolutely positioned for perfect centering */}
+            <View 
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 40,
+              }}
+            >
+              <ProxymeLogo />
+            </View>
+            
+            {/* Inbox Icon (Right) - Fixed width */}
+            <TouchableOpacity 
+              onPress={() => router.push('/requests')}
+              className="w-10 h-10 items-center justify-center ml-auto"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+                <View>
+                    <IconSymbol name="tray.fill" size={24} color="#2D3748" />
+                    {pendingRequestsCount > 0 && (
+                        <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 items-center justify-center border-2 border-white">
+                            <Text className="text-white text-[10px] font-bold">{pendingRequestsCount > 9 ? '9+' : String(pendingRequestsCount)}</Text>
+                        </View>
+                    )}
+                </View>
+            </TouchableOpacity>
+          </View>
+      </View>
+
+      {/* Animated Header - Scrolls with content */}
+      <Animated.View 
+        style={{ 
+            position: 'absolute', 
+            top: STICKY_HEADER_HEIGHT, 
+            left: 0, 
+            right: 0, 
             zIndex: 100, 
-            height: HEADER_HEIGHT,
+            height: ANIMATED_HEADER_HEIGHT,
             backgroundColor: '#F9FAFB',
             transform: [{ translateY }],
         }}
-        className="pt-12 px-4 shadow-sm"
+        className="px-4 pt-4 shadow-sm"
       >
-          <View className="mb-6 flex-row justify-between items-center">
-            <View className="flex-row items-center">
-                <Image 
-                  source={require('../../assets/images/icon.png')}
-                  style={{ width: 40, height: 40, borderRadius: 8 }}
-                  resizeMode="contain"
-                />
-            </View>
-            <View className="flex-row items-center space-x-4">
-                <TouchableOpacity onPress={() => router.push('/requests')} className="mr-4">
-                    <View>
-                        <IconSymbol name="tray.fill" size={24} color="#2D3748" />
-                        {pendingRequestsCount > 0 && (
-                            <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 items-center justify-center border-2 border-white">
-                                <Text className="text-white text-[10px] font-bold">{pendingRequestsCount > 9 ? '9+' : String(pendingRequestsCount)}</Text>
-                            </View>
-                        )}
-                    </View>
-                </TouchableOpacity>
-            </View>
-          </View>
-
-          <View className="flex-row mb-6 gap-3">
+          <View className="flex-row gap-3">
               <TouchableOpacity 
                 onPress={openModal}
                 activeOpacity={0.9}
-                className="flex-1 bg-white rounded-3xl border border-gray-100 p-3 shadow-sm h-28 justify-between"
+                className="flex-1 bg-white rounded-3xl p-3 shadow-sm h-28 justify-between"
+                style={{
+                  borderWidth: 1,
+                  borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.08,
+                  shadowRadius: 8,
+                  elevation: 3,
+                }}
               >
                   <View className="flex-row justify-between items-start">
                       <View className={`w-10 h-10 rounded-full items-center justify-center border ${currentStatus ? 'border-green-400 bg-gray-100' : 'border-gray-200 border-dashed bg-gray-50'}`}>
@@ -602,7 +704,20 @@ export default function HomeScreen() {
                   </View>
               </TouchableOpacity>
 
-              <View className="flex-1 bg-white rounded-3xl border border-gray-100 p-3 shadow-sm h-28 justify-between">
+              <TouchableOpacity 
+                onPress={() => toggleProxy(!isProxyActive)}
+                activeOpacity={0.9}
+                className="flex-1 bg-white rounded-3xl p-3 shadow-sm h-28 justify-between"
+                style={{
+                  borderWidth: 1,
+                  borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.08,
+                  shadowRadius: 8,
+                  elevation: 3,
+                }}
+              >
                   <View className="flex-row justify-between items-start">
                       <View className={`w-10 h-10 rounded-full items-center justify-center ${isProxyActive ? 'bg-green-50' : 'bg-gray-50'}`}>
                           <IconSymbol name={isProxyActive ? "location.fill" : "location.slash"} size={20} color={isProxyActive ? "#10B981" : "#9CA3AF"} />
@@ -622,10 +737,8 @@ export default function HomeScreen() {
                           {isProxyActive ? `Visible at ${getDisplayText(address)}.` : "Hidden from others."}
                       </Text>
                   </View>
-              </View>
+              </TouchableOpacity>
           </View>
-
-          <View className="h-[1px] bg-gray-200 mb-6 mx-2" />
       </Animated.View>
 
       <Animated.FlatList
@@ -636,13 +749,13 @@ export default function HomeScreen() {
             { useNativeDriver: true }
           )}
           scrollEventThrottle={16}
-          contentContainerStyle={{ paddingTop: HEADER_HEIGHT + 12, paddingBottom: 100, paddingHorizontal: 16 }}
+          contentContainerStyle={{ paddingTop: STICKY_HEADER_HEIGHT + ANIMATED_HEADER_HEIGHT + 8, paddingBottom: 100, paddingHorizontal: 16 }}
           refreshControl={
               <RefreshControl 
                 refreshing={loading} 
                 onRefresh={fetchProxyFeed} 
                 tintColor="#2D3748" 
-                progressViewOffset={HEADER_HEIGHT + 12}
+                progressViewOffset={STICKY_HEADER_HEIGHT + ANIMATED_HEADER_HEIGHT + 8}
               />
           }
           ListEmptyComponent={
@@ -682,6 +795,87 @@ export default function HomeScreen() {
              }
          }}
       />
+    </View>
+  );
+}
+
+// Proxyme Logo Component with Gradient Text
+function ProxymeLogo() {
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center', position: 'relative', paddingHorizontal: 8, paddingVertical: 4 }}>
+      {/* Gradient Text - Light slate to dark slate gradient for better readability */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+        <Text 
+          className="text-lg font-bold" 
+          style={{ 
+            fontFamily: 'LibertinusSans-Bold',
+            color: '#475569', // Slate-600 (light slate start)
+            letterSpacing: 0.3,
+          }}
+        >
+          p
+        </Text>
+        <Text 
+          className="text-lg font-bold" 
+          style={{ 
+            fontFamily: 'LibertinusSans-Bold',
+            color: '#334155', // Slate-700
+            letterSpacing: 0.3,
+          }}
+        >
+          r
+        </Text>
+        <Text 
+          className="text-lg font-bold" 
+          style={{ 
+            fontFamily: 'LibertinusSans-Bold',
+            color: '#1E293B', // Slate-800
+            letterSpacing: 0.3,
+          }}
+        >
+          o
+        </Text>
+        <Text 
+          className="text-lg font-bold" 
+          style={{ 
+            fontFamily: 'LibertinusSans-Bold',
+            color: '#0F172A', // Slate-900 (dark slate)
+            letterSpacing: 0.3,
+          }}
+        >
+          x
+        </Text>
+        <Text 
+          className="text-lg font-bold" 
+          style={{ 
+            fontFamily: 'LibertinusSans-Bold',
+            color: '#0F172A', // Slate-900
+            letterSpacing: 0.3,
+          }}
+        >
+          y
+        </Text>
+        <Text 
+          className="text-lg font-bold" 
+          style={{ 
+            fontFamily: 'LibertinusSans-Bold',
+            color: '#0F172A', // Slate-900
+            letterSpacing: 0.3,
+          }}
+        >
+          m
+        </Text>
+        <Text 
+          className="text-lg font-bold" 
+          style={{ 
+            fontFamily: 'LibertinusSans-Bold',
+            color: '#0F172A', // Slate-900
+            letterSpacing: 0.3,
+          }}
+        >
+          e
+        </Text>
+      </View>
     </View>
   );
 }
@@ -727,7 +921,7 @@ function StatusPreviewModal({ visible, profile, onClose }: { visible: boolean, p
     return (
         <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
              <TouchableOpacity style={{flex:1, backgroundColor:'rgba(0,0,0,0.8)', justifyContent:'center', padding: 24}} activeOpacity={1} onPress={onClose}>
-                  <TouchableOpacity activeOpacity={1} className="bg-white rounded-3xl overflow-hidden shadow-2xl w-full">
+                  <TouchableOpacity activeOpacity={1} className="bg-paper rounded-3xl overflow-hidden shadow-2xl w-full">
                        {profile.status_image_url && (
                            <View className="w-full aspect-square bg-gray-100">
                                <FeedImage path={profile.status_image_url} resizeMode="cover" />

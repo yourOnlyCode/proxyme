@@ -261,9 +261,14 @@ export default function EditProfileScreen() {
 
   const currentPlatformConfig = SOCIAL_PLATFORMS.find(p => p.id === selectedPlatform);
 
+  const Wrapper = Platform.OS === 'web' ? View : TouchableWithoutFeedback;
+  const wrapperProps = Platform.OS === 'web' 
+    ? {} 
+    : { onPress: Keyboard.dismiss, accessible: false };
+
   return (
     <View className="flex-1 bg-white">
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <Wrapper {...wrapperProps}>
         <View className="flex-1">
       {/* Custom Header */}
       <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: insets.top + 12, paddingBottom: 12 }}>
@@ -317,7 +322,14 @@ export default function EditProfileScreen() {
               className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
               returnKeyType="done"
               blurOnSubmit={true}
-              onSubmitEditing={() => Keyboard.dismiss()}
+              onSubmitEditing={() => {
+                if (Platform.OS !== 'web') Keyboard.dismiss();
+              }}
+              onFocus={(e) => {
+                if (Platform.OS === 'web') {
+                  e.stopPropagation();
+                }
+              }}
           />
         </View>
 
@@ -329,7 +341,14 @@ export default function EditProfileScreen() {
               className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
               returnKeyType="done"
               blurOnSubmit={true}
-              onSubmitEditing={() => Keyboard.dismiss()}
+              onSubmitEditing={() => {
+                if (Platform.OS !== 'web') Keyboard.dismiss();
+              }}
+              onFocus={(e) => {
+                if (Platform.OS === 'web') {
+                  e.stopPropagation();
+                }
+              }}
           />
         </View>
 
@@ -344,7 +363,14 @@ export default function EditProfileScreen() {
               style={{ textAlignVertical: 'top' }}
               returnKeyType="done"
               blurOnSubmit={true}
-              onSubmitEditing={() => Keyboard.dismiss()}
+              onSubmitEditing={() => {
+                if (Platform.OS !== 'web') Keyboard.dismiss();
+              }}
+              onFocus={(e) => {
+                if (Platform.OS === 'web') {
+                  e.stopPropagation();
+                }
+              }}
           />
         </View>
 
@@ -506,7 +532,14 @@ export default function EditProfileScreen() {
                                 autoCapitalize="none"
                                 returnKeyType="done"
                                 blurOnSubmit={true}
-                                onSubmitEditing={() => Keyboard.dismiss()}
+                                onSubmitEditing={() => {
+                                  if (Platform.OS !== 'web') Keyboard.dismiss();
+                                }}
+                                onFocus={(e) => {
+                                  if (Platform.OS === 'web') {
+                                    e.stopPropagation();
+                                  }
+                                }}
                                 className="bg-gray-50 p-5 rounded-2xl text-lg mb-6 border border-gray-200 text-ink"
                                 autoFocus
                             />
@@ -531,7 +564,7 @@ export default function EditProfileScreen() {
           </KeyboardAvoidingView>
         </Modal>
         </View>
-      </TouchableWithoutFeedback>
+      </Wrapper>
       <KeyboardToolbar />
     </View>
   );

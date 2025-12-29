@@ -60,70 +60,88 @@ export default function CityFeedScreen() {
     }
   }, [user]);
 
-  const fetchFeed = async () => {
-    if (!user || !location) return;
+  const fetchFeed = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    if (!location) {
+      setLoading(false);
+      setFeed([]);
+      return;
+    }
 
     setLoading(true);
 
-    const { data, error } = await supabase.rpc('get_city_users', {
-      lat: location.coords.latitude,
-      long: location.coords.longitude,
-      range_meters: CITY_RANGE
-    });
+    try {
+      const { data, error } = await supabase.rpc('get_city_users', {
+        lat: location.coords.latitude,
+        long: location.coords.longitude,
+        range_meters: CITY_RANGE
+      });
 
-    if (error) {
-      console.error('Error fetching city feed:', error);
-    } else if (data) {
-      // 1. Filter: Only show users with active statuses
-      let filtered = data.filter((u: FeedProfile) => u.statuses && u.statuses.length > 0);
+      if (error) {
+        console.error('Error fetching city feed:', error);
+        setFeed([]);
+      } else if (data) {
+        // 1. Filter: Only show users with active statuses
+        let filtered = data.filter((u: FeedProfile) => u.statuses && u.statuses.length > 0);
 
-      // 2. Sort: Top down based on Interest Match Score
-      if (myInterests) {
-          filtered.sort((a: FeedProfile, b: FeedProfile) => {
-              const scoreA = calculateRawMatchScore(a.detailed_interests);
-              const scoreB = calculateRawMatchScore(b.detailed_interests);
-              return scoreB - scoreA; // Descending order
-          });
-      }
+        // 2. Sort: Top down based on Interest Match Score
+        if (myInterests) {
+            filtered.sort((a: FeedProfile, b: FeedProfile) => {
+                const scoreA = calculateRawMatchScore(a.detailed_interests);
+                const scoreB = calculateRawMatchScore(b.detailed_interests);
+                return scoreB - scoreA; // Descending order
+            });
+        }
 
-      // 3. Fetch pending requests for each user
-      const userIds = filtered.map((u: FeedProfile) => u.id);
-      if (userIds.length > 0 && user) {
-          const { data: pendingData } = await supabase
-              .from('interests')
-              .select('id, sender_id, receiver_id, status')
-              .in('sender_id', [user.id, ...userIds])
-              .in('receiver_id', [user.id, ...userIds])
-              .in('status', ['pending']);
-          
-          // Create a map of user_id -> pending interest
-          const pendingMap = new Map<string, { id: string; isReceived: boolean }>();
-          pendingData?.forEach((interest: any) => {
-              if (interest.sender_id === user.id) {
-                  // User sent request to this person
-                  pendingMap.set(interest.receiver_id, { id: interest.id, isReceived: false });
-              } else if (interest.receiver_id === user.id) {
-                  // User received request from this person
-                  pendingMap.set(interest.sender_id, { id: interest.id, isReceived: true });
-              }
-          });
-          
-          // Add pending request info to each user
-          const enrichedFeed = filtered.map((u: FeedProfile) => {
-              const pending = pendingMap.get(u.id);
-              return {
-                  ...u,
-                  pending_request: pending ? { id: pending.id, is_received: pending.isReceived } : null
-              } as FeedProfile & { pending_request?: { id: string; is_received: boolean } | null };
-          });
-          
-          setFeed(enrichedFeed);
+        // 3. Fetch pending requests for each user
+        const userIds = filtered.map((u: FeedProfile) => u.id);
+        if (userIds.length > 0 && user) {
+            const { data: pendingData } = await supabase
+                .from('interests')
+                .select('id, sender_id, receiver_id, status')
+                .in('sender_id', [user.id, ...userIds])
+                .in('receiver_id', [user.id, ...userIds])
+                .in('status', ['pending']);
+            
+            // Create a map of user_id -> pending interest
+            const pendingMap = new Map<string, { id: string; isReceived: boolean }>();
+            pendingData?.forEach((interest: any) => {
+                if (interest.sender_id === user.id) {
+                    // User sent request to this person
+                    pendingMap.set(interest.receiver_id, { id: interest.id, isReceived: false });
+                } else if (interest.receiver_id === user.id) {
+                    // User received request from this person
+                    pendingMap.set(interest.sender_id, { id: interest.id, isReceived: true });
+                }
+            });
+            
+            // Add pending request info to each user
+            const enrichedFeed = filtered.map((u: FeedProfile) => {
+                const pending = pendingMap.get(u.id);
+                return {
+                    ...u,
+                    pending_request: pending ? { id: pending.id, is_received: pending.isReceived } : null
+                } as FeedProfile & { pending_request?: { id: string; is_received: boolean } | null };
+            });
+            
+            setFeed(enrichedFeed);
+        } else {
+            setFeed(filtered);
+        }
       } else {
-          setFeed(filtered);
+        setFeed([]);
       }
+    } catch (err) {
+      console.error('Error in fetchFeed:', err);
+      setFeed([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  };
+  }, [user, location, myInterests]);
 
   const calculateRawMatchScore = (userInterests: any) => {
       if (!myInterests || !userInterests) return 0;
@@ -178,18 +196,14 @@ export default function CityFeedScreen() {
   
   // Initial fetch on mount and when interests change
   useEffect(() => {
-    if (location) {
-      fetchFeed();
-    }
-  }, [myInterests]); // Only re-fetch when interests change (for re-sorting)
+    fetchFeed();
+  }, [fetchFeed]);
 
   // Refresh when tab comes into focus
   useFocusEffect(
     useCallback(() => {
-      if (location) {
-        fetchFeed();
-      }
-    }, [location])
+      fetchFeed();
+    }, [fetchFeed])
   );
 
   const sendInterest = async (targetUserId: string) => {

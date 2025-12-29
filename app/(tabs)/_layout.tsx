@@ -4,6 +4,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/lib/auth';
 import { useProxyLocation } from '@/lib/location';
 import { supabase } from '@/lib/supabase';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform, View } from 'react-native';
@@ -85,7 +86,8 @@ export default function TabLayout() {
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'messages'
+        table: 'messages',
+        filter: `receiver_id=eq.${user.id}`
       }, () => {
         fetchUnreadMessages();
       })
@@ -105,22 +107,41 @@ export default function TabLayout() {
           tabBarInactiveTintColor: '#9CA3AF', // Gray-400
           headerShown: false,
           tabBarStyle: {
-              backgroundColor: '#FFFFFF',
-              borderTopWidth: 0,
-              elevation: 10,
+              backgroundColor: 'transparent', // Transparent to show gradient backdrop
+              borderTopWidth: 0, // Remove hard border completely
+              elevation: 0, // Remove default Android elevation
               shadowColor: '#000',
-              shadowOffset: { width: 0, height: -2 },
-              shadowOpacity: 0.05,
-              shadowRadius: 10,
+              shadowOffset: { width: 0, height: -6 }, // Upward shadow creates motion blur effect
+              shadowOpacity: 0.1, // Slightly more visible for glossy effect
+              shadowRadius: 20, // Large blur radius for soft, diffused glow
               height: Platform.OS === 'ios' ? 88 : 60,
               paddingBottom: Platform.OS === 'ios' ? 28 : 8,
               paddingTop: 8,
+              overflow: 'visible',
           },
           tabBarLabelStyle: {
               fontWeight: '600',
               fontSize: 10,
-          }
-        }}>
+          },
+          tabBarBackground: () => (
+            <LinearGradient
+              colors={[
+                '#FFFFFF',
+                '#F1F5F9',
+                '#E2E8F0',
+                '#F1F5F9',
+                '#FFFFFF',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              locations={[0, 0.3, 0.5, 0.7, 1]}
+              style={{
+                flex: 1,
+              }}
+            />
+          ),
+        }}
+        >
         <Tabs.Screen
           name="index"
           options={{

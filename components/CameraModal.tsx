@@ -1,8 +1,8 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Image, Modal, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Dimensions, Image, Modal, PanResponder, Text, TouchableOpacity, View } from 'react-native';
 
 const getScreenDimensions = () => {
     const { width, height } = Dimensions.get('window');
@@ -13,12 +13,14 @@ export function CameraModal({
     visible, 
     onClose, 
     onPhotoTaken,
-    slideFromRight = false
+    slideFromRight = false,
+    source = 'status' // 'proxy' | 'status'
 }: { 
     visible: boolean; 
     onClose: () => void; 
     onPhotoTaken: (uri: string) => void;
     slideFromRight?: boolean;
+    source?: 'proxy' | 'status';
 }) {
     const [screenDimensions, setScreenDimensions] = useState(getScreenDimensions());
     const SCREEN_WIDTH = Math.max(Number(screenDimensions.width) || 0, 1);
@@ -29,6 +31,8 @@ export function CameraModal({
     const cameraRef = useRef<CameraView>(null);
     const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
     const slideAnim = useRef(new Animated.Value(0)).current;
+    const swipeAnim = useRef(new Animated.Value(0)).current;
+    const isClosing = useRef(false);
     
     // Update screen dimensions on mount and when window changes
     useEffect(() => {
@@ -64,7 +68,86 @@ export function CameraModal({
             // When not using slide animation, ensure it's at 0
             slideAnim.setValue(0);
         }
+        // Reset swipe animation when modal opens
+        if (visible) {
+            swipeAnim.setValue(0);
+            isClosing.current = false;
+        }
     }, [visible, slideFromRight, SCREEN_WIDTH]);
+
+    // PanResponder for swipe gestures - recreate when source or capturedPhoto changes
+    const panResponder = useMemo(
+        () => PanResponder.create({
+            onStartShouldSetPanResponder: () => !capturedPhoto, // Only respond when not in preview
+            onMoveShouldSetPanResponder: (_, gestureState) => {
+                if (capturedPhoto) return false;
+                // For proxy source: detect horizontal swipe (left)
+                if (source === 'proxy') {
+                    return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 10;
+                }
+                // For status source: detect vertical swipe (down)
+                if (source === 'status') {
+                    return Math.abs(gestureState.dy) > Math.abs(gestureState.dx) && gestureState.dy > 10;
+                }
+                return false;
+            },
+            onPanResponderMove: (_, gestureState) => {
+                if (isClosing.current) return;
+                
+                if (source === 'proxy') {
+                    // Swipe left to close (positive dx means moving left)
+                    if (gestureState.dx > 0) {
+                        swipeAnim.setValue(gestureState.dx);
+                    }
+                } else if (source === 'status') {
+                    // Swipe down to close (positive dy means moving down)
+                    if (gestureState.dy > 0) {
+                        swipeAnim.setValue(gestureState.dy);
+                    }
+                }
+            },
+            onPanResponderRelease: (_, gestureState) => {
+                if (isClosing.current) return;
+                
+                const threshold = 100;
+                
+                if (source === 'proxy' && gestureState.dx > threshold) {
+                    // Swipe left completed - close modal
+                    isClosing.current = true;
+                    const screenWidth = Number(SCREEN_WIDTH) || 0;
+                    Animated.timing(swipeAnim, {
+                        toValue: screenWidth,
+                        duration: 200,
+                        useNativeDriver: true,
+                    }).start(() => {
+                        onClose();
+                        swipeAnim.setValue(0);
+                    });
+                } else if (source === 'status' && gestureState.dy > threshold) {
+                    // Swipe down completed - close modal
+                    isClosing.current = true;
+                    const screenHeight = Number(SCREEN_HEIGHT) || 0;
+                    Animated.timing(swipeAnim, {
+                        toValue: screenHeight,
+                        duration: 200,
+                        useNativeDriver: true,
+                    }).start(() => {
+                        onClose();
+                        swipeAnim.setValue(0);
+                    });
+                } else {
+                    // Snap back to original position
+                    Animated.spring(swipeAnim, {
+                        toValue: 0,
+                        useNativeDriver: true,
+                        tension: 50,
+                        friction: 7,
+                    }).start();
+                }
+            },
+        }),
+        [source, capturedPhoto, SCREEN_WIDTH, SCREEN_HEIGHT, swipeAnim, onClose]
+    );
 
     if (!visible) {
         return null;
@@ -298,6 +381,10 @@ export function CameraModal({
     }
 
     if (slideFromRight) {
+        const transformStyle = source === 'proxy' 
+            ? [{ translateX: Animated.add(slideAnim, swipeAnim) }]
+            : [{ translateX: slideAnim }, { translateY: swipeAnim }];
+        
         return (
             <Modal 
                 visible={visible} 
@@ -307,44 +394,49 @@ export function CameraModal({
             >
                 <Animated.View 
                     className="flex-1 bg-black"
-                    style={{ transform: [{ translateX: slideAnim }] }}
+                    style={{ transform: transformStyle }}
+                    {...panResponder.panHandlers}
                 >
                     <CameraView
                         ref={cameraRef}
                         style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
                         facing={facing}
                     />
-                    
-                    {/* Top Controls */}
-                    <View className="absolute top-12 left-0 right-0 flex-row justify-start items-center px-4">
+
+                    {/* Bottom Controls - Reorganized */}
+                    <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
+                        {/* X Button - Left of capture */}
                         <TouchableOpacity 
                             onPress={onClose}
-                            className="bg-black/50 p-3 rounded-full"
+                            className="bg-black/50 p-3 rounded-full mr-8"
                         >
                             <IconSymbol name="xmark" size={24} color="white" />
                         </TouchableOpacity>
-                    </View>
-
-                    {/* Bottom Controls */}
-                    <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
-                        <TouchableOpacity 
-                            onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
-                            className="bg-black/50 p-3 rounded-full mr-8"
-                        >
-                            <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
-                        </TouchableOpacity>
+                        
+                        {/* Capture Button - Center */}
                         <TouchableOpacity 
                             onPress={takePicture}
                             className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 items-center justify-center"
                         >
                             <View className="w-16 h-16 rounded-full bg-white" />
                         </TouchableOpacity>
-                        <View className="w-20" />
+                        
+                        {/* Front/Back Toggle - Right of capture */}
+                        <TouchableOpacity 
+                            onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+                            className="bg-black/50 p-3 rounded-full ml-8"
+                        >
+                            <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
+                        </TouchableOpacity>
                     </View>
                 </Animated.View>
             </Modal>
         );
     }
+
+    const transformStyle = source === 'status' 
+        ? [{ translateY: swipeAnim }]
+        : [];
 
     return (
         <Modal 
@@ -353,40 +445,44 @@ export function CameraModal({
             transparent={false}
             statusBarTranslucent
         >
-            <View className="flex-1 bg-black">
+            <Animated.View 
+                className="flex-1 bg-black"
+                style={{ transform: transformStyle }}
+                {...panResponder.panHandlers}
+            >
                 <CameraView
                     ref={cameraRef}
                     style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
                     facing={facing}
                 />
-                
-                {/* Top Controls */}
-                <View className="absolute top-12 left-0 right-0 flex-row justify-start items-center px-4">
+
+                {/* Bottom Controls - Reorganized */}
+                <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
+                    {/* X Button - Left of capture */}
                     <TouchableOpacity 
                         onPress={onClose}
-                        className="bg-black/50 p-3 rounded-full"
+                        className="bg-black/50 p-3 rounded-full mr-8"
                     >
                         <IconSymbol name="xmark" size={24} color="white" />
                     </TouchableOpacity>
-                </View>
-
-                {/* Bottom Controls */}
-                <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
-                    <TouchableOpacity 
-                        onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
-                        className="bg-black/50 p-3 rounded-full mr-8"
-                    >
-                        <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
-                    </TouchableOpacity>
+                    
+                    {/* Capture Button - Center */}
                     <TouchableOpacity 
                         onPress={takePicture}
                         className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 items-center justify-center"
                     >
                         <View className="w-16 h-16 rounded-full bg-white" />
                     </TouchableOpacity>
-                    <View className="w-20" />
+                    
+                    {/* Front/Back Toggle - Right of capture */}
+                    <TouchableOpacity 
+                        onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+                        className="bg-black/50 p-3 rounded-full ml-8"
+                    >
+                        <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
+                    </TouchableOpacity>
                 </View>
-            </View>
+            </Animated.View>
         </Modal>
     );
 }

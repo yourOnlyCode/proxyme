@@ -49,16 +49,61 @@ serve(async (req) => {
       targetUserId = record.receiver_id;
       title = "New Connection Request";
       body = "Someone wants to connect with you!";
-      data = { url: "/(tabs)/interests" };
+      data = { url: "/requests" };
     } 
     // Interest Accepted
     else if (record.status === "accepted") {
       // Notify the SENDER that their request was accepted
-      // (Wait, 'record' is the new state. If status changed to accepted, notify sender)
       targetUserId = record.sender_id;
       title = "Connection Accepted!";
       body = "You can now chat.";
       data = { url: `/chat/${record.id}` };
+    }
+  } else if (table === "notifications") {
+    // All notifications (club, event, connection, etc.)
+    targetUserId = record.user_id;
+    title = record.title;
+    body = record.body;
+    
+    // Build URL based on notification type
+    if (record.type === "forum_reply" && record.data?.club_id && record.data?.topic_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=forum&topic=${record.data.topic_id}` };
+    } else if (record.type === "club_event" && record.data?.club_id && record.data?.event_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=events` };
+    } else if (record.type === "club_member" && record.data?.club_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=members` };
+    } else if (record.type === "event_rsvp" && record.data?.club_id && record.data?.event_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+    } else if (record.type === "event_rsvp_update" && record.data?.club_id && record.data?.event_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+    } else if (record.type === "event_update" && record.data?.club_id && record.data?.event_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+    } else if (record.type === "event_reminder" && record.data?.club_id && record.data?.event_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+    } else if (record.type === "event_cancelled" && record.data?.club_id) {
+      data = { url: `/clubs/${record.data.club_id}?tab=events` };
+    } else {
+      data = { url: "/requests" };
+    }
+  } else if (table === "club_forum_replies") {
+    // Forum reply - notification will be created by trigger, but we can also send push
+    const { data: topic } = await supabase
+      .from("club_forum_topics")
+      .select("created_by, title, club_id")
+      .eq("id", record.topic_id)
+      .single();
+    
+    if (topic && topic.created_by !== record.created_by) {
+      targetUserId = topic.created_by;
+      const { data: replier } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", record.created_by)
+        .single();
+      
+      title = "New Reply to Your Post";
+      body = `${replier?.username || "Someone"} replied to "${topic.title}"`;
+      data = { url: `/clubs/${topic.club_id}?tab=forum&topic=${record.topic_id}` };
     }
   }
 

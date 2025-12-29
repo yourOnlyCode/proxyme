@@ -1,13 +1,9 @@
+import EventCard from '@/components/club/EventCard';
 import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
+import Avatar from '@/components/profile/Avatar';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import Avatar from '@/components/profile/Avatar';
-import ClubForumTab from '@/components/club/ClubForumTab';
-import ClubEventsTab from '@/components/club/ClubEventsTab';
-import ClubMembersTab from '@/components/club/ClubMembersTab';
-import ClubSettingsTab from '@/components/club/ClubSettingsTab';
-import EventCard from '@/components/club/EventCard';
-import { ClubDetail, ClubMember, ForumTopic, ForumReply, ClubEvent } from '@/lib/types';
+import { ClubDetail, ClubEvent, ClubMember, ForumReply, ForumTopic } from '@/lib/types';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Calendar from 'expo-calendar';
 import * as Notifications from 'expo-notifications';
@@ -205,6 +201,7 @@ export default function ClubDetailScreen() {
             event: '*',
             schema: 'public',
             table: 'club_event_rsvps',
+            filter: `club_id=eq.${id}`
         }, () => {
             // Refresh events to update RSVP counts
             fetchEvents();

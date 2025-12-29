@@ -1,6 +1,6 @@
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Image, Keyboard, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Keyboard, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
 export default function SignIn() {
@@ -30,8 +30,13 @@ export default function SignIn() {
     setLoading(false);
   }
 
+  const Wrapper = Platform.OS === 'web' ? View : TouchableWithoutFeedback;
+  const wrapperProps = Platform.OS === 'web' 
+    ? {} 
+    : { onPress: Keyboard.dismiss, accessible: false };
+
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+    <Wrapper {...wrapperProps}>
       <View className="flex-1 justify-center px-8 bg-white">
       <View className="items-center mb-8">
         <Image 
@@ -51,7 +56,14 @@ export default function SignIn() {
           onChangeText={setEmail}
           returnKeyType="next"
           blurOnSubmit={false}
-          onSubmitEditing={() => Keyboard.dismiss()}
+          onSubmitEditing={() => {
+            if (Platform.OS !== 'web') Keyboard.dismiss();
+          }}
+          onFocus={(e) => {
+            if (Platform.OS === 'web') {
+              e.stopPropagation();
+            }
+          }}
         />
         <TextInput
           className="border border-gray-300 rounded-lg p-4 text-base mb-6 text-black"
@@ -63,8 +75,13 @@ export default function SignIn() {
           returnKeyType="done"
           blurOnSubmit={true}
           onSubmitEditing={() => {
-            Keyboard.dismiss();
+            if (Platform.OS !== 'web') Keyboard.dismiss();
             signInWithEmail();
+          }}
+          onFocus={(e) => {
+            if (Platform.OS === 'web') {
+              e.stopPropagation();
+            }
           }}
         />
         
@@ -90,6 +107,6 @@ export default function SignIn() {
         </View>
       </View>
       </View>
-    </TouchableWithoutFeedback>
+    </Wrapper>
   );
 }

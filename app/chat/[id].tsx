@@ -277,6 +277,11 @@ export default function ChatScreen() {
                   returnKeyType="send"
                   onSubmitEditing={sendMessage}
                   blurOnSubmit={false}
+                  onFocus={(e) => {
+                    if (Platform.OS === 'web') {
+                      e.stopPropagation();
+                    }
+                  }}
               />
               <TouchableOpacity onPress={sendMessage} disabled={!newMessage.trim()}>
                   <Text className={`font-bold ${newMessage.trim() ? 'text-business' : 'text-gray-400'}`}>Send</Text>

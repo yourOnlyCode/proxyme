@@ -29,8 +29,10 @@ export const Colors = {
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
+    /** Libertinus Sans as default font */
+    sans: 'LibertinusSans-Regular',
+    sansBold: 'LibertinusSans-Bold',
+    sansItalic: 'LibertinusSans-Italic',
     /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
     /** iOS `UIFontDescriptorSystemDesignRounded` */
@@ -39,13 +41,17 @@ export const Fonts = Platform.select({
     mono: 'ui-monospace',
   },
   default: {
-    sans: 'normal',
+    sans: 'LibertinusSans-Regular',
+    sansBold: 'LibertinusSans-Bold',
+    sansItalic: 'LibertinusSans-Italic',
     serif: 'serif',
     rounded: 'normal',
     mono: 'monospace',
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sans: "'Libertinus Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sansBold: "'Libertinus Sans Bold', system-ui, sans-serif",
+    sansItalic: "'Libertinus Sans Italic', system-ui, sans-serif",
     serif: "Georgia, 'Times New Roman', serif",
     rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Proxy",
     "slug": "proxy-business",
-    "version": "1.3.2",
+    "version": "1.3.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "proxybusiness",
@@ -37,8 +37,24 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "bundler": "metro",
+      "name": "Proxy",
+      "shortName": "Proxy",
+      "lang": "en",
+      "themeColor": "#E6F4FE",
+      "backgroundColor": "#ffffff",
+      "display": "standalone",
+      "startUrl": "/",
+      "description": "Connect with people nearby",
+      "meta": {
+        "apple-mobile-web-app-capable": "yes",
+        "apple-mobile-web-app-status-bar-style": "black-translucent"
+      }
     },
+    "assetBundlePatterns": [
+      "assets/fonts/*"
+    ],
     "plugins": [
       "expo-router",
       [

@@ -18,17 +18,32 @@ type Interest = {
   created_at: string;
 };
 
+type Notification = {
+  id: string;
+  type: 'forum_reply' | 'club_event' | 'club_member' | 'connection_request' | 'connection_accepted' | 'message' | 'event_rsvp' | 'event_rsvp_update' | 'event_update' | 'event_reminder' | 'event_cancelled';
+  title: string;
+  body: string;
+  data: any;
+  read: boolean;
+  created_at: string;
+};
+
 export default function RequestsScreen() {
   const { user } = useAuth();
   const [incoming, setIncoming] = useState<Interest[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'requests' | 'notifications'>('requests');
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
   const [selectedInterestId, setSelectedInterestId] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    if (user) fetchData();
+    if (user) {
+      fetchData();
+      fetchNotifications();
+    }
   }, [user]);
 
   const fetchData = async () => {
@@ -49,6 +64,52 @@ export default function RequestsScreen() {
       
     if (data) setIncoming(data as any);
     setLoading(false);
+  };
+
+  const fetchNotifications = async () => {
+    if (!user) return;
+    
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    
+    if (data) setNotifications(data as Notification[]);
+  };
+
+  const markNotificationAsRead = async (notificationId: string) => {
+    await supabase
+      .from('notifications')
+      .update({ read: true, read_at: new Date().toISOString() })
+      .eq('id', notificationId);
+    
+    setNotifications(prev => prev.map(n => 
+      n.id === notificationId ? { ...n, read: true } : n
+    ));
+  };
+
+  const handleNotificationPress = async (notification: Notification) => {
+    await markNotificationAsRead(notification.id);
+    
+    if (notification.type === 'forum_reply' && notification.data?.club_id) {
+      router.push(`/clubs/${notification.data.club_id}${notification.data.topic_id ? `?tab=forum&topic=${notification.data.topic_id}` : ''}`);
+    } else if (notification.type === 'club_event' && notification.data?.club_id) {
+      router.push(`/clubs/${notification.data.club_id}?tab=events${notification.data.event_id ? `&event=${notification.data.event_id}` : ''}`);
+    } else if (notification.type === 'club_member' && notification.data?.club_id) {
+      router.push(`/clubs/${notification.data.club_id}?tab=members`);
+    } else if (notification.type === 'event_rsvp' && notification.data?.club_id && notification.data?.event_id) {
+      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+    } else if (notification.type === 'event_rsvp_update' && notification.data?.club_id && notification.data?.event_id) {
+      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+    } else if (notification.type === 'event_update' && notification.data?.club_id && notification.data?.event_id) {
+      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+    } else if (notification.type === 'event_reminder' && notification.data?.club_id && notification.data?.event_id) {
+      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+    } else if (notification.type === 'event_cancelled' && notification.data?.club_id) {
+      router.push(`/clubs/${notification.data.club_id}?tab=events`);
+    }
   };
 
   const openProfile = async (userId: string, interestId: string) => {
@@ -154,20 +215,72 @@ export default function RequestsScreen() {
           <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
               <IconSymbol name="chevron.left" size={28} color="#1A1A1A" />
           </TouchableOpacity>
-          <Text className="text-3xl font-bold flex-1 text-center pr-8">Requests</Text>
+          <Text className="text-3xl font-bold flex-1 text-center pr-8">Inbox</Text>
       </View>
 
-      <FlatList
-        data={incoming}
-        keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} />}
-        renderItem={renderIncoming}
-        ListEmptyComponent={
-            <View className="items-center mt-10">
-                <Text className="text-gray-400 text-lg">No new requests.</Text>
-            </View>
-        }
-      />
+      {/* Tab Selector */}
+      <View className="flex-row mb-4 bg-white rounded-xl p-1">
+        <TouchableOpacity
+          onPress={() => setActiveTab('requests')}
+          className={`flex-1 py-2 rounded-lg ${activeTab === 'requests' ? 'bg-blue-600' : ''}`}
+        >
+          <Text className={`text-center font-bold ${activeTab === 'requests' ? 'text-white' : 'text-gray-600'}`}>
+            Requests {incoming.length > 0 && `(${incoming.length})`}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setActiveTab('notifications')}
+          className={`flex-1 py-2 rounded-lg ${activeTab === 'notifications' ? 'bg-blue-600' : ''}`}
+        >
+          <Text className={`text-center font-bold ${activeTab === 'notifications' ? 'text-white' : 'text-gray-600'}`}>
+            Notifications {notifications.filter(n => !n.read).length > 0 && `(${notifications.filter(n => !n.read).length})`}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === 'requests' ? (
+        <FlatList
+          data={incoming}
+          keyExtractor={(item) => item.id}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} />}
+          renderItem={renderIncoming}
+          ListEmptyComponent={
+              <View className="items-center mt-10">
+                  <Text className="text-gray-400 text-lg">No new requests.</Text>
+              </View>
+          }
+        />
+      ) : (
+        <FlatList
+          data={notifications}
+          keyExtractor={(item) => item.id}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchNotifications} />}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              onPress={() => handleNotificationPress(item)}
+              className={`flex-row items-center justify-between bg-white p-4 rounded-xl mb-3 shadow-sm border ${item.read ? 'border-gray-100' : 'border-blue-200 bg-blue-50'}`}
+            >
+              <View className="flex-1 mr-3">
+                <Text className={`font-bold text-base ${item.read ? 'text-gray-700' : 'text-ink'}`}>
+                  {item.title}
+                </Text>
+                <Text className="text-gray-600 text-sm mt-1">{item.body}</Text>
+                <Text className="text-gray-400 text-xs mt-1">
+                  {new Date(item.created_at).toLocaleDateString()}
+                </Text>
+              </View>
+              {!item.read && (
+                <View className="w-3 h-3 bg-blue-600 rounded-full" />
+              )}
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+              <View className="items-center mt-10">
+                  <Text className="text-gray-400 text-lg">No notifications.</Text>
+              </View>
+          }
+        />
+      )}
     </View>
   );
 }

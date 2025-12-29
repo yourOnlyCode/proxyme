@@ -4,6 +4,8 @@ import { ToastProvider } from '@/components/ui/ToastProvider';
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
+import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 import "../global.css";
@@ -13,6 +15,9 @@ import { registerForPushNotificationsAsync } from '../lib/push';
 import { supabase } from '../lib/supabase';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -24,8 +29,21 @@ function InitialLayout() {
   const router = useRouter();
   const colorScheme = useColorScheme();
 
+  // Load Libertinus Sans fonts
+  const [fontsLoaded, fontError] = useFonts({
+    'LibertinusSans-Regular': require('../assets/fonts/LibertinusSans-Regular.ttf'),
+    'LibertinusSans-Bold': require('../assets/fonts/LibertinusSans-Bold.ttf'),
+    'LibertinusSans-Italic': require('../assets/fonts/LibertinusSans-Italic.ttf'),
+  });
+
   useEffect(() => {
-    if (loading) return;
+    if (fontsLoaded || fontError) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    if (loading || !fontsLoaded) return;
 
     const inAuthGroup = segments[0] === '(auth)';
     const inOnboardingGroup = segments[0] === 'onboarding';
@@ -43,7 +61,7 @@ function InitialLayout() {
           }
       });
     }
-  }, [session, loading, segments]);
+  }, [session, loading, segments, fontsLoaded]);
 
   // Register for Push Notifications when user is logged in
   useEffect(() => {
@@ -52,7 +70,7 @@ function InitialLayout() {
       }
   }, [user]);
 
-  if (loading) {
+  if (loading || !fontsLoaded) {
      return null; 
   }
 

@@ -60,7 +60,16 @@ export default function InboxScreen() {
         .on('postgres_changes', {
           event: '*',
           schema: 'public',
-          table: 'messages'
+          table: 'messages',
+          filter: `receiver_id=eq.${user.id}`
+        }, () => {
+          fetchData();
+        })
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: `sender_id=eq.${user.id}`
         }, () => {
           fetchData();
         })

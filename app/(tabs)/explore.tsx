@@ -1,11 +1,10 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, Image, Linking, Modal, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Dimensions, Image, Linking, Modal, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
@@ -52,11 +51,8 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showFriendCode, setShowFriendCode] = useState(false);
-  const [highlightFriendCode, setHighlightFriendCode] = useState(false);
   const [showShareOptions, setShowShareOptions] = useState(false);
   const router = useRouter();
-  const highlightAnim = useRef(new Animated.Value(0)).current;
 
   const fetchProfile = async () => {
     if (!user) return;
@@ -93,51 +89,9 @@ export default function ProfileScreen() {
   useFocusEffect(
       useCallback(() => {
           fetchProfile();
-          // Check if we should highlight friend code (coming from referral popup)
-          const checkHighlight = async () => {
-            const shouldHighlight = await AsyncStorage.getItem('highlight_friend_code');
-            if (shouldHighlight === 'true') {
-              setShowFriendCode(true);
-              setHighlightFriendCode(true);
-              await AsyncStorage.removeItem('highlight_friend_code');
-              // Stop highlighting after 3 seconds
-              setTimeout(() => {
-                setHighlightFriendCode(false);
-              }, 3000);
-            }
-          };
-          checkHighlight();
       }, [user])
   );
 
-  // Animation for highlighting friend code
-  useEffect(() => {
-    if (highlightFriendCode) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(highlightAnim, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(highlightAnim, {
-            toValue: 0,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    }
-  }, [highlightFriendCode]);
-
-  const handleViewFriendCode = () => {
-    setShowFriendCode(true);
-    setHighlightFriendCode(true);
-    // Stop highlighting after 3 seconds
-    setTimeout(() => {
-      setHighlightFriendCode(false);
-    }, 3000);
-  };
 
   // Get share content with clickable links
   const getShareContent = () => {
@@ -189,169 +143,6 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleShareToInstagramStory = async () => {
-    const content = getShareContent();
-    if (!content) return;
-    
-    try {
-      // Copy friend code to clipboard
-      await Clipboard.setStringAsync(content.friendCode);
-      
-      // Try Instagram Stories deep link with link sticker
-      // Instagram Stories API allows adding link stickers via URL scheme
-      // Format: instagram://story-camera?mediaType=PHOTO&stickerMediaId=...
-      // However, for link stickers, we need to use the Creative Kit or try a different approach
-      
-      // Open Instagram Stories camera
-      // Note: Instagram Stories link stickers require the Creative Kit API (needs Facebook App ID)
-      // For now, we'll open the camera and copy the code - user can add link sticker manually
-      const canOpen = await Linking.canOpenURL('instagram://story-camera');
-      if (canOpen) {
-        await Linking.openURL('instagram://story-camera');
-        setShowShareOptions(false);
-        // Show toast with instructions
-        toast.show(`Friend code ${content.friendCode} copied! Paste it in your story, then tap the link sticker icon and add: ${content.appStoreLink}`, 'success');
-      } else {
-        // Instagram not installed, fallback to native share
-        await Share.share({
-          message: content.shareText,
-          title: 'Join me on Proxyme!',
-          url: content.appStoreLink,
-        });
-        setShowShareOptions(false);
-        toast.show(`Friend code ${content.friendCode} copied to clipboard!`, 'success');
-      }
-    } catch (error) {
-      console.error('Error sharing to Instagram Story:', error);
-      // Still copy to clipboard even if Instagram fails
-      try {
-        await Clipboard.setStringAsync(content.friendCode);
-        toast.show(`Friend code ${content.friendCode} copied to clipboard!`, 'success');
-      } catch (clipError) {
-        console.error('Error copying to clipboard:', clipError);
-      }
-      
-      // Fallback to native share
-      await Share.share({
-        message: content.shareText,
-        title: 'Join me on Proxyme!',
-        url: content.appStoreLink,
-      });
-      setShowShareOptions(false);
-    }
-  };
-
-  const handleShareToTikTokStory = async () => {
-    const content = getShareContent();
-    if (!content) return;
-    
-    try {
-      // Try TikTok deep link
-      const canOpen = await Linking.canOpenURL('tiktok://');
-      if (canOpen) {
-        // Open TikTok app
-        await Linking.openURL('tiktok://');
-        setShowShareOptions(false);
-        // Show share dialog with content
-        setTimeout(() => {
-          Share.share({
-            message: `My Proxyme friend code: ${content.friendCode}\n${content.appStoreLink}\n${content.deepLink}`,
-            title: 'Proxyme Friend Code',
-          });
-        }, 1000);
-      } else {
-        // Fallback to native share
-        await Share.share({
-          message: content.shareText,
-          title: 'Join me on Proxyme!',
-          url: content.appStoreLink,
-        });
-        setShowShareOptions(false);
-      }
-    } catch (error) {
-      console.error('Error sharing to TikTok:', error);
-      await Share.share({
-        message: content.shareText,
-        title: 'Join me on Proxyme!',
-        url: content.appStoreLink,
-      });
-      setShowShareOptions(false);
-    }
-  };
-
-  const handleShareToMessaging = useCallback(async () => {
-    const content = getShareContent();
-    if (!content) return;
-    
-    try {
-      // Use native share with messaging-specific text
-      await Share.share({
-        message: content.messagingText,
-        title: 'Join me on Proxyme!',
-        url: content.appStoreLink,
-      });
-      setShowShareOptions(false);
-    } catch (error) {
-      console.error('Error sharing to messaging:', error);
-      setShowShareOptions(false);
-    }
-  }, [profile?.friend_code]);
-
-  const handleShareToInstagramDM = async () => {
-    const content = getShareContent();
-    if (!content) return;
-    
-    try {
-      // Try Instagram DM deep link
-      const canOpen = await Linking.canOpenURL('instagram://direct-inbox');
-      if (canOpen) {
-        await Linking.openURL('instagram://direct-inbox');
-        setShowShareOptions(false);
-        // After opening, share the messaging text
-        setTimeout(() => {
-          Share.share({
-            message: content.messagingText,
-            title: 'Proxyme Friend Code',
-            url: content.appStoreLink,
-          });
-        }, 1000);
-      } else {
-        // Fallback to native share with messaging text
-        await Share.share({
-          message: content.messagingText,
-          title: 'Join me on Proxyme!',
-          url: content.appStoreLink,
-        });
-        setShowShareOptions(false);
-      }
-    } catch (error) {
-      console.error('Error sharing to Instagram DM:', error);
-      await Share.share({
-        message: content.messagingText,
-        title: 'Join me on Proxyme!',
-        url: content.appStoreLink,
-      });
-      setShowShareOptions(false);
-    }
-  };
-
-  const handleShareToTikTokDM = async () => {
-    const content = getShareContent();
-    if (!content) return;
-    
-    try {
-      // TikTok doesn't have a direct DM deep link, use native share with messaging text
-      await Share.share({
-        message: content.messagingText,
-        title: 'Join me on Proxyme!',
-        url: content.appStoreLink,
-      });
-      setShowShareOptions(false);
-    } catch (error) {
-      console.error('Error sharing to TikTok DM:', error);
-      setShowShareOptions(false);
-    }
-  };
 
   const openLink = (url: string) => {
       Linking.openURL(url).catch(err => console.error("Couldn't load page", err));
@@ -372,17 +163,17 @@ export default function ProfileScreen() {
           case 'Romance': return { bg: 'bg-romance/10', text: 'text-romance', border: 'border-romance/30', badge: 'bg-romance/20', icon: '#E07A5F' };
           case 'Friendship': return { bg: 'bg-friendship/10', text: 'text-friendship', border: 'border-friendship/30', badge: 'bg-friendship/20', icon: '#81B29A' };
           case 'Professional': return { bg: 'bg-business/10', text: 'text-business', border: 'border-business/30', badge: 'bg-business/20', icon: '#3D405B' };
-          default: return { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', badge: 'bg-gray-200', icon: '#718096' };
+          default: return { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200', badge: 'bg-slate-200', icon: '#718096' };
       }
   };
 
-  if (!profile && loading) return <View className="flex-1 bg-paper" />;
+  if (!profile && loading) return <View className="flex-1 bg-slate-50" />;
 
   const primaryGoal = profile?.relationship_goals?.[0];
   const theme = getTheme(primaryGoal);
 
   return (
-    <View className="flex-1 bg-paper">
+    <View className="flex-1 bg-slate-50">
         <ScrollView 
             refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchProfile} />}
             contentContainerStyle={{ paddingBottom: 40 }}
@@ -399,7 +190,7 @@ export default function ProfileScreen() {
                 
                 {/* Settings Button */}
                 <TouchableOpacity 
-                    className="absolute top-12 right-4 bg-white/90 p-2 rounded-full shadow-sm backdrop-blur-md"
+                    className="absolute top-12 right-4 bg-paper/90 p-2 rounded-full shadow-sm backdrop-blur-md"
                     onPress={() => router.push('/(settings)/edit-profile')}
                 >
                      <IconSymbol name="gear" size={24} color="#2D3748" />
@@ -408,13 +199,22 @@ export default function ProfileScreen() {
 
             {/* Profile Info */}
             <View className="px-5 -mt-16">
-                <View className="border-4 border-paper rounded-full w-36 h-36 overflow-hidden bg-white shadow-md">
+                <View 
+                  className="rounded-full w-36 h-36 overflow-hidden bg-white shadow-md"
+                  style={{
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.1,
+                    shadowRadius: 8,
+                    elevation: 4,
+                  }}
+                >
                      <ProfileImage path={profile?.avatar_url || null} style={{ width: '100%', height: '100%' }} />
                 </View>
                 
                 <View className="mt-4">
                     <View className="flex-row items-center">
-                        <Text className="text-3xl font-extrabold text-ink mr-2">{profile?.full_name || 'No Name'}</Text>
+                        <Text className="text-3xl font-extrabold text-slate-900 mr-2">{profile?.full_name || 'No Name'}</Text>
                         {profile?.is_verified && (
                             <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" />
                         )}
@@ -426,13 +226,17 @@ export default function ProfileScreen() {
                 {stats && stats.total > 0 && (
                     <TouchableOpacity 
                         onPress={() => router.push(`/connections/${user?.id}`)}
-                        className="flex-row mt-6 bg-white p-3 rounded-xl justify-between border border-gray-100 shadow-sm"
+                        className="flex-row mt-6 bg-white p-3 rounded-xl justify-between shadow-sm"
+                        style={{
+                          borderWidth: 1,
+                          borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+                        }}
                     >
                         <View className="items-center flex-1 justify-center">
-                            <Text className="text-xl font-bold text-ink mb-1">{stats.total}</Text>
+                            <Text className="text-xl font-bold text-slate-900 mb-1">{stats.total}</Text>
                             <IconSymbol name="person.2.fill" size={16} color="#9CA3AF" />
                         </View>
-                        <View className="w-[1px] bg-gray-200" />
+                        <View className="w-[1px] bg-slate-200" />
                         <View className="items-center flex-1 justify-center">
                             <Text className="text-lg font-bold text-romance mb-1">{stats.romance || 0}</Text>
                             <IconSymbol name="heart.fill" size={14} color="#E07A5F" />
@@ -450,94 +254,51 @@ export default function ProfileScreen() {
 
                 {/* Friend Code Section - Only show if not verified */}
                 {!profile?.is_verified && profile?.friend_code && (
-                    <View className="mt-4">
-                        {!showFriendCode ? (
-                            <TouchableOpacity
-                                onPress={handleViewFriendCode}
-                                className="bg-gray-50 p-3 rounded-xl border border-gray-200 flex-row items-center justify-between"
-                            >
-                                <View className="flex-row items-center flex-1">
-                                    <IconSymbol name="gift.fill" size={18} color="#3B82F6" />
-                                    <View className="ml-3">
-                                        <Text className="text-gray-700 font-semibold text-sm">Friend Code: {profile.friend_code}</Text>
-                                        <Text className="text-gray-500 text-xs mt-0.5">{profile.referral_count || 0}/10 referrals - unlock free verification!</Text>
-                                    </View>
-                                </View>
-                                <TouchableOpacity
-                                    onPress={() => setShowShareOptions(true)}
-                                    className="bg-ink px-3 py-1.5 rounded-lg"
-                                >
-                                    <IconSymbol name="paperplane.fill" size={14} color="white" />
-                                </TouchableOpacity>
-                            </TouchableOpacity>
-                        ) : (
-                            <Animated.View
-                                style={{
-                                    transform: [
-                                        {
-                                            scale: highlightAnim.interpolate({
-                                                inputRange: [0, 1],
-                                                outputRange: [1, 1.02],
-                                            }),
-                                        },
-                                    ],
-                                    borderWidth: highlightAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: [2, 4],
-                                    }),
-                                    borderColor: highlightAnim.interpolate({
-                                        inputRange: [0, 1],
-                                        outputRange: ['#3B82F6', '#10B981'],
-                                    }),
-                                }}
-                                className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border-2 border-blue-500 items-center shadow-lg"
-                            >
-                                <Text className="text-xs text-gray-500 mb-2 font-semibold uppercase tracking-wider">Your Friend Code</Text>
-                                <Text className="text-3xl font-bold text-ink tracking-wider mb-3">
-                                    {profile.friend_code}
-                                </Text>
-                                <View className="flex-row gap-2 w-full">
-                                    <TouchableOpacity
-                                        onPress={handleCopyFriendCode}
-                                        className="flex-1 bg-gray-200 py-2.5 rounded-xl items-center flex-row justify-center"
-                                    >
-                                        <IconSymbol name="square.and.arrow.up.fill" size={16} color="#6B7280" />
-                                        <Text className="text-gray-700 font-bold ml-1.5 text-sm">Copy</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        onPress={() => setShowShareOptions(true)}
-                                        className="flex-1 bg-ink py-2.5 rounded-xl items-center flex-row justify-center"
-                                    >
-                                        <IconSymbol name="paperplane.fill" size={16} color="white" />
-                                        <Text className="text-white font-bold ml-1.5 text-sm">Share</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        onPress={() => setShowFriendCode(false)}
-                                        className="px-3 py-2.5 bg-gray-100 rounded-xl items-center justify-center"
-                                    >
-                                        <IconSymbol name="eye.slash.fill" size={16} color="#6B7280" />
-                                    </TouchableOpacity>
-                                </View>
-                                <Text className="text-xs text-gray-500 mt-2 text-center">
-                                    {profile.referral_count || 0}/10 referrals - verification unlocks at 10
-                                </Text>
-                            </Animated.View>
-                        )}
+                    <View 
+                      className="mt-4 bg-slate-50 p-2 rounded-lg flex-row items-center justify-between"
+                      style={{
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.04,
+                        shadowRadius: 3,
+                        elevation: 1,
+                      }}
+                    >
+                        <View className="flex-row items-center flex-1">
+                            <IconSymbol name="gift.fill" size={14} color="#3B82F6" />
+                            <Text className="text-slate-700 font-semibold text-xs ml-2">Friend Code: {profile.friend_code}</Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={() => setShowShareOptions(true)}
+                            className="bg-ink px-2 py-1 rounded"
+                        >
+                            <IconSymbol name="paperplane.fill" size={12} color="white" />
+                        </TouchableOpacity>
                     </View>
                 )}
 
                 {/* Bio */}
-                <Text className="mt-6 text-ink text-lg leading-7 font-medium opacity-90">
+                <Text className="mt-6 text-slate-900 text-lg leading-7 font-medium opacity-90">
                     {profile?.bio || 'Add a bio to introduce yourself.'}
                 </Text>
 
                 {/* Photos Gallery */}
                 {profile?.photos && profile.photos.length > 0 && (
                     <View className="mt-6">
-                        <Text className="text-xl font-bold mb-3 text-ink">Photos</Text>
+                        <Text className="text-xl font-bold mb-3 text-slate-900">Photos</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                             {profile.photos.map((p, i) => (
-                                <View key={i} className="mr-3 w-32 h-40 rounded-xl overflow-hidden shadow-sm bg-gray-100 border border-gray-200">
+                                <View 
+                                  key={i} 
+                                  className="mr-3 w-32 h-40 rounded-xl overflow-hidden shadow-sm bg-slate-100"
+                                  style={{
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 2 },
+                                    shadowOpacity: 0.06,
+                                    shadowRadius: 4,
+                                    elevation: 2,
+                                  }}
+                                >
                                     <ProfileImage path={p.url} style={{ width: '100%', height: '100%' }} />
                                 </View>
                             ))}
@@ -547,27 +308,56 @@ export default function ProfileScreen() {
 
                 {/* Detailed Interests */}
                 <View className="mt-8">
-                    <Text className="text-xl font-bold mb-4 text-ink">Interests</Text>
+                    <Text className="text-xl font-bold mb-4 text-slate-900">Interests</Text>
                     {profile?.detailed_interests && Object.keys(profile.detailed_interests).length > 0 ? (
                         Object.entries(profile.detailed_interests).map(([category, items]) => (
-                            <View key={category} className="mb-4 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                                <Text className="text-sm font-bold text-gray-500 mb-3 uppercase tracking-wider">{category}</Text>
+                            <View 
+                              key={category} 
+                              className="mb-4 bg-white p-4 rounded-2xl shadow-sm"
+                              style={{
+                                borderWidth: 1,
+                                borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+                              }}
+                            >
+                                <Text className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider">{category}</Text>
                                 <View className="flex-row flex-wrap">
                                     {items && items.length > 0 ? (
                                         items.map((item, idx) => (
-                                            <View key={idx} className={`px-3 py-1.5 rounded-lg mr-2 mb-2 border border-gray-100 ${theme.bg}`}>
+                                            <View 
+                                              key={idx} 
+                                              className={`px-3 py-1.5 rounded-lg mr-2 mb-2 ${theme.bg}`}
+                                              style={{
+                                                shadowColor: '#000',
+                                                shadowOffset: { width: 0, height: 1 },
+                                                shadowOpacity: 0.03,
+                                                shadowRadius: 2,
+                                                elevation: 1,
+                                              }}
+                                            >
                                                 <Text className={`font-semibold text-sm ${theme.text}`}>{item}</Text>
                                             </View>
                                         ))
                                     ) : (
-                                        <Text className="text-gray-400 italic text-sm">General Interest</Text>
+                                        <Text className="text-slate-400 italic text-sm">General Interest</Text>
                                     )}
                                 </View>
                             </View>
                         ))
                     ) : (
-                        <View className="bg-gray-50 p-6 rounded-2xl items-center border border-dashed border-gray-300">
-                             <Text className="text-gray-400 italic">No interests added yet.</Text>
+                        <View 
+                          className="bg-slate-50 p-6 rounded-2xl items-center"
+                          style={{
+                            borderWidth: 1,
+                            borderStyle: 'dashed',
+                            borderColor: 'rgba(148, 163, 184, 0.3)',
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: 1 },
+                            shadowOpacity: 0.03,
+                            shadowRadius: 2,
+                            elevation: 1,
+                          }}
+                        >
+                             <Text className="text-slate-400 italic">No interests added yet.</Text>
                         </View>
                     )}
                 </View>
@@ -575,7 +365,7 @@ export default function ProfileScreen() {
                 {/* Sign Out Button */}
                 <TouchableOpacity 
                     onPress={() => signOut()} 
-                    className="mt-8 mb-8 bg-gray-100 py-4 rounded-2xl items-center border border-gray-200"
+                    className="mt-8 mb-8 bg-slate-100 py-4 rounded-2xl items-center"
                 >
                     <Text className="text-red-500 font-bold text-lg">Sign Out</Text>
                 </TouchableOpacity>
@@ -593,71 +383,22 @@ export default function ProfileScreen() {
                 <View className="bg-white rounded-t-3xl w-full p-6 pb-8">
                     <View className="items-center mb-6">
                         <View className="w-12 h-1 bg-gray-300 rounded-full mb-4" />
-                        <Text className="text-2xl font-bold text-ink">Share Friend Code</Text>
-                        <Text className="text-sm text-gray-500 mt-1">Choose how you'd like to share</Text>
-                    </View>
-
-                    <View className="gap-3">
-                        {/* Messaging */}
-                        <TouchableOpacity
-                            onPress={handleShareToMessaging}
-                            className="bg-blue-500 py-4 rounded-xl flex-row items-center justify-center"
-                        >
-                            <IconSymbol name="message.fill" size={20} color="white" />
-                            <Text className="text-white font-semibold ml-2">Messaging</Text>
-                        </TouchableOpacity>
-
-                        {/* Instagram Story */}
-                        <TouchableOpacity
-                            onPress={handleShareToInstagramStory}
-                            className="bg-gradient-to-r from-pink-500 to-purple-500 py-4 rounded-xl flex-row items-center justify-center"
-                        >
-                            <IconSymbol name="photo.fill" size={20} color="white" />
-                            <Text className="text-white font-semibold ml-2">Instagram Story</Text>
-                        </TouchableOpacity>
-
-                        {/* TikTok Story */}
-                        <TouchableOpacity
-                            onPress={handleShareToTikTokStory}
-                            className="bg-black py-4 rounded-xl flex-row items-center justify-center"
-                        >
-                            <IconSymbol name="photo.fill" size={20} color="white" />
-                            <Text className="text-white font-semibold ml-2">TikTok Story</Text>
-                        </TouchableOpacity>
-
-                        {/* Instagram DM */}
-                        <TouchableOpacity
-                            onPress={handleShareToInstagramDM}
-                            className="bg-pink-500 py-4 rounded-xl flex-row items-center justify-center"
-                        >
-                            <IconSymbol name="message.fill" size={20} color="white" />
-                            <Text className="text-white font-semibold ml-2">Instagram DM</Text>
-                        </TouchableOpacity>
-
-                        {/* TikTok DM */}
-                        <TouchableOpacity
-                            onPress={handleShareToTikTokDM}
-                            className="bg-gray-800 py-4 rounded-xl flex-row items-center justify-center"
-                        >
-                            <IconSymbol name="message.fill" size={20} color="white" />
-                            <Text className="text-white font-semibold ml-2">TikTok DM</Text>
-                        </TouchableOpacity>
-
-                        {/* General Share */}
-                        <TouchableOpacity
-                            onPress={handleShareFriendCode}
-                            className="bg-ink py-4 rounded-xl flex-row items-center justify-center"
-                        >
-                            <IconSymbol name="square.and.arrow.up.fill" size={20} color="white" />
-                            <Text className="text-white font-semibold ml-2">Other Apps</Text>
-                        </TouchableOpacity>
+                        <Text className="text-2xl font-bold text-slate-900">Share Friend Code</Text>
                     </View>
 
                     <TouchableOpacity
-                        onPress={() => setShowShareOptions(false)}
-                        className="mt-4 py-3 rounded-xl border border-gray-300 items-center"
+                        onPress={handleShareFriendCode}
+                        className="bg-blue-600 py-4 rounded-xl flex-row items-center justify-center mb-4"
                     >
-                        <Text className="text-gray-700 font-semibold">Cancel</Text>
+                        <IconSymbol name="square.and.arrow.up.fill" size={20} color="white" />
+                        <Text className="text-white font-semibold ml-2 text-lg">Share</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => setShowShareOptions(false)}
+                        className="mt-4 py-3 rounded-xl items-center"
+                    >
+                        <Text className="text-slate-700 font-semibold">Cancel</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -675,7 +416,7 @@ function ProfileImage({ path, style }: { path: string | null, style: any }) {
       setUrl(data.publicUrl);
     }, [path]);
   
-    if (!url) return <View style={style} className="bg-gray-200 animate-pulse" />;
+    if (!url) return <View style={style} className="bg-slate-200 animate-pulse" />;
   
     return (
       <Image source={{ uri: url }} style={style} resizeMode="cover" />

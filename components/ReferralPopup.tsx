@@ -1,7 +1,6 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useAuth } from '@/lib/auth';
-import { supabase } from '@/lib/supabase';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Modal, Share, Text, TouchableOpacity, View } from 'react-native';

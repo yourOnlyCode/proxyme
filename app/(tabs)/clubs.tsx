@@ -189,7 +189,7 @@ export default function ClubsScreen() {
 
   const renderClubItem = ({ item }: { item: Club }) => (
       <TouchableOpacity 
-        className="bg-white rounded-2xl mb-4 shadow-sm overflow-hidden border border-gray-100"
+        className="bg-white rounded-2xl mb-4 shadow-sm overflow-hidden"
         onPress={() => router.push(`/clubs/${item.id}`)}
       >
           <View className="h-32 bg-gray-200">
@@ -243,7 +243,13 @@ export default function ClubsScreen() {
             </TouchableOpacity>
         </View>
 
-        <View className="flex-row mb-6 bg-white p-1 rounded-xl border border-gray-100 shadow-sm">
+        <View 
+          className="flex-row mb-6 bg-white p-1 rounded-xl shadow-sm"
+          style={{
+            borderWidth: 1,
+            borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+          }}
+        >
             <TouchableOpacity 
                 onPress={() => setTab('my')}
                 className={`flex-1 py-2 rounded-lg items-center ${tab === 'my' ? 'bg-gray-100' : ''}`}
