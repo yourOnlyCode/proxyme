@@ -1,6 +1,7 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useAuth } from '@/lib/auth';
+import { getReferralShareContent } from '@/lib/referral';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Modal, Share, Text, TouchableOpacity, View } from 'react-native';
@@ -18,12 +19,12 @@ export function ReferralPopup({ visible, onClose, friendCode, onNeverShowAgain }
   const router = useRouter();
   const [neverShowAgain, setNeverShowAgain] = useState(false);
 
-  const shareText = `Join me on Proxyme! Use my friend code ${friendCode || 'XXXXXX'} to unlock verification when you sign up. Download now!`;
-
   const handleShare = async () => {
     try {
+      const shareContent = getReferralShareContent(friendCode);
+      if (!shareContent) return;
       await Share.share({
-        message: shareText,
+        message: shareContent.shareText,
         title: 'Join me on Proxyme!',
       });
     } catch (error) {
@@ -83,7 +84,7 @@ export function ReferralPopup({ visible, onClose, friendCode, onNeverShowAgain }
 
           {/* Subtext */}
           <Text className="text-xs text-gray-500 text-center mb-6">
-            When 10 friends use your code verification will automatically unlock.
+            When 3 friends use your code verification will automatically unlock.
           </Text>
 
           {/* Friend Code Display */}

@@ -115,8 +115,8 @@ BEGIN
           WHERE id = referrer_id
           RETURNING referral_count INTO current_count;
           
-          -- Unlock verification automatically at 10 referrals
-          IF current_count >= 10 THEN
+          -- Unlock verification automatically at 3 referrals
+          IF current_count >= 3 THEN
               UPDATE public.profiles SET is_verified = TRUE WHERE id = referrer_id;
           END IF;
       END IF;

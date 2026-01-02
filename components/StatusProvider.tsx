@@ -65,12 +65,12 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [updating, setUpdating] = useState(false);
   const [userProfile, setUserProfile] = useState<{ avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null>(null);
   const [relationshipGoal, setRelationshipGoal] = useState<string | null>(null);
-  // Tab order: Penpal (0), My Status (1), My Clubs (2) - My Status is center
-  const tabs = ['penpal', 'status', 'clubs'] as const;
+  // Tab order: My Status (0), My Clubs (1) - Penpal hidden for beta
+  const tabs = ['status', 'clubs'] as const;
   type TabType = typeof tabs[number];
   const [activeTab, setActiveTab] = useState<TabType>('status');
   const tabScrollX = useRef(new Animated.Value(0)).current;
-  const tabIndexRef = useRef(1); // Start at index 1 (My Status)
+  const tabIndexRef = useRef(0); // Start at index 0 (My Status)
   
   // Status Data
   const [statusText, setStatusText] = useState('');
@@ -305,10 +305,10 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           tabIndexRef.current = index;
           tabScrollX.setValue(-index * SCREEN_WIDTH);
         } else {
-          // Default to My Status (index 1)
+          // Default to My Status (index 0)
           setActiveTab('status');
-          tabIndexRef.current = 1;
-          tabScrollX.setValue(-1 * SCREEN_WIDTH);
+          tabIndexRef.current = 0;
+          tabScrollX.setValue(0);
         }
       });
     }
@@ -1047,10 +1047,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                     transform: [{ translateX: tabScrollX }],
                                 }}
                             >
-                                {/* Tab order: Penpal (0), My Status (1), My Clubs (2) */}
-                                <View style={{ width: SCREEN_WIDTH, paddingHorizontal: 24 }}>
-                                    {renderPenpalTab()}
-                                </View>
+                                {/* Tab order: My Status (0), My Clubs (1) - Penpal hidden */}
                                 <View style={{ width: SCREEN_WIDTH, paddingHorizontal: 24 }}>
                                     {renderStatusTab()}
                                 </View>
@@ -1114,21 +1111,6 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                 </TouchableOpacity>
                             </View>
                         )}
-                        {activeTab === 'penpal' && (
-                            <View className="mx-6 mb-4">
-                                <TouchableOpacity
-                                    onPress={sendPenpal}
-                                    disabled={sendingPenpal}
-                                    className="bg-indigo-600 w-full py-4 rounded-xl items-center shadow-lg"
-                                >
-                                    {sendingPenpal ? (
-                                        <ActivityIndicator color="white" />
-                                    ) : (
-                                        <Text className="text-white font-bold text-lg">Send to Random Penpal</Text>
-                                    )}
-                                </TouchableOpacity>
-                            </View>
-                        )}
 
                         {/* Tab Selector - Glassy Slider at Bottom */}
                         <View 
@@ -1166,14 +1148,12 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                                 // inputRange must be ascending: from last tab to first tab
                                                 inputRange: [
                                                     -(tabs.length - 1) * SCREEN_WIDTH, // clubs
-                                                    -1 * SCREEN_WIDTH, // status
-                                                    0 // penpal
+                                                    0 // status
                                                 ],
                                                 // outputRange: indicator position for each tab
                                                 outputRange: [
-                                                    2 * ((SCREEN_WIDTH - 48 - 8) / tabs.length) + 4, // clubs position
-                                                    1 * ((SCREEN_WIDTH - 48 - 8) / tabs.length) + 4, // status position
-                                                    4 // penpal position
+                                                    1 * ((SCREEN_WIDTH - 48 - 8) / tabs.length) + 4, // clubs position
+                                                    4 // status position
                                                 ],
                                                 extrapolate: 'clamp',
                                             })
@@ -1185,7 +1165,6 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                 {tabs.map((tab, index) => {
                                     const isActive = activeTab === tab;
                                     const tabNames = {
-                                        penpal: 'Penpal',
                                         status: 'My Status',
                                         clubs: 'My Clubs'
                                     };

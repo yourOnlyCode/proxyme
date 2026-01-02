@@ -5,10 +5,11 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Dimensions, FlatList, Image, LayoutAnimation, Modal, PanResponder, Platform, RefreshControl, Switch, Text, TouchableOpacity, UIManager, View } from 'react-native';
+import { Animated, Dimensions, FlatList, Image, LayoutAnimation, Modal, PanResponder, Platform, RefreshControl, Share, Switch, Text, TouchableOpacity, UIManager, View } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
+import { getReferralShareContent } from '../../lib/referral';
 import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
@@ -37,7 +38,7 @@ export default function HomeScreen() {
   // Scroll Animation
   const scrollY = useRef(new Animated.Value(0)).current;
   const STICKY_HEADER_HEIGHT = Platform.OS === 'ios' ? 86 : 56; // Height of fixed sticky header (reduced paddingBottom)
-  const ANIMATED_HEADER_HEIGHT = 140; // Height of scrollable animated header section (reduced from 220)
+  const ANIMATED_HEADER_HEIGHT = 80; // Height of scrollable animated header section (proxy toggle only)
   const HEADER_HEIGHT = STICKY_HEADER_HEIGHT + ANIMATED_HEADER_HEIGHT; // Total header height
   
   // Fix for bounce: clamp scrollY to non-negative
@@ -65,15 +66,26 @@ export default function HomeScreen() {
   const [myInterests, setMyInterests] = useState<Record<string, string[]> | null>(null);
   const [myGoals, setMyGoals] = useState<string[] | null>(null);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [friendCode, setFriendCode] = useState<string | null>(null);
+  const [userCity, setUserCity] = useState<string | null>(null);
+  const [referralCount, setReferralCount] = useState<number>(0);
+  const [showFriendCodeToast, setShowFriendCodeToast] = useState(false);
 
   useEffect(() => {
     if (user) {
         // Fetch detailed interests & goals
-        supabase.from('profiles').select('detailed_interests, relationship_goals').eq('id', user.id).single()
+        supabase.from('profiles').select('detailed_interests, relationship_goals, friend_code, city, referral_count').eq('id', user.id).single()
         .then(({ data }) => {
             if (data) {
                 setMyInterests(data.detailed_interests);
                 setMyGoals(data.relationship_goals);
+                setFriendCode(data.friend_code);
+                setUserCity(data.city);
+                setReferralCount(data.referral_count || 0);
+                // Show friend code toast if user has a friend code
+                if (data.friend_code) {
+                    setShowFriendCodeToast(true);
+                }
             }
         });
 
@@ -632,21 +644,8 @@ export default function HomeScreen() {
               <ProxymeLogo />
             </View>
             
-            {/* Inbox Icon (Right) - Fixed width */}
-            <TouchableOpacity 
-              onPress={() => router.push('/requests')}
-              className="w-10 h-10 items-center justify-center ml-auto"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-                <View>
-                    <IconSymbol name="tray.fill" size={24} color="#2D3748" />
-                    {pendingRequestsCount > 0 && (
-                        <View className="absolute -top-1 -right-1 bg-red-500 rounded-full w-5 h-5 items-center justify-center border-2 border-white">
-                            <Text className="text-white text-[10px] font-bold">{pendingRequestsCount > 9 ? '9+' : String(pendingRequestsCount)}</Text>
-                        </View>
-                    )}
-                </View>
-            </TouchableOpacity>
+            {/* Empty space for balance (Inbox moved to nav bar) */}
+            <View className="w-10 h-10 ml-auto" />
           </View>
       </View>
 
@@ -664,81 +663,42 @@ export default function HomeScreen() {
         }}
         className="px-4 pt-4 shadow-sm"
       >
-          <View className="flex-row gap-3">
-              <TouchableOpacity 
-                onPress={openModal}
-                activeOpacity={0.9}
-                className="flex-1 bg-white rounded-3xl p-3 shadow-sm h-28 justify-between"
-                style={{
-                  borderWidth: 1,
-                  borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.08,
-                  shadowRadius: 8,
-                  elevation: 3,
-                }}
-              >
-                  <View className="flex-row justify-between items-start">
-                      <View className={`w-10 h-10 rounded-full items-center justify-center border ${currentStatus ? 'border-green-400 bg-gray-100' : 'border-gray-200 border-dashed bg-gray-50'}`}>
-                          {currentStatusImage ? (
-                              <View className="w-full h-full rounded-full overflow-hidden">
-                                  <FeedImage path={currentStatusImage} resizeMode="cover" />
-                              </View>
-                          ) : (
-                              <IconSymbol name="plus" size={20} color="#9CA3AF" />
-                          )}
+          {/* Proxy Toggle - Full Width */}
+          <TouchableOpacity 
+            onPress={() => toggleProxy(!isProxyActive)}
+            activeOpacity={0.9}
+            className="bg-white rounded-3xl p-3 shadow-sm"
+            style={{
+              borderWidth: 1,
+              borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.08,
+              shadowRadius: 8,
+              elevation: 3,
+            }}
+          >
+              <View className="flex-row justify-between items-center">
+                  <View className="flex-row items-center flex-1">
+                      <View className={`w-8 h-8 rounded-full items-center justify-center mr-3 ${isProxyActive ? 'bg-green-50' : 'bg-gray-50'}`}>
+                          <IconSymbol name={isProxyActive ? "location.fill" : "location.slash"} size={18} color={isProxyActive ? "#10B981" : "#9CA3AF"} />
                       </View>
-                      {currentStatus && (
-                          <View className="bg-green-100 px-2 py-0.5 rounded-full">
-                              <Text className="text-[10px] font-bold text-green-700">ON</Text>
-                          </View>
-                      )}
-                  </View>
-                  
-                  <View>
-                      <Text className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">My Status</Text>
-                      <Text className={`font-bold text-xs leading-4 ${currentStatus ? 'text-ink' : 'text-gray-400 italic'}`} numberOfLines={2}>
-                          {currentStatusText ? `"${currentStatusText}"` : "What're you up to?"}
-                      </Text>
-                  </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                onPress={() => toggleProxy(!isProxyActive)}
-                activeOpacity={0.9}
-                className="flex-1 bg-white rounded-3xl p-3 shadow-sm h-28 justify-between"
-                style={{
-                  borderWidth: 1,
-                  borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.08,
-                  shadowRadius: 8,
-                  elevation: 3,
-                }}
-              >
-                  <View className="flex-row justify-between items-start">
-                      <View className={`w-10 h-10 rounded-full items-center justify-center ${isProxyActive ? 'bg-green-50' : 'bg-gray-50'}`}>
-                          <IconSymbol name={isProxyActive ? "location.fill" : "location.slash"} size={20} color={isProxyActive ? "#10B981" : "#9CA3AF"} />
+                      <View className="flex-1">
+                          <Text className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">Proxy Mode</Text>
+                          <Text className="text-ink font-bold text-xs leading-4" numberOfLines={1}>
+                              {isProxyActive ? `Visible at ${getDisplayText(address)}.` : "Hidden from others."}
+                          </Text>
                       </View>
-                      <Switch 
-                          value={isProxyActive} 
-                          onValueChange={toggleProxy}
-                          trackColor={{ false: '#e2e8f0', true: '#1A1A1A' }}
-                          thumbColor={'#fff'}
-                          style={{ transform: [{ scaleX: 0.6 }, { scaleY: 0.6 }] }} 
-                      />
                   </View>
-
-                  <View>
-                      <Text className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">Proxy Mode</Text>
-                      <Text className="text-ink font-bold text-xs leading-4" numberOfLines={2}>
-                          {isProxyActive ? `Visible at ${getDisplayText(address)}.` : "Hidden from others."}
-                      </Text>
-                  </View>
-              </TouchableOpacity>
-          </View>
+                  <Switch 
+                      value={isProxyActive} 
+                      onValueChange={toggleProxy}
+                      trackColor={{ false: '#e2e8f0', true: '#1A1A1A' }}
+                      thumbColor={'#fff'}
+                      style={{ transform: [{ scaleX: 0.6 }, { scaleY: 0.6 }] }} 
+                  />
+              </View>
+          </TouchableOpacity>
       </Animated.View>
 
       <Animated.FlatList
@@ -795,6 +755,129 @@ export default function HomeScreen() {
              }
          }}
       />
+
+      {/* Friend Code Toast - Hovering at Top */}
+      {showFriendCodeToast && friendCode && (
+        <View 
+          className="absolute left-0 right-0 px-4 pb-4"
+          style={{
+            top: STICKY_HEADER_HEIGHT + 20,
+            zIndex: 9999,
+            elevation: 9999,
+          }}
+        >
+          <View
+            className="rounded-3xl p-4 overflow-hidden"
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              borderWidth: 1.5,
+              borderColor: 'rgba(255, 255, 255, 0.8)',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: 0.15,
+              shadowRadius: 40,
+              elevation: 20,
+            }}
+          >
+            {/* Outer glow effect */}
+            <View
+              style={{
+                position: 'absolute',
+                top: -2,
+                left: -2,
+                right: -2,
+                bottom: -2,
+                borderRadius: 30,
+                backgroundColor: 'rgba(255, 255, 255, 0.5)',
+                zIndex: -1,
+              }}
+            />
+            <LinearGradient
+              colors={[
+                '#FFFFFF',
+                '#F1F5F9',
+                '#E2E8F0',
+                '#F1F5F9',
+                '#FFFFFF',
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              locations={[0, 0.3, 0.5, 0.7, 1]}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                borderRadius: 24,
+                opacity: 0.95,
+              }}
+            />
+            {/* Close Button - Overlay that doesn't take space */}
+            <TouchableOpacity
+              onPress={() => setShowFriendCodeToast(false)}
+              className="absolute top-3 right-3 z-10 p-1.5"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                borderRadius: 20,
+              }}
+            >
+              <IconSymbol name="xmark" size={18} color="#6B7280" />
+            </TouchableOpacity>
+
+            <View className="items-center" style={{ position: 'relative', zIndex: 1 }}>
+              <View className="items-center flex-1 w-full">
+                <Text className="text-[14px] font-bold text-gray-600 uppercase mb-2 italic">Share the Love,</Text>
+                <Text className="text-[14px] font-bold text-gray-600 uppercase mb-2 italic">Free Verification</Text>
+                <View className="flex-row items-center justify-center w-full mb-2">
+                  <View 
+                    className="px-4 py-2 rounded-full mr-3"
+                    style={{
+                      backgroundColor: 'rgba(59, 130, 246, 0.9)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(59, 130, 246, 1)',
+                    }}
+                  >
+                    <Text className="text-white font-bold text-sm">
+                      {referralCount}/3 referrals
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={async () => {
+                      try {
+                        const shareContent = getReferralShareContent(friendCode);
+                        if (!shareContent) return;
+                        await Share.share({
+                          message: shareContent.shareText,
+                          title: 'Join me on Proxyme!',
+                        });
+                        // Popup stays open - only X button closes it
+                      } catch (error) {
+                        console.error('Error sharing:', error);
+                      }
+                    }}
+                    className="px-3 py-2 rounded-lg flex-row items-center justify-center"
+                    style={{
+                      backgroundColor: '#1A1A1A',
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 4,
+                      elevation: 5,
+                    }}
+                  >
+                    <IconSymbol name="paperplane.fill" size={16} color="white" />
+                  </TouchableOpacity>
+                </View>
+                <Text className="text-xs text-gray-600 text-center mb-2" style={{ fontWeight: '500' }}>
+                  Proxyme is powered by its users! Share to expand {userCity || 'your city'}. {referralCount >= 3 ? '🎉 You\'re verified!' : `Get ${3 - referralCount} more ${referralCount === 2 ? 'referral' : 'referrals'} to unlock verification.`}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 
 export default function TabLayout() {
   const { address } = useProxyLocation();
@@ -154,6 +154,24 @@ export default function TabLayout() {
           options={{
             title: address?.city || 'City',
             tabBarIcon: ({ color }) => <IconSymbol size={28} name="building.2.fill" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="inbox"
+          options={{
+            title: 'Inbox',
+            tabBarIcon: ({ color }) => (
+              <View>
+                <IconSymbol size={28} name="tray.fill" color={color} />
+                {(pendingRequestsCount > 0 || unreadMessagesCount > 0) && (
+                  <View className="absolute -top-1 -right-1 bg-red-500 rounded-full min-w-[18px] h-[18px] items-center justify-center px-1 border-2 border-white">
+                    <Text className="text-white text-[9px] font-bold">
+                      {pendingRequestsCount + unreadMessagesCount > 9 ? '9+' : String(pendingRequestsCount + unreadMessagesCount)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ),
           }}
         />
         <Tabs.Screen

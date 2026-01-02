@@ -6,6 +6,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Dimensions, Image, Linking, Modal, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
+import { getReferralShareContent } from '../../lib/referral';
 import { supabase } from '../../lib/supabase';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -93,26 +94,9 @@ export default function ProfileScreen() {
   );
 
 
-  // Get share content with clickable links
+  // Get share content with clickable links - using centralized function
   const getShareContent = () => {
-    if (!profile?.friend_code) return null;
-    
-    // Proxyme app link - update with your actual app store links
-    const appStoreLink = 'https://proxyme.app'; // Replace with actual app store link
-    const appStoreLinkPlaceholder = 'www.proxyme.app'; // Placeholder link for messaging
-    const deepLink = `proxybusiness://referral?code=${profile.friend_code}`; // Deep link using app scheme
-    
-    // Messaging-specific text with paragraph break and app store link
-    const messagingText = `Find me and new friends on Proxyme! The proximity based app for connecting through common interests.\n\nRegister with my friend code: ${profile.friend_code} to get closer to verification!\n\n${appStoreLink}`;
-    
-    return {
-      friendCode: profile.friend_code,
-      appStoreLink,
-      appStoreLinkPlaceholder,
-      deepLink,
-      shareText: `Join me on Proxyme! Use my friend code ${profile.friend_code} to unlock verification when you sign up.\n\nDownload: ${appStoreLink}\n\nOr open in app: ${deepLink}`,
-      messagingText,
-    };
+    return getReferralShareContent(profile?.friend_code || null);
   };
 
   const handleCopyFriendCode = async () => {
@@ -213,44 +197,24 @@ export default function ProfileScreen() {
                 </View>
                 
                 <View className="mt-4">
-                    <View className="flex-row items-center">
+                    <View className="flex-row items-center flex-wrap">
                         <Text className="text-3xl font-extrabold text-slate-900 mr-2">{profile?.full_name || 'No Name'}</Text>
                         {profile?.is_verified && (
                             <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" />
                         )}
                     </View>
-                    <Text className={`text-base font-semibold ${theme.text} mt-1 opacity-80`}>@{profile?.username || 'username'}</Text>
+                    <View className="flex-row items-center mt-1 flex-wrap">
+                        <Text className={`text-base font-semibold ${theme.text} opacity-80`}>@{profile?.username || 'username'}</Text>
+                        {stats && stats.total > 0 && (
+                            <>
+                                <Text className={`text-base font-semibold ${theme.text} opacity-60 mx-2`}>•</Text>
+                                <Text className={`text-base font-semibold ${theme.text} opacity-80`}>
+                                    {stats.total} {stats.total === 1 ? 'connection' : 'connections'}
+                                </Text>
+                            </>
+                        )}
+                    </View>
                 </View>
-                
-                {/* Connection Stats (Clickable) */}
-                {stats && stats.total > 0 && (
-                    <TouchableOpacity 
-                        onPress={() => router.push(`/connections/${user?.id}`)}
-                        className="flex-row mt-6 bg-white p-3 rounded-xl justify-between shadow-sm"
-                        style={{
-                          borderWidth: 1,
-                          borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
-                        }}
-                    >
-                        <View className="items-center flex-1 justify-center">
-                            <Text className="text-xl font-bold text-slate-900 mb-1">{stats.total}</Text>
-                            <IconSymbol name="person.2.fill" size={16} color="#9CA3AF" />
-                        </View>
-                        <View className="w-[1px] bg-slate-200" />
-                        <View className="items-center flex-1 justify-center">
-                            <Text className="text-lg font-bold text-romance mb-1">{stats.romance || 0}</Text>
-                            <IconSymbol name="heart.fill" size={14} color="#E07A5F" />
-                        </View>
-                        <View className="items-center flex-1 justify-center">
-                            <Text className="text-lg font-bold text-friendship mb-1">{stats.friendship || 0}</Text>
-                            <IconSymbol name="person.2.fill" size={14} color="#81B29A" />
-                        </View>
-                        <View className="items-center flex-1 justify-center">
-                            <Text className="text-lg font-bold text-business mb-1">{stats.business || 0}</Text>
-                            <IconSymbol name="briefcase.fill" size={14} color="#3D405B" />
-                        </View>
-                    </TouchableOpacity>
-                )}
 
                 {/* Friend Code Section - Only show if not verified */}
                 {!profile?.is_verified && profile?.friend_code && (
@@ -277,38 +241,35 @@ export default function ProfileScreen() {
                     </View>
                 )}
 
-                {/* Bio */}
-                <Text className="mt-6 text-slate-900 text-lg leading-7 font-medium opacity-90">
-                    {profile?.bio || 'Add a bio to introduce yourself.'}
-                </Text>
-
-                {/* Photos Gallery */}
-                {profile?.photos && profile.photos.length > 0 && (
+                {/* Relationship Goals with Intent Label */}
+                {profile?.relationship_goals && profile.relationship_goals.length > 0 && (
                     <View className="mt-6">
-                        <Text className="text-xl font-bold mb-3 text-slate-900">Photos</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                            {profile.photos.map((p, i) => (
-                                <View 
-                                  key={i} 
-                                  className="mr-3 w-32 h-40 rounded-xl overflow-hidden shadow-sm bg-slate-100"
-                                  style={{
-                                    shadowColor: '#000',
-                                    shadowOffset: { width: 0, height: 2 },
-                                    shadowOpacity: 0.06,
-                                    shadowRadius: 4,
-                                    elevation: 2,
-                                  }}
-                                >
-                                    <ProfileImage path={p.url} style={{ width: '100%', height: '100%' }} />
-                                </View>
-                            ))}
-                        </ScrollView>
+                        <View className="flex-row items-center mb-2">
+                            <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mr-2">Intent</Text>
+                        </View>
+                        <View className="flex-row flex-wrap">
+                            {profile.relationship_goals.map((goal, idx) => {
+                                const badgeColors = getTheme(goal);
+                                return (
+                                    <View key={idx} className={`px-4 py-2 rounded-full mr-2 mb-2 ${badgeColors.badge}`}>
+                                        <Text className={`${badgeColors.text} font-bold`}>{goal}</Text>
+                                    </View>
+                                );
+                            })}
+                        </View>
                     </View>
                 )}
 
-                {/* Detailed Interests */}
+                {/* Bio */}
+                {profile?.bio && (
+                    <Text className="mt-6 text-slate-900 text-lg leading-7 font-medium opacity-90">
+                        {profile.bio}
+                    </Text>
+                )}
+
+                {/* Detailed Interests - Now More Prominent */}
                 <View className="mt-8">
-                    <Text className="text-xl font-bold mb-4 text-slate-900">Interests</Text>
+                    <Text className="text-2xl font-bold mb-4 text-slate-900">Interests</Text>
                     {profile?.detailed_interests && Object.keys(profile.detailed_interests).length > 0 ? (
                         Object.entries(profile.detailed_interests).map(([category, items]) => (
                             <View 
@@ -361,6 +322,36 @@ export default function ProfileScreen() {
                         </View>
                     )}
                 </View>
+
+                {/* Photos Gallery - Moved to Bottom with Larger Thumbnails */}
+                {profile?.photos && profile.photos.length > 0 && (
+                    <View className="mt-8">
+                        <Text className="text-2xl font-bold mb-4 text-slate-900">Photos</Text>
+                        <ScrollView 
+                            horizontal 
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={{ paddingRight: 20 }}
+                        >
+                            {profile.photos.map((p, i) => (
+                                <View 
+                                  key={i} 
+                                  className="mr-4 rounded-2xl overflow-hidden shadow-md bg-slate-100"
+                                  style={{
+                                    width: 200,
+                                    height: 250,
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 4 },
+                                    shadowOpacity: 0.1,
+                                    shadowRadius: 8,
+                                    elevation: 4,
+                                  }}
+                                >
+                                    <ProfileImage path={p.url} style={{ width: '100%', height: '100%' }} />
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </View>
+                )}
 
                 {/* Sign Out Button */}
                 <TouchableOpacity 
