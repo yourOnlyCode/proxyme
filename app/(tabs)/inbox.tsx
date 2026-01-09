@@ -31,13 +31,31 @@ type Conversation = {
     sender_id: string;
   } | null;
   unread_count?: number;
+  created_at?: string; // connection created_at fallback for sorting when no messages exist
+};
+
+type Notification = {
+  id: string;
+  type: 'forum_reply' | 'club_event' | 'club_member' | 'club_invite' | 'connection_request' | 'connection_accepted' | 'message';
+  title: string;
+  body: string;
+  data: {
+    club_id?: string;
+    topic_id?: string;
+    event_id?: string;
+    member_id?: string;
+    inviter_id?: string;
+  } | null;
+  read: boolean;
+  created_at: string;
 };
 
 type InboxItem = {
-  type: 'request' | 'message';
+  type: 'request' | 'message' | 'notification';
   id: string;
   request?: Interest;
   conversation?: Conversation;
+  notification?: Notification;
   timestamp: string;
 };
 
@@ -54,9 +72,9 @@ export default function InboxScreen() {
     if (user) {
       fetchData();
 
-      // Subscribe to message changes to update unread counts
+      // Subscribe to message and notification changes
       const subscription = supabase
-        .channel('inbox-messages')
+        .channel('inbox-updates')
         .on('postgres_changes', {
           event: '*',
           schema: 'public',
@@ -70,6 +88,14 @@ export default function InboxScreen() {
           schema: 'public',
           table: 'messages',
           filter: `sender_id=eq.${user.id}`
+        }, () => {
+          fetchData();
+        })
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`
         }, () => {
           fetchData();
         })
@@ -95,9 +121,8 @@ export default function InboxScreen() {
     setLoading(true);
 
     try {
-      // Fetch all data in parallel
-      const [requestsResult, connectionsResult] = await Promise.all([
-        // Fetch pending requests
+      // Fetch pending requests + optimized conversations + notifications in parallel
+      const [requestsResult, conversationsResult, notificationsResult] = await Promise.all([
         supabase
           .from('interests')
           .select(`
@@ -109,86 +134,36 @@ export default function InboxScreen() {
           .eq('receiver_id', user.id)
           .eq('status', 'pending')
           .order('created_at', { ascending: false }),
-        
-        // Fetch conversations (accepted connections)
+        supabase.rpc('get_my_inbox_conversations'),
         supabase
-          .from('interests')
-          .select('id, sender_id, receiver_id, created_at')
-          .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-          .eq('status', 'accepted')
+          .from('notifications')
+          .select('id, type, title, body, data, read, created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(50), // Limit to recent 50 notifications
       ]);
 
       const requestsData = requestsResult.data;
-      const connectionsData = connectionsResult.data;
+      const conversationsRows = (conversationsResult as any).data as any[] | null;
+      const notificationsData = notificationsResult.data;
 
-      const conversations: Conversation[] = [];
-      
-      if (connectionsData && connectionsData.length > 0) {
-        const connectionIds = connectionsData.map(c => c.id);
-        const partnerIds = connectionsData.map(c => 
-          c.sender_id === user.id ? c.receiver_id : c.sender_id
-        );
-
-        // Fetch all messages and profiles in parallel
-        const [messagesResult, profilesResult] = await Promise.all([
-          // Fetch all messages for all conversations at once
-          supabase
-            .from('messages')
-            .select('conversation_id, content, created_at, sender_id, read')
-            .in('conversation_id', connectionIds)
-            .order('created_at', { ascending: false }),
-          
-          // Fetch all partner profiles at once
-          supabase
-            .from('profiles')
-            .select('id, username, avatar_url')
-            .in('id', partnerIds)
-        ]);
-
-        const allMessages = messagesResult.data || [];
-        const profiles = profilesResult.data || [];
-        
-        // Create maps for quick lookup
-        const profileMap = new Map(profiles.map(p => [p.id, p]));
-        const messagesByConversation = new Map<string, typeof allMessages>();
-        
-        // Group messages by conversation
-        allMessages.forEach(msg => {
-          const convId = msg.conversation_id;
-          if (!messagesByConversation.has(convId)) {
-            messagesByConversation.set(convId, []);
-          }
-          messagesByConversation.get(convId)!.push(msg);
-        });
-
-        // Build conversations
-        connectionsData.forEach(conn => {
-          const partnerId = conn.sender_id === user.id ? conn.receiver_id : conn.sender_id;
-          const partner = profileMap.get(partnerId);
-          const messages = messagesByConversation.get(conn.id) || [];
-          
-          // Get last message and unread count
-          const lastMessage = messages.length > 0 ? messages[0] : null;
-          const unreadCount = messages.filter(m => m.sender_id !== user.id && !m.read).length;
-
-          if (partner) {
-            conversations.push({
-              id: conn.id,
-              partner: {
-                id: partner.id,
-                username: partner.username,
-                avatar_url: partner.avatar_url,
-              },
-              last_message: lastMessage ? {
-                content: lastMessage.content,
-                created_at: lastMessage.created_at,
-                sender_id: lastMessage.sender_id,
-              } : null,
-              unread_count: unreadCount,
-            });
-          }
-        });
-      }
+      const conversations: Conversation[] = (conversationsRows || []).map((row) => ({
+        id: row.id,
+        created_at: row.connection_created_at,
+        partner: {
+          id: row.partner_id,
+          username: row.partner_username,
+          avatar_url: row.partner_avatar_url,
+        },
+        last_message: row.last_message_created_at
+          ? {
+              content: row.last_message_content,
+              created_at: row.last_message_created_at,
+              sender_id: row.last_message_sender_id,
+            }
+          : null,
+        unread_count: row.unread_count || 0,
+      }));
 
       // Combine and sort by timestamp
       const inboxItems: InboxItem[] = [
@@ -202,7 +177,13 @@ export default function InboxScreen() {
           type: 'message' as const,
           id: conv.id,
           conversation: conv,
-          timestamp: conv.last_message?.created_at || conv.partner.id,
+          timestamp: conv.last_message?.created_at || conv.created_at || conv.partner.id,
+        })),
+        ...(notificationsData || []).map((notif: any) => ({
+          type: 'notification' as const,
+          id: notif.id,
+          notification: notif,
+          timestamp: notif.created_at,
         })),
       ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
@@ -217,7 +198,7 @@ export default function InboxScreen() {
   const openProfile = async (userId: string, interestId?: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, username, full_name, bio, avatar_url, detailed_interests, relationship_goals, is_verified, city, state, social_links, status_text, status_image_url, status_created_at')
       .eq('id', userId)
       .single();
     
@@ -335,6 +316,134 @@ export default function InboxScreen() {
           </View>
           <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
         </TouchableOpacity>
+      );
+    }
+
+    if (item.type === 'notification' && item.notification) {
+      const notif = item.notification;
+      const getNotificationIcon = () => {
+        switch (notif.type) {
+          case 'forum_reply':
+            return { name: 'bubble.left.and.bubble.right.fill' as const, color: '#3B82F6' };
+          case 'club_event':
+            return { name: 'calendar.badge.plus' as const, color: '#10B981' };
+          case 'club_member':
+            return { name: 'person.badge.plus' as const, color: '#8B5CF6' };
+          case 'club_invite':
+            return { name: 'envelope.badge' as const, color: '#F59E0B' };
+          default:
+            return { name: 'bell.fill' as const, color: '#6B7280' };
+        }
+      };
+
+      const icon = getNotificationIcon();
+
+      const markNotificationRead = async () => {
+        // Mark as read
+        if (!notif.read) {
+          await supabase
+            .from('notifications')
+            .update({ read: true, read_at: new Date().toISOString() })
+            .eq('id', notif.id);
+        }
+      };
+
+      const handleClubInviteResponse = async (response: 'accepted' | 'declined') => {
+        if (!user?.id || !notif.data?.club_id) return;
+
+        try {
+          await markNotificationRead();
+
+          if (response === 'accepted') {
+            const { error } = await supabase
+              .from('club_members')
+              .update({ status: 'accepted' })
+              .eq('club_id', notif.data.club_id)
+              .eq('user_id', user.id);
+            if (error) throw error;
+
+            router.push(`/clubs/${notif.data.club_id}?tab=forum`);
+          } else {
+            // Decline = remove membership row (requires DELETE policy, added in SQL)
+            const { error } = await supabase
+              .from('club_members')
+              .delete()
+              .eq('club_id', notif.data.club_id)
+              .eq('user_id', user.id);
+            if (error) throw error;
+          }
+
+          fetchData();
+        } catch (e: any) {
+          Alert.alert('Error', e?.message || 'Could not update invite.');
+        }
+      };
+
+      const handleNotificationPress = async () => {
+        await markNotificationRead();
+
+        // Navigate based on notification type
+        if (notif.type === 'forum_reply' && notif.data?.club_id) {
+          router.push(`/clubs/${notif.data.club_id}?tab=forum`);
+        } else if (notif.type === 'club_event' && notif.data?.club_id) {
+          router.push(`/clubs/${notif.data.club_id}?tab=events`);
+        } else if (notif.type === 'club_member' && notif.data?.club_id) {
+          router.push(`/clubs/${notif.data.club_id}?tab=members`);
+        } else if (notif.type === 'club_invite' && notif.data?.club_id) {
+          router.push(`/clubs/${notif.data.club_id}`);
+        }
+
+        fetchData(); // Refresh to update read status
+      };
+
+      return (
+        <View
+          className={`p-4 rounded-xl mb-3 shadow-sm border ${
+            notif.read ? 'bg-white border-gray-100' : 'bg-blue-50 border-blue-200'
+          }`}
+        >
+          <TouchableOpacity className="flex-row items-center" onPress={handleNotificationPress} activeOpacity={0.8}>
+            <View
+              className={`w-10 h-10 rounded-full items-center justify-center ${
+                notif.read ? 'bg-gray-100' : 'bg-blue-100'
+              }`}
+            >
+              <IconSymbol name={icon.name} size={20} color={icon.color} />
+            </View>
+            <View className="ml-3 flex-1 pr-2">
+              <Text className={`font-bold text-base mb-1 ${notif.read ? 'text-gray-700' : 'text-gray-900'}`}>
+                {notif.title}
+              </Text>
+              <Text className="text-gray-500 text-sm" numberOfLines={2}>
+                {notif.body}
+              </Text>
+            </View>
+            {!notif.read && <View className="w-2 h-2 bg-blue-500 rounded-full" />}
+          </TouchableOpacity>
+
+          {notif.type === 'club_invite' && notif.data?.club_id && (
+            <View className="flex-row items-center justify-end mt-3">
+              <TouchableOpacity
+                className="bg-gray-100 px-4 py-2 rounded-full mr-2"
+                onPress={() => router.push(`/clubs/${notif.data!.club_id}`)}
+              >
+                <Text className="text-gray-700 font-bold text-xs">View</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="bg-red-50 px-4 py-2 rounded-full mr-2"
+                onPress={() => handleClubInviteResponse('declined')}
+              >
+                <Text className="text-red-600 font-bold text-xs">Decline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="bg-green-50 px-4 py-2 rounded-full"
+                onPress={() => handleClubInviteResponse('accepted')}
+              >
+                <Text className="text-green-700 font-bold text-xs">Accept</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       );
     }
 

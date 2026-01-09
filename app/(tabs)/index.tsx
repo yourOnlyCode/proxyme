@@ -2,6 +2,7 @@ import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -70,30 +71,64 @@ export default function HomeScreen() {
   const [userCity, setUserCity] = useState<string | null>(null);
   const [referralCount, setReferralCount] = useState<number>(0);
   const [showFriendCodeToast, setShowFriendCodeToast] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  // Check if user has opted out of seeing the referral popup
+  const checkDontShowAgain = async () => {
+    try {
+      const value = await AsyncStorage.getItem('dont_show_referral_popup');
+      return value === 'true';
+    } catch (e) {
+      console.error('Error reading preference:', e);
+      return false;
+    }
+  };
+
+  const fetchUserProfile = async () => {
+    if (!user) return;
+    
+    // Fetch detailed interests & goals
+    const { data } = await supabase
+      .from('profiles')
+      .select('detailed_interests, relationship_goals, friend_code, city, referral_count')
+      .eq('id', user.id)
+      .single();
+    
+    if (data) {
+      setMyInterests(data.detailed_interests);
+      setMyGoals(data.relationship_goals);
+      setFriendCode(data.friend_code);
+      setUserCity(data.city);
+      setReferralCount(data.referral_count || 0);
+      // Show friend code toast if user has a friend code and hasn't opted out
+      if (data.friend_code) {
+        const shouldNotShow = await checkDontShowAgain();
+        if (!shouldNotShow) {
+          setShowFriendCodeToast(true);
+        }
+      }
+    }
+  };
+
+  const handleCloseReferralPopup = async () => {
+    setShowFriendCodeToast(false);
+    // Save preference if checkbox is checked
+    if (dontShowAgain) {
+      try {
+        await AsyncStorage.setItem('dont_show_referral_popup', 'true');
+      } catch (e) {
+        console.error('Error saving preference:', e);
+      }
+    }
+  };
 
   useEffect(() => {
     if (user) {
-        // Fetch detailed interests & goals
-        supabase.from('profiles').select('detailed_interests, relationship_goals, friend_code, city, referral_count').eq('id', user.id).single()
-        .then(({ data }) => {
-            if (data) {
-                setMyInterests(data.detailed_interests);
-                setMyGoals(data.relationship_goals);
-                setFriendCode(data.friend_code);
-                setUserCity(data.city);
-                setReferralCount(data.referral_count || 0);
-                // Show friend code toast if user has a friend code
-                if (data.friend_code) {
-                    setShowFriendCodeToast(true);
-                }
-            }
-        });
-
-        // Fetch My Status
-        fetchMyStatus();
-        
-        // Fetch pending requests
-        fetchPendingRequests();
+      fetchUserProfile();
+      // Fetch My Status
+      fetchMyStatus();
+      // Fetch pending requests
+      fetchPendingRequests();
     }
   }, [user]);
 
@@ -111,6 +146,22 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!user) return;
 
+    // Subscribe to profile changes (for referral_count updates)
+    const profileSubscription = supabase
+      .channel('profile-updates')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles',
+        filter: `id=eq.${user.id}`,
+      }, (payload) => {
+        // Update referral_count if it changed
+        if (payload.new.referral_count !== undefined) {
+          setReferralCount(payload.new.referral_count || 0);
+        }
+      })
+      .subscribe();
+
     // Subscribe to changes
     const subscription = supabase
       .channel('pending-requests-proxy')
@@ -125,6 +176,7 @@ export default function HomeScreen() {
       .subscribe();
 
     return () => {
+      supabase.removeChannel(profileSubscription);
       supabase.removeChannel(subscription);
     };
   }, [user]);
@@ -225,10 +277,13 @@ export default function HomeScreen() {
   // Refresh when tab comes into focus
   useFocusEffect(
     useCallback(() => {
+      // Refresh user profile to get updated referral_count
+      fetchUserProfile();
+      
       if (isProxyActive && location) {
         fetchProxyFeed();
       }
-    }, [isProxyActive, location])
+    }, [isProxyActive, location, user])
   );
 
   const sendInterest = async (targetUserId: string) => {
@@ -302,12 +357,25 @@ export default function HomeScreen() {
       setModalVisible(true);
   };
 
-  const calculateMatchPercentage = (score: number) => {
-    if (!myInterests) return 0;
-    const myCatCount = Object.keys(myInterests).length;
-    if (myCatCount === 0) return 0;
-    const maxScore = myCatCount * 16; // 1 for cat + 3*5 for items
-    return Math.round((score / maxScore) * 100);
+  const calculateMatchPercentage = (userInterests: Record<string, string[]> | null) => {
+    if (!myInterests || !userInterests) return 0;
+    
+    // Count the actual number of matching interests/tags
+    const commonInterests = getCommonInterests(userInterests);
+    const matchCount = commonInterests.length;
+    
+    // Map match count to percentage
+    if (matchCount >= 4) {
+      return 98; // 4+ things in common: 98%+ match
+    } else if (matchCount === 3) {
+      return 95; // 3 things in common: 95% match
+    } else if (matchCount === 2) {
+      return 80; // 2 things in common: 80% match
+    } else if (matchCount === 1) {
+      return 60; // 1 thing in common: 60% match
+    } else {
+      return 0; // No matches: 0% match
+    }
   };
 
   // Find common interests between my interests and user's interests
@@ -343,7 +411,7 @@ export default function HomeScreen() {
   // Track initial touch position for swipe detection
   const initialTouchX = useRef<number | null>(null);
 
-  // Swipe gesture handler (swipe left for inbox, swipe right for camera)
+  // Swipe gesture handler (swipe right for camera only)
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -363,12 +431,8 @@ export default function HomeScreen() {
         const startX = initialTouchX.current ?? evt.nativeEvent.pageX;
         const isFromLeftEdge = startX < 100;
         
-        // Swipe left (dx < 0) to open inbox
-        if (gestureState.dx < -100) {
-          router.push('/inbox');
-        }
         // Swipe right from left edge (dx > 0) to open camera
-        else if (gestureState.dx > 100 && isFromLeftEdge) {
+        if (gestureState.dx > 100 && isFromLeftEdge) {
           openCamera(true, 'proxy'); // Pass true to indicate it's from swipe, and 'proxy' as source
         }
         
@@ -484,15 +548,45 @@ export default function HomeScreen() {
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 keyExtractor={(img, idx) => `feed-${item.id}-${idx}`}
-                renderItem={({ item: imgPath }) => (
-                    <TouchableOpacity 
-                        activeOpacity={0.95} 
-                        onPress={() => openProfile(item)}
-                        style={{ width: CARD_WIDTH - 2, height: CARD_WIDTH - 2 }}
-                    >
-                        <FeedImage path={imgPath} resizeMode="cover" />
-                    </TouchableOpacity>
-                )}
+                renderItem={({ item: imgPath, index }) => {
+                    const isAvatar = index === 0 && imgPath === item.avatar_url;
+                    return (
+                        <TouchableOpacity 
+                            activeOpacity={0.95} 
+                            onPress={() => openProfile(item)}
+                            style={{ width: CARD_WIDTH - 2, height: CARD_WIDTH - 2 }}
+                        >
+                            <View style={{ width: '100%', height: '100%', position: 'relative' }}>
+                                <FeedImage path={imgPath} resizeMode="cover" />
+                                {/* Show verified badge only on avatar (first image) */}
+                                {isAvatar && item.is_verified && (
+                                    <View
+                                        style={{
+                                            position: 'absolute',
+                                            bottom: 12,
+                                            right: 12,
+                                            backgroundColor: '#3B82F6',
+                                            borderRadius: 12,
+                                            width: 24,
+                                            height: 24,
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            shadowColor: '#000',
+                                            shadowOffset: { width: 0, height: 2 },
+                                            shadowOpacity: 0.3,
+                                            shadowRadius: 4,
+                                            elevation: 5,
+                                            borderWidth: 2,
+                                            borderColor: '#fff',
+                                        }}
+                                    >
+                                        <IconSymbol name="checkmark.seal.fill" size={14} color="#fff" />
+                                    </View>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+                    );
+                }}
             />
             {/* Dots */}
             {displayImages.length > 1 && (
@@ -815,7 +909,7 @@ export default function HomeScreen() {
             />
             {/* Close Button - Overlay that doesn't take space */}
             <TouchableOpacity
-              onPress={() => setShowFriendCodeToast(false)}
+              onPress={handleCloseReferralPopup}
               className="absolute top-3 right-3 z-10 p-1.5"
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               style={{
@@ -873,6 +967,25 @@ export default function HomeScreen() {
                 <Text className="text-xs text-gray-600 text-center mb-2" style={{ fontWeight: '500' }}>
                   Proxyme is powered by its users! Share to expand {userCity || 'your city'}. {referralCount >= 3 ? '🎉 You\'re verified!' : `Get ${3 - referralCount} more ${referralCount === 2 ? 'referral' : 'referrals'} to unlock verification.`}
                 </Text>
+                {/* Don't show again checkbox */}
+                <TouchableOpacity
+                  onPress={() => setDontShowAgain(!dontShowAgain)}
+                  className="flex-row items-center justify-center mt-2"
+                  activeOpacity={0.7}
+                >
+                  <View
+                    className={`w-4 h-4 rounded border-2 mr-2 items-center justify-center ${
+                      dontShowAgain ? 'bg-blue-600 border-blue-600' : 'border-gray-400 bg-white'
+                    }`}
+                  >
+                    {dontShowAgain && (
+                      <IconSymbol name="checkmark" size={10} color="white" />
+                    )}
+                  </View>
+                  <Text className="text-xs text-gray-600" style={{ fontWeight: '400' }}>
+                    Don't show this again
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
           </View>
@@ -1016,7 +1129,10 @@ function StatusPreviewModal({ visible, profile, onClose }: { visible: boolean, p
                            </View>
                        )}
                        <View className="p-4 bg-gray-50 border-t border-gray-100 items-center">
-                           <Text className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Posted by {profile.full_name || profile.username}</Text>
+                           <View className="flex-row items-center justify-center mb-1">
+                               <Text className="text-xs font-bold text-gray-400 uppercase tracking-widest">Posted by {profile.full_name || profile.username}</Text>
+                               {profile.is_verified && <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />}
+                           </View>
                            {expiryText ? <Text className="text-[10px] text-gray-400 font-medium">{expiryText}</Text> : null}
                        </View>
                   </TouchableOpacity>

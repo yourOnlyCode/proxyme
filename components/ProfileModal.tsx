@@ -55,6 +55,8 @@ export function ProfileModal({
     const router = useRouter();
     const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number, hidden?: boolean } | null>(null);
     const [fetchedPhotos, setFetchedPhotos] = useState<{ url: string; order: number }[] | null>(null);
+    const [fetchedProfile, setFetchedProfile] = useState<Partial<ProfileData> | null>(null);
+    const [loadingProfile, setLoadingProfile] = useState(false);
     const [fullScreenVisible, setFullScreenVisible] = useState(false);
     const [fullScreenIndex, setFullScreenIndex] = useState(0);
     const fullScreenScrollRef = useRef<ScrollView>(null);
@@ -73,6 +75,9 @@ export function ProfileModal({
 
     useEffect(() => {
         if (profile?.id && visible) {
+            setFetchedProfile(null);
+            setLoadingProfile(true);
+
             supabase.rpc('get_user_connection_stats', { target_user_id: profile.id })
                 .then(({ data, error }) => {
                     if (data) setStats(data);
@@ -89,8 +94,22 @@ export function ProfileModal({
                         setFetchedPhotos(data.map(p => ({ url: p.image_url, order: p.display_order })));
                     }
                 });
+
+            // Fetch full profile details (especially `detailed_interests`) so the modal
+            // is consistent even when upstream screens pass a "thin" profile object.
+            supabase
+                .from('profiles')
+                .select('id, username, full_name, bio, avatar_url, detailed_interests, relationship_goals, is_verified, city, state, social_links, status_text, status_image_url, status_created_at')
+                .eq('id', profile.id)
+                .single()
+                .then(({ data }) => {
+                    if (data) setFetchedProfile(data);
+                })
+                .finally(() => setLoadingProfile(false));
         } else {
             setFetchedPhotos(null);
+            setFetchedProfile(null);
+            setLoadingProfile(false);
         }
     }, [profile?.id, visible]);
 
@@ -99,6 +118,24 @@ export function ProfileModal({
     const isTrulyConnected = connectionState.state === 'already_connected';
 
     if (!profile) return null;
+
+    const mergedProfile: ProfileData = {
+        ...profile,
+        ...(fetchedProfile || {}),
+        detailed_interests: (fetchedProfile as any)?.detailed_interests ?? profile.detailed_interests,
+        relationship_goals: (fetchedProfile as any)?.relationship_goals ?? profile.relationship_goals,
+        bio: (fetchedProfile as any)?.bio ?? profile.bio,
+        social_links: (fetchedProfile as any)?.social_links ?? profile.social_links,
+        avatar_url: (fetchedProfile as any)?.avatar_url ?? profile.avatar_url,
+        full_name: (fetchedProfile as any)?.full_name ?? profile.full_name,
+        username: (fetchedProfile as any)?.username ?? profile.username,
+        is_verified: (fetchedProfile as any)?.is_verified ?? profile.is_verified,
+        city: (fetchedProfile as any)?.city ?? profile.city,
+        state: (fetchedProfile as any)?.state ?? profile.state,
+        status_text: (fetchedProfile as any)?.status_text ?? profile.status_text,
+        status_image_url: (fetchedProfile as any)?.status_image_url ?? profile.status_image_url,
+        status_created_at: (fetchedProfile as any)?.status_created_at ?? profile.status_created_at,
+    };
     
     const getGoalColors = (goal?: string) => {
         switch(goal) {
@@ -109,15 +146,15 @@ export function ProfileModal({
         }
     };
 
-    const primaryGoal = profile.relationship_goals?.[0];
+    const primaryGoal = mergedProfile.relationship_goals?.[0];
     const colors = getGoalColors(primaryGoal);
 
     // Calculate Shared Interests Score & Percentage locally
     let sharedScore = 0;
     const allInterests: { category: string, value: string, isShared: boolean }[] = [];
     
-    if (profile.detailed_interests) {
-        Object.entries(profile.detailed_interests).forEach(([cat, values]) => {
+    if (mergedProfile.detailed_interests) {
+        Object.entries(mergedProfile.detailed_interests).forEach(([cat, values]) => {
             let catMatch = false;
             if (myInterests && myInterests[cat]) {
                 catMatch = true;
@@ -154,9 +191,9 @@ export function ProfileModal({
     const matchPercentage = calculateMatchPercentage();
 
     // Prepare Photos
-    const galleryPhotos = fetchedPhotos || profile.photos || [];
+    const galleryPhotos = fetchedPhotos || mergedProfile.photos || [];
     const displayPhotos: { url: string }[] = [];
-    if (profile.avatar_url) displayPhotos.push({ url: profile.avatar_url });
+    if (mergedProfile.avatar_url) displayPhotos.push({ url: mergedProfile.avatar_url });
     galleryPhotos.forEach(p => displayPhotos.push({ url: p.url }));
     
     // Ensure at least one item for rendering if everything is missing
@@ -229,11 +266,11 @@ export function ProfileModal({
                         {/* Name & Badge */}
                         <View className="flex-row items-center justify-between mb-2">
                              <View className="flex-row items-center flex-1">
-                                <Text className="text-3xl font-extrabold text-ink mr-2">{profile.full_name}</Text>
+                                 <Text className="text-3xl font-extrabold text-ink mr-2">{mergedProfile.full_name}</Text>
                                 {isTrulyConnected && (
                                     <IconSymbol name="star.fill" size={24} color="#F59E0B" style={{ marginRight: 8 }} />
                                 )}
-                                {profile.is_verified && (
+                                {mergedProfile.is_verified && (
                                     <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" style={{ marginRight: 8 }} />
                                 )}
                                 {matchPercentage > 0 && (
@@ -246,8 +283,8 @@ export function ProfileModal({
                         
                         {/* Username & Socials */}
                         <View className="flex-row items-center mb-4 flex-wrap">
-                            <Text className="text-gray-500 font-medium text-lg mr-3">@{profile.username}</Text>
-                            <SocialIcons links={profile.social_links} />
+                            <Text className="text-gray-500 font-medium text-lg mr-3">@{mergedProfile.username}</Text>
+                            <SocialIcons links={mergedProfile.social_links} />
                         </View>
 
                         {/* Connection Stats */}
@@ -293,18 +330,18 @@ export function ProfileModal({
                         <View className="flex-row items-center mb-6">
                             <IconSymbol name="location.fill" size={16} color="#9CA3AF" />
                             <Text className="text-gray-500 ml-1">
-                                {profile.dist_meters ? `${Math.round(profile.dist_meters)}m away` : 'Nearby'}
-                                {profile.city && ` • ${profile.city}`}
-                                {profile.state && `, ${profile.state}`}
+                                {mergedProfile.dist_meters ? `${Math.round(mergedProfile.dist_meters)}m away` : 'Nearby'}
+                                {mergedProfile.city && ` • ${mergedProfile.city}`}
+                                {mergedProfile.state && `, ${mergedProfile.state}`}
                             </Text>
                         </View>
 
                         {/* Relationship Goals */}
-                        {profile.relationship_goals && profile.relationship_goals.length > 0 && (
+                        {mergedProfile.relationship_goals && mergedProfile.relationship_goals.length > 0 && (
                             <View className="mb-6">
                                 <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">Looking For</Text>
                                 <View className="flex-row flex-wrap">
-                                    {profile.relationship_goals.map((goal, idx) => {
+                                    {mergedProfile.relationship_goals.map((goal, idx) => {
                                         const badgeColors = getGoalColors(goal);
                                         return (
                                             <View key={idx} className={`px-4 py-2 rounded-full mr-2 mb-2 ${badgeColors.badgeBg}`}>
@@ -317,16 +354,19 @@ export function ProfileModal({
                         )}
 
                         {/* Bio */}
-                        {profile.bio && (
+                        {mergedProfile.bio && (
                             <View className="mb-6">
                                 <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">About</Text>
-                                <Text className="text-ink text-lg leading-7">{profile.bio}</Text>
+                                <Text className="text-ink text-lg leading-7">{mergedProfile.bio}</Text>
                             </View>
                         )}
 
                         {/* Interests */}
                         <View className="mb-8">
                              <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">Interests</Text>
+                             {loadingProfile && allInterests.length === 0 && (
+                                 <Text className="text-gray-400 italic mb-2">Loading interests...</Text>
+                             )}
                              <View className="flex-row flex-wrap">
                                 {allInterests.map((item, idx) => (
                                     <View 
@@ -356,7 +396,7 @@ export function ProfileModal({
                  {/* Sticky Footer */}
                  <View className="p-4 bg-white border-t border-gray-100 shadow-lg pb-8">
                     <ProfileActionButtons
-                        profile={profile}
+                        profile={mergedProfile}
                         variant="modal"
                         myGoals={myGoals}
                         onStateChange={onStateChange}

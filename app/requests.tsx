@@ -71,7 +71,7 @@ export default function RequestsScreen() {
     
     const { data, error } = await supabase
       .from('notifications')
-      .select('*')
+      .select('id, type, title, body, data, read, created_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -115,7 +115,7 @@ export default function RequestsScreen() {
   const openProfile = async (userId: string, interestId: string) => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, username, full_name, bio, avatar_url, detailed_interests, relationship_goals, is_verified, city, state, social_links, status_text, status_image_url, status_created_at')
         .eq('id', userId)
         .single();
       

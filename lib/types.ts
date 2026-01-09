@@ -17,6 +17,7 @@ export type ClubMember = {
       username: string;
       full_name: string;
       avatar_url: string | null;
+      is_verified?: boolean;
   }
 };
 
@@ -37,6 +38,7 @@ export type ForumTopic = {
         username: string;
         full_name: string | null;
         avatar_url: string | null;
+        is_verified?: boolean;
     }
     support_count?: number;
     oppose_count?: number;
@@ -56,6 +58,7 @@ export type ForumReply = {
         username: string;
         full_name: string | null;
         avatar_url: string | null;
+        is_verified?: boolean;
     }
     support_count?: number;
     oppose_count?: number;
@@ -74,6 +77,7 @@ export type ClubEvent = {
     creator: {
         username: string;
         full_name: string | null;
+        is_verified?: boolean;
     }
     rsvp_counts?: {
         going: number;

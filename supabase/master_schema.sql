@@ -75,6 +75,13 @@ begin
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'referred_by') then
         alter table public.profiles add column referred_by uuid REFERENCES public.profiles(id);
     end if;
+    -- Onboarding and social links columns
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'is_onboarded') then
+        alter table public.profiles add column is_onboarded boolean DEFAULT false;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'social_links') then
+        alter table public.profiles add column social_links jsonb;
+    end if;
 end $$;
 
 -- RLS for profiles
@@ -157,6 +164,28 @@ create policy "Receiver can update status"
   on public.interests for update
   using ( (SELECT auth.uid()) = receiver_id );
 
+-- Allow either side to disconnect via SECURITY DEFINER function
+create or replace function public.remove_connection(p_partner_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.interests
+  set status = 'declined'
+  where status = 'accepted'
+    and (
+      (sender_id = auth.uid() and receiver_id = p_partner_id)
+      or
+      (sender_id = p_partner_id and receiver_id = auth.uid())
+    );
+end;
+$$;
+
+revoke all on function public.remove_connection(uuid) from public;
+grant execute on function public.remove_connection(uuid) to authenticated;
+
 -- Function to generate unique 6-digit friend code
 create or replace function public.generate_friend_code()
 returns text
@@ -215,9 +244,14 @@ begin
           -- Link user
           update public.profiles set referred_by = referrer_id where id = new.id;
           
-          -- Increment count
+          -- Recalculate referral_count based on actual referred_by relationships
+          -- This ensures accuracy even if the count was previously incorrect
           update public.profiles 
-          set referral_count = referral_count + 1 
+          set referral_count = (
+            select count(*) 
+            from public.profiles ref 
+            where ref.referred_by = referrer_id
+          )
           where id = referrer_id
           returning referral_count into current_count;
           
@@ -231,6 +265,76 @@ begin
   return new;
 end;
 $$;
+
+-- Apply a friend code AFTER signup (onboarding flow).
+-- This lets us keep sign-up minimal while still incrementing the referrer's referral_count safely.
+create or replace function public.apply_friend_code(p_friend_code text)
+returns json
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  me uuid;
+  referrer_id uuid;
+  current_count int;
+  code text;
+begin
+  me := auth.uid();
+  if me is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  code := trim(coalesce(p_friend_code, ''));
+  if code = '' then
+    raise exception 'Friend code is required';
+  end if;
+
+  -- Disallow applying more than once.
+  if exists (select 1 from public.profiles p where p.id = me and p.referred_by is not null) then
+    raise exception 'Friend code already applied';
+  end if;
+
+  select p.id into referrer_id
+  from public.profiles p
+  where p.friend_code = code;
+
+  if referrer_id is null then
+    raise exception 'Invalid friend code';
+  end if;
+
+  if referrer_id = me then
+    raise exception 'You cannot use your own friend code';
+  end if;
+
+  -- Link user to referrer.
+  update public.profiles
+  set referred_by = referrer_id
+  where id = me;
+
+  -- Recalculate referrer's count from truth source (referred_by links) for correctness.
+  update public.profiles
+  set referral_count = (
+    select count(*)
+    from public.profiles ref
+    where ref.referred_by = referrer_id
+  )
+  where id = referrer_id
+  returning referral_count into current_count;
+
+  -- Unlock verification automatically at 3 referrals
+  if current_count >= 3 then
+    update public.profiles set is_verified = true where id = referrer_id;
+  end if;
+
+  return json_build_object(
+    'referrer_id', referrer_id,
+    'referral_count', current_count
+  );
+end;
+$$;
+
+revoke all on function public.apply_friend_code(text) from public;
+grant execute on function public.apply_friend_code(text) to authenticated;
 
 -- Trigger to ensure friend_code is set on profile insert
 create or replace function public.ensure_friend_code()
@@ -364,6 +468,10 @@ CREATE TABLE IF NOT EXISTS public.clubs (
     max_member_count INTEGER CHECK (max_member_count IS NULL OR max_member_count > 0)
 );
 
+-- One club per owner (DB enforcement)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clubs_owner_one_club
+  ON public.clubs(owner_id);
+
 ALTER TABLE public.clubs ENABLE ROW LEVEL SECURITY;
 
 drop policy if exists "Clubs are viewable by everyone" on public.clubs;
@@ -402,6 +510,7 @@ ALTER TABLE public.club_members ENABLE ROW LEVEL SECURITY;
 
 drop policy if exists "Members can view other members" on public.club_members;
 drop policy if exists "Users can join/leave clubs" on public.club_members;
+drop policy if exists "Users can leave clubs" on public.club_members;
 drop policy if exists "Admins/Owners can update member status" on public.club_members;
 
 CREATE POLICY "Members can view other members"
@@ -412,6 +521,10 @@ CREATE POLICY "Users can join/leave clubs"
     ON public.club_members FOR INSERT
     WITH CHECK ((SELECT auth.uid()) = user_id OR 
                EXISTS (SELECT 1 FROM public.clubs WHERE id = club_id AND owner_id = (SELECT auth.uid())));
+
+CREATE POLICY "Users can leave clubs"
+    ON public.club_members FOR DELETE
+    USING ((SELECT auth.uid()) = user_id);
 
 CREATE POLICY "Admins/Owners can update member status"
     ON public.club_members FOR UPDATE
@@ -689,9 +802,7 @@ returns table (
   is_verified boolean,
   has_sent_interest boolean,
   has_received_interest boolean,
-  status_text text,
-  status_image_url text,
-  status_created_at timestamptz,
+  statuses jsonb,
   connection_id uuid
 )
 language plpgsql
@@ -713,7 +824,11 @@ begin
     p.avatar_url,
     p.relationship_goals,
     p.detailed_interests,
-    null::jsonb as photos, -- Placeholder as profile_photos table logic is separate
+    (
+        select jsonb_agg(jsonb_build_object('url', pp.image_url, 'order', pp.display_order) order by pp.display_order)
+        from public.profile_photos pp
+        where pp.user_id = p.id
+    ) as photos,
     st_distance(
       p.location,
       st_point(long, lat)::geography
@@ -746,9 +861,21 @@ begin
         select 1 from public.interests i 
         where i.sender_id = p.id and i.receiver_id = auth.uid()
     ) as has_received_interest,
-    CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_text ELSE NULL END as status_text,
-    CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_image_url ELSE NULL END as status_image_url,
-    CASE WHEN p.status_created_at > now() - interval '1 hour' THEN p.status_created_at ELSE NULL END as status_created_at,
+    -- Fetch active statuses
+    (
+        select jsonb_agg(
+            jsonb_build_object(
+                'id', s.id,
+                'content', s.content,
+                'type', s.type,
+                'caption', s.caption,
+                'created_at', s.created_at,
+                'expires_at', s.expires_at
+            ) order by s.created_at asc
+        )
+        from public.statuses s
+        where s.user_id = p.id and s.expires_at > now()
+    ) as statuses,
     (
         select i.id 
         from public.interests i
@@ -924,7 +1051,10 @@ DECLARE
   is_hidden boolean;
 BEGIN
   -- Check privacy
-  SELECT hide_connections INTO is_hidden FROM public.profiles WHERE id = target_user_id;
+  -- NOTE: qualify `profiles.id` because `id` is also an output column variable in RETURNS TABLE.
+  SELECT p.hide_connections INTO is_hidden
+  FROM public.profiles p
+  WHERE p.id = target_user_id;
   
   -- If hidden and viewer is NOT the target user, return nothing
   IF is_hidden AND auth.uid() <> target_user_id THEN

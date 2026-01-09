@@ -1,4 +1,5 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { GlassCard } from '@/components/ui/GlassCard';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -88,7 +89,7 @@ export default function ClubsScreen() {
             // Fetch all clubs in city
             const { data, error } = await supabase
                 .from('clubs')
-                .select('*')
+                .select('id, name, description, image_url, city')
                 .eq('city', address.city);
 
             if (error) throw error;
@@ -125,6 +126,45 @@ export default function ClubsScreen() {
           return;
       }
 
+      // Check if user is verified
+      const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_verified')
+          .eq('id', user.id)
+          .single();
+
+      if (!profile?.is_verified) {
+          Alert.alert(
+              'Verification Required',
+              'You need to be verified to create clubs. Get verified to unlock this feature and more!',
+              [
+                  { text: 'Cancel', style: 'cancel' },
+                  { 
+                      text: 'Get Verified', 
+                      onPress: () => router.push('/(settings)/get-verified')
+                  }
+              ]
+          );
+          return;
+      }
+
+      // Enforce: users can only create one club
+      const { data: existingClub, error: existingClubError } = await supabase
+          .from('clubs')
+          .select('id')
+          .eq('owner_id', user.id)
+          .maybeSingle();
+
+      if (existingClubError) {
+          Alert.alert('Error', existingClubError.message);
+          return;
+      }
+
+      if (existingClub?.id) {
+          Alert.alert('Limit reached', 'You can only create one club. You can still join as many clubs as you want.');
+          return;
+      }
+
       setCreating(true);
       try {
           let imagePath = null;
@@ -154,7 +194,14 @@ export default function ClubsScreen() {
               .select()
               .single();
 
-          if (clubError) throw clubError;
+          if (clubError) {
+              // DB-enforced unique index on owner_id will throw 23505
+              if (clubError.code === '23505') {
+                  Alert.alert('Limit reached', 'You can only create one club. You can still join as many clubs as you want.');
+                  return;
+              }
+              throw clubError;
+          }
 
           // Insert Owner Member
           const { error: memberError } = await supabase
@@ -188,50 +235,49 @@ export default function ClubsScreen() {
   };
 
   const renderClubItem = ({ item }: { item: Club }) => (
-      <TouchableOpacity 
-        className="bg-white rounded-2xl mb-4 shadow-sm overflow-hidden"
-        onPress={() => router.push(`/clubs/${item.id}`)}
-      >
-          <View className="h-32 bg-gray-200">
-              {item.image_url ? (
-                  <ClubImage path={item.image_url} />
-              ) : (
-                  <View className="w-full h-full items-center justify-center bg-gray-300">
-                      <IconSymbol name="person.3.fill" size={40} color="#9CA3AF" />
+      <TouchableOpacity onPress={() => router.push(`/clubs/${item.id}`)} activeOpacity={0.92}>
+          <GlassCard className="mb-4" contentClassName="overflow-hidden" tint="light" intensity={35}>
+              <View className="h-32 bg-gray-200">
+                  {item.image_url ? (
+                      <ClubImage path={item.image_url} />
+                  ) : (
+                      <View className="w-full h-full items-center justify-center bg-gray-300">
+                          <IconSymbol name="person.3.fill" size={40} color="#9CA3AF" />
+                      </View>
+                  )}
+                  <View className="absolute top-2 right-2 bg-black/50 px-2 py-1 rounded-md">
+                      <Text className="text-white text-xs font-bold uppercase">{item.city || ''}</Text>
                   </View>
-              )}
-              <View className="absolute top-2 right-2 bg-black/50 px-2 py-1 rounded-md">
-                  <Text className="text-white text-xs font-bold uppercase">{item.city || ''}</Text>
               </View>
-          </View>
-          <View className="p-4">
-              <View className="flex-row justify-between items-center mb-1">
-                  <Text className="text-xl font-bold text-ink flex-1 mr-2" numberOfLines={1}>{item.name}</Text>
-                  {item.role && (
-                      <View className="bg-blue-100 px-2 py-0.5 rounded text-xs">
-                          <Text className="text-blue-700 font-bold text-[10px] uppercase">{String(item.role)}</Text>
+              <View className="p-4">
+                  <View className="flex-row justify-between items-center mb-1">
+                      <Text className="text-xl font-bold text-ink flex-1 mr-2" numberOfLines={1}>{item.name}</Text>
+                      {item.role && (
+                          <View className="bg-blue-100 px-2 py-0.5 rounded text-xs">
+                              <Text className="text-blue-700 font-bold text-[10px] uppercase">{String(item.role)}</Text>
+                          </View>
+                      )}
+                  </View>
+                  <Text className="text-gray-500 text-sm mb-3" numberOfLines={2}>{item.description || 'No description'}</Text>
+                  
+                  {item.is_member ? (
+                      <View className="flex-row items-center">
+                          <IconSymbol name="checkmark.circle.fill" size={16} color="#10B981" />
+                          <Text className="text-emerald-600 font-bold text-xs ml-1">Member</Text>
+                      </View>
+                  ) : (
+                      <View className="flex-row items-center">
+                          <IconSymbol name="lock.fill" size={12} color="#6B7280" />
+                          <Text className="text-gray-500 font-bold text-xs ml-1">Invite Only</Text>
                       </View>
                   )}
               </View>
-              <Text className="text-gray-500 text-sm mb-3" numberOfLines={2}>{item.description || 'No description'}</Text>
-              
-              {item.is_member ? (
-                  <View className="flex-row items-center">
-                      <IconSymbol name="checkmark.circle.fill" size={16} color="#10B981" />
-                      <Text className="text-emerald-600 font-bold text-xs ml-1">Member</Text>
-                  </View>
-              ) : (
-                  <View className="flex-row items-center">
-                      <IconSymbol name="lock.fill" size={12} color="#6B7280" />
-                      <Text className="text-gray-500 font-bold text-xs ml-1">Invite Only</Text>
-                  </View>
-              )}
-          </View>
+          </GlassCard>
       </TouchableOpacity>
   );
 
   return (
-    <View className="flex-1 bg-gray-50 pt-12 px-4">
+    <View className="flex-1 bg-slate-50 pt-12 px-4">
         <View className="flex-row justify-between items-center mb-4">
             <Text className="text-3xl font-bold text-ink">Social Clubs</Text>
             {/* Create Button - verify limit logic handled in backend or assume UI check needed? */}
@@ -243,26 +289,22 @@ export default function ClubsScreen() {
             </TouchableOpacity>
         </View>
 
-        <View 
-          className="flex-row mb-6 bg-white p-1 rounded-xl shadow-sm"
-          style={{
-            borderWidth: 1,
-            borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
-          }}
-        >
-            <TouchableOpacity 
-                onPress={() => setTab('my')}
-                className={`flex-1 py-2 rounded-lg items-center ${tab === 'my' ? 'bg-gray-100' : ''}`}
-            >
-                <Text className={`font-bold ${tab === 'my' ? 'text-ink' : 'text-gray-400'}`}>My Clubs</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-                onPress={() => setTab('discover')}
-                className={`flex-1 py-2 rounded-lg items-center ${tab === 'discover' ? 'bg-gray-100' : ''}`}
-            >
-                <Text className={`font-bold ${tab === 'discover' ? 'text-ink' : 'text-gray-400'}`}>Discover {address?.city || 'Clubs'}</Text>
-            </TouchableOpacity>
-        </View>
+        <GlassCard className="mb-6" contentClassName="p-1" tint="light" intensity={25}>
+            <View className="flex-row">
+                <TouchableOpacity 
+                    onPress={() => setTab('my')}
+                    className={`flex-1 py-2 rounded-lg items-center ${tab === 'my' ? 'bg-white/80' : ''}`}
+                >
+                    <Text className={`font-bold ${tab === 'my' ? 'text-ink' : 'text-gray-400'}`}>My Clubs</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                    onPress={() => setTab('discover')}
+                    className={`flex-1 py-2 rounded-lg items-center ${tab === 'discover' ? 'bg-white/80' : ''}`}
+                >
+                    <Text className={`font-bold ${tab === 'discover' ? 'text-ink' : 'text-gray-400'}`}>Discover {address?.city || 'Clubs'}</Text>
+                </TouchableOpacity>
+            </View>
+        </GlassCard>
 
         <FlatList
             data={tab === 'my' ? myClubs : cityClubs}
@@ -347,7 +389,7 @@ export default function ClubsScreen() {
                 </TouchableOpacity>
                 
                 <Text className="text-center text-gray-400 text-xs mt-4">
-                    Unverified users can create max 1 club.
+                    Verification required to create clubs.
                 </Text>
             </View>
         </Modal>

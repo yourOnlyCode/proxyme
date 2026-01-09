@@ -1,7 +1,9 @@
 import EventCard from '@/components/club/EventCard';
+import ReplyItem from '@/components/club/ReplyItem';
 import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
 import Avatar from '@/components/profile/Avatar';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
+import { GlassCard } from '@/components/ui/GlassCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ClubDetail, ClubEvent, ClubMember, ForumReply, ForumTopic } from '@/lib/types';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -9,9 +11,10 @@ import * as Calendar from 'expo-calendar';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
+import { getUserConnectionsList } from '../../lib/connections';
 import { supabase } from '../../lib/supabase';
 
 
@@ -107,7 +110,11 @@ export default function ClubDetailScreen() {
   }, [id, user]);
 
   const fetchClubDetails = async () => {
-      const { data, error } = await supabase.from('clubs').select('*').eq('id', id).single();
+      const { data, error } = await supabase
+        .from('clubs')
+        .select('id, name, description, image_url, city, owner_id, max_member_count')
+        .eq('id', id)
+        .single();
       if (data) {
           setClub(data);
           // Initialize settings form
@@ -216,7 +223,7 @@ export default function ClubDetailScreen() {
         .from('club_forum_topics')
         .select(`
             id, title, content, created_at, updated_at, reply_count, last_reply_at, is_pinned, is_locked, created_by,
-            creator:profiles!created_by (username, full_name, avatar_url)
+            creator:profiles!created_by (username, full_name, avatar_url, is_verified)
         `)
         .eq('club_id', id)
         .order('is_pinned', { ascending: false })
@@ -231,7 +238,7 @@ export default function ClubDetailScreen() {
         .from('club_forum_replies')
         .select(`
             id, content, created_at, updated_at, is_edited, edited_at, parent_reply_id, created_by,
-            creator:profiles!created_by (username, full_name, avatar_url)
+            creator:profiles!created_by (username, full_name, avatar_url, is_verified)
         `)
         .eq('topic_id', topicId)
         .order('created_at', { ascending: true });
@@ -296,7 +303,7 @@ export default function ClubDetailScreen() {
         .from('club_members')
         .select(`
             id, user_id, role, status,
-            profile:profiles!user_id (username, full_name, avatar_url)
+            profile:profiles!user_id (username, full_name, avatar_url, is_verified)
         `)
         .eq('club_id', id)
         .eq('status', 'accepted');
@@ -656,24 +663,66 @@ export default function ClubDetailScreen() {
       }
   };
 
-  const fetchConnections = async () => {
+  const handleDeclineInvite = async () => {
       if (!user) return;
-      
-      const { data, error } = await supabase.rpc('get_user_connections_list', {
-          target_user_id: user.id,
-          filter_intent: null // Get all connections regardless of intent
-      });
-      
-      if (error) {
-          console.error('Error fetching connections:', error);
-          Alert.alert('Error', 'Failed to load connections');
+      const { error } = await supabase
+        .from('club_members')
+        .delete()
+        .eq('club_id', id)
+        .eq('user_id', user.id);
+
+      if (error) Alert.alert('Error', error.message);
+      else {
+          setMemberStatus(null);
+          setRole(null);
+          Alert.alert('Declined', 'Invite declined.');
+          router.back();
+      }
+  };
+
+  const handleLeaveClub = async () => {
+      if (!user) return;
+      if (role === 'owner') {
+          Alert.alert('Owner', 'As the owner, you can delete the club instead of leaving.');
           return;
       }
-      
-      // Filter out existing members
-      const memberIds = new Set(members.map(m => m.user_id));
-      const filtered = (data || []).filter((u: any) => !memberIds.has(u.id));
-      setSearchResults(filtered);
+
+      Alert.alert('Leave club?', 'You can be invited again later.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+              text: 'Leave',
+              style: 'destructive',
+              onPress: async () => {
+                  const { error } = await supabase
+                    .from('club_members')
+                    .delete()
+                    .eq('club_id', id)
+                    .eq('user_id', user.id);
+
+                  if (error) Alert.alert('Error', error.message);
+                  else {
+                      setMemberStatus(null);
+                      setRole(null);
+                      router.back();
+                  }
+              }
+          }
+      ]);
+  };
+
+  const fetchConnections = async () => {
+      if (!user) return;
+
+      try {
+          const connections = await getUserConnectionsList({ targetUserId: user.id, filterIntent: null });
+          // Filter out existing members
+          const memberIds = new Set(members.map(m => m.user_id));
+          const filtered = (connections || []).filter((u: any) => !memberIds.has(u.id));
+          setSearchResults(filtered);
+      } catch (error: any) {
+          console.error('Error fetching connections:', error);
+          Alert.alert('Error', 'Failed to load connections. Please try again.');
+      }
   };
 
   const inviteUser = async (userId: string) => {
@@ -697,7 +746,7 @@ export default function ClubDetailScreen() {
       try {
           const { data: eventsData, error } = await supabase
             .from('club_events')
-            .select('*')
+            .select('id, club_id, title, description, event_date, location, created_by, created_at')
             .eq('club_id', id)
             .order('event_date', { ascending: true });
           
@@ -708,7 +757,7 @@ export default function ClubDetailScreen() {
               const userIds = [...new Set(eventsData.map(e => e.created_by))];
               const { data: profiles } = await supabase
                 .from('profiles')
-                .select('id, username, full_name, avatar_url')
+                .select('id, username, full_name, avatar_url, is_verified')
                 .in('id', userIds);
                 
               const profilesMap = new Map(profiles?.map(p => [p.id, p]));
@@ -737,7 +786,7 @@ export default function ClubDetailScreen() {
                   const rsvpData = rsvpMap.get(event.id) || { going: 0, maybe: 0, cant: 0, userRsvp: null };
                   return {
                       ...event,
-                      creator: profilesMap.get(event.created_by) || { username: 'Unknown', full_name: null, avatar_url: null },
+                      creator: profilesMap.get(event.created_by) || { username: 'Unknown', full_name: null, avatar_url: null, is_verified: false },
                       rsvp_counts: {
                           going: rsvpData.going,
                           maybe: rsvpData.maybe,
@@ -1090,18 +1139,6 @@ export default function ClubDetailScreen() {
             )}
         </View>
 
-        {/* Club Image Banner */}
-        <View className="h-48 bg-gray-900 relative">
-            <ClubImage path={club.image_url} />
-            <View className="absolute inset-0 bg-black/40" />
-            <View className="absolute bottom-4 left-4 right-4">
-                <View className="flex-row items-center">
-                    <IconSymbol name="location.fill" size={14} color="#E5E7EB" />
-                    <Text className="text-gray-200 ml-1 font-semibold">{club.city}</Text>
-                </View>
-            </View>
-        </View>
-
         {/* Access Control View */}
         {!isMember ? (
             <View className="flex-1 p-6 items-center">
@@ -1112,12 +1149,20 @@ export default function ClubDetailScreen() {
                 <Text className="text-gray-500 text-center mb-8">This club is invite only. You must be invited by an admin to join.</Text>
 
                 {memberStatus === 'invited' && (
-                    <TouchableOpacity 
-                        onPress={handleAcceptInvite}
-                        className="bg-black py-4 px-8 rounded-xl shadow-lg w-full items-center"
-                    >
-                        <Text className="text-white font-bold text-lg">Accept Invite</Text>
-                    </TouchableOpacity>
+                    <View className="w-full">
+                        <TouchableOpacity 
+                            onPress={handleAcceptInvite}
+                            className="bg-black py-4 px-8 rounded-xl shadow-lg w-full items-center"
+                        >
+                            <Text className="text-white font-bold text-lg">Accept Invite</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={handleDeclineInvite}
+                            className="mt-3 bg-gray-100 py-4 px-8 rounded-xl w-full items-center"
+                        >
+                            <Text className="text-gray-700 font-bold text-lg">Decline</Text>
+                        </TouchableOpacity>
+                    </View>
                 )}
             </View>
         ) : (
@@ -1196,10 +1241,13 @@ export default function ClubDetailScreen() {
                                             <Avatar url={selectedTopic.creator.avatar_url} size={32} onUpload={() => {}} editable={false} />
                                         </TouchableOpacity>
                                         <View className="flex-1">
-                                            <TouchableOpacity onPress={() => viewUserProfile(selectedTopic.created_by)}>
+                                            <TouchableOpacity onPress={() => viewUserProfile(selectedTopic.created_by)} className="flex-row items-center">
                                                 <Text className="text-sm font-semibold text-ink">
                                                     {selectedTopic.creator.full_name || selectedTopic.creator.username}
                                                 </Text>
+                                                {selectedTopic.creator.is_verified && (
+                                                    <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
+                                                )}
                                             </TouchableOpacity>
                                             <Text className="text-xs text-gray-500">
                                                 {new Date(selectedTopic.created_at).toLocaleDateString('en-US', {
@@ -1342,18 +1390,23 @@ export default function ClubDetailScreen() {
                     ) : (
                         // Topics List View
                         <>
-                            <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
-                                <Text className="font-bold text-gray-500">{topics.length} {topics.length === 1 ? 'Topic' : 'Topics'}</Text>
-                                <TouchableOpacity 
-                                    onPress={() => setTopicModalVisible(true)}
-                                    className="bg-black px-4 py-2 rounded-full"
-                                >
-                                    <Text className="text-white text-xs font-bold">New Topic</Text>
-                                </TouchableOpacity>
-                            </View>
                             <FlatList
                                 data={topics}
                                 keyExtractor={item => item.id}
+                        ListHeaderComponent={
+                            <View>
+                                <ClubBanner imagePath={club.image_url} city={club.city} />
+                                <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
+                                    <Text className="font-bold text-gray-500">{topics.length} {topics.length === 1 ? 'Topic' : 'Topics'}</Text>
+                                    <TouchableOpacity 
+                                        onPress={() => setTopicModalVisible(true)}
+                                        className="bg-black px-4 py-2 rounded-full"
+                                    >
+                                        <Text className="text-white text-xs font-bold">New Topic</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        }
                                 renderItem={({ item }) => (
                                     <TouchableOpacity 
                                         onPress={() => viewTopic(item)}
@@ -1376,9 +1429,14 @@ export default function ClubDetailScreen() {
                                                 <View className="mr-2">
                                                     <Avatar url={item.creator.avatar_url} size={24} onUpload={() => {}} editable={false} />
                                                 </View>
-                                                <Text className="text-xs text-gray-500">
-                                                    {item.creator.full_name || item.creator.username}
-                                                </Text>
+                                                <View className="flex-row items-center">
+                                                    <Text className="text-xs text-gray-500">
+                                                        {item.creator.full_name || item.creator.username}
+                                                    </Text>
+                                                    {item.creator.is_verified && (
+                                                        <IconSymbol name="checkmark.seal.fill" size={10} color="#3B82F6" style={{ marginLeft: 4 }} />
+                                                    )}
+                                                </View>
                                             </TouchableOpacity>
                                             <View className="flex-row items-center">
                                                 <IconSymbol name="bubble.left.and.bubble.right" size={14} color="#6B7280" />
@@ -1400,25 +1458,31 @@ export default function ClubDetailScreen() {
                                         <Text className="text-gray-400 text-center">No topics yet. Start a discussion!</Text>
                                     </View>
                                 }
+                                contentContainerStyle={{ paddingBottom: 24 }}
                             />
                         </>
                     )
                 ) : activeTab === 'events' ? (
                     <View className="flex-1">
-                        <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
-                            <Text className="font-bold text-gray-500">{events.length} Events</Text>
-                            {isAdmin && (
-                                <TouchableOpacity 
-                                    onPress={() => setEventModalVisible(true)}
-                                    className="bg-black px-4 py-2 rounded-full"
-                                >
-                                    <Text className="text-white text-xs font-bold">Create Event</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
                         <FlatList
                             data={events}
                             keyExtractor={item => item.id}
+                            ListHeaderComponent={
+                                <View>
+                                    <ClubBanner imagePath={club.image_url} city={club.city} />
+                                    <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
+                                        <Text className="font-bold text-gray-500">{events.length} Events</Text>
+                                        {isAdmin && (
+                                            <TouchableOpacity 
+                                                onPress={() => setEventModalVisible(true)}
+                                                className="bg-black px-4 py-2 rounded-full"
+                                            >
+                                                <Text className="text-white text-xs font-bold">Create Event</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                </View>
+                            }
                             renderItem={({ item }) => (
                                 <EventCard
                                     event={item}
@@ -1437,31 +1501,52 @@ export default function ClubDetailScreen() {
                                     <Text className="text-gray-500 mt-4 font-medium">No events scheduled</Text>
                                 </View>
                             }
+                            contentContainerStyle={{ paddingBottom: 24 }}
                         />
                     </View>
                 ) : activeTab === 'members' ? (
                     <View className="flex-1">
-                        <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
-                            <Text className="font-bold text-gray-500">{members.length} Members</Text>
-                            {isAdmin && (
-                                <TouchableOpacity 
-                                    onPress={() => setInviteModalVisible(true)}
-                                    className="bg-black px-4 py-2 rounded-full"
-                                >
-                                    <Text className="text-white text-xs font-bold">Invite Member</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
                         <FlatList
                             data={members}
                             keyExtractor={item => item.id}
+                            ListHeaderComponent={
+                                <View>
+                                    <ClubBanner imagePath={club.image_url} city={club.city} />
+                                    <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
+                                        <Text className="font-bold text-gray-500">{members.length} Members</Text>
+                                        <View className="flex-row items-center">
+                                            {isAdmin && (
+                                                <TouchableOpacity 
+                                                    onPress={() => setInviteModalVisible(true)}
+                                                    className="bg-black px-4 py-2 rounded-full"
+                                                >
+                                                    <Text className="text-white text-xs font-bold">Invite Member</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            {role !== 'owner' && (
+                                                <TouchableOpacity
+                                                    onPress={handleLeaveClub}
+                                                    className="ml-2 bg-red-50 px-4 py-2 rounded-full"
+                                                >
+                                                    <Text className="text-red-600 text-xs font-bold">Leave</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    </View>
+                                </View>
+                            }
                             renderItem={({ item }) => (
                                 <View className="flex-row items-center p-4 bg-white border-b border-gray-50">
                                     <View className="mr-3">
                                         <Avatar url={item.profile.avatar_url} size={40} onUpload={() => {}} editable={false} />
                                     </View>
                                     <View className="flex-1">
-                                        <Text className="font-bold text-ink">{item.profile.full_name || item.profile.username}</Text>
+                                        <View className="flex-row items-center">
+                                            <Text className="font-bold text-ink">{item.profile.full_name || item.profile.username}</Text>
+                                            {item.profile.is_verified && (
+                                                <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
+                                            )}
+                                        </View>
                                         <Text className="text-gray-500 text-xs">@{item.profile.username}</Text>
                                     </View>
                                     <View className={`px-2 py-1 rounded text-xs ${
@@ -1473,11 +1558,15 @@ export default function ClubDetailScreen() {
                                     </View>
                                 </View>
                             )}
+                            contentContainerStyle={{ paddingBottom: 24 }}
                         />
                     </View>
                 ) : activeTab === 'settings' ? (
                     <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16 }}>
-                        <View className="bg-white rounded-2xl p-6 mb-4 shadow-sm">
+                        <View style={{ marginHorizontal: -16, marginTop: -16, marginBottom: 16 }}>
+                            <ClubBanner imagePath={club.image_url} city={club.city} />
+                        </View>
+                        <GlassCard className="mb-4" contentClassName="p-6" tint="light" intensity={22}>
                             <Text className="text-2xl font-bold text-ink mb-6">Club Settings</Text>
                             
                             {/* Club Name */}
@@ -1545,11 +1634,11 @@ export default function ClubDetailScreen() {
                                     <Text className="text-white font-bold text-lg">Save Changes</Text>
                                 )}
                             </TouchableOpacity>
-                        </View>
+                        </GlassCard>
 
                         {/* Danger Zone */}
                         {role === 'owner' && (
-                            <View className="bg-white rounded-2xl p-6 shadow-sm">
+                            <GlassCard contentClassName="p-6" tint="light" intensity={18}>
                                 <Text className="text-xl font-bold text-red-600 mb-4">Danger Zone</Text>
                                 <TouchableOpacity
                                     onPress={() => {
@@ -1582,7 +1671,7 @@ export default function ClubDetailScreen() {
                                 >
                                     <Text className="text-red-600 font-bold">Delete Club</Text>
                                 </TouchableOpacity>
-                            </View>
+                            </GlassCard>
                         )}
                     </ScrollView>
                 ) : null}
@@ -1614,9 +1703,14 @@ export default function ClubDetailScreen() {
                         <View className="flex-row items-center justify-between py-3 border-b border-gray-50">
                             <View className="flex-row items-center">
                                 <View className="w-8 h-8 mr-2 rounded-full overflow-hidden">
-                                    <Avatar path={item.avatar_url} />
+                                    <Avatar url={item.avatar_url} size={32} onUpload={() => {}} editable={false} />
                                 </View>
-                                <Text className="font-bold">{item.username}</Text>
+                                <View className="flex-row items-center">
+                                    <Text className="font-bold">{item.username}</Text>
+                                    {item.is_verified && (
+                                        <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
+                                    )}
+                                </View>
                             </View>
                             <TouchableOpacity 
                                 onPress={() => inviteUser(item.id)}
@@ -2089,3 +2183,22 @@ function ClubImage({ path }: { path: string | null }) {
     return <Image source={{ uri: url }} className="w-full h-full" resizeMode="cover" />;
 }
 
+function ClubBanner({ imagePath, city }: { imagePath: string | null; city: string | null }) {
+    const { height } = useWindowDimensions();
+    // Responsive banner height: smaller on minis, not overly tall on Pro Max
+    const bannerHeight = Math.max(140, Math.min(220, Math.round(height * 0.22)));
+    return (
+        <View className="bg-gray-900 relative" style={{ height: bannerHeight }}>
+            <ClubImage path={imagePath} />
+            <View className="absolute inset-0 bg-black/40" />
+            {!!city && (
+                <View className="absolute bottom-4 left-4 right-4">
+                    <View className="flex-row items-center">
+                        <IconSymbol name="location.fill" size={14} color="#E5E7EB" />
+                        <Text className="text-gray-200 ml-1 font-semibold">{city}</Text>
+                    </View>
+                </View>
+            )}
+        </View>
+    );
+}

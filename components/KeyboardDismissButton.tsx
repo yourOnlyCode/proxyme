@@ -63,16 +63,25 @@ export function KeyboardToolbar() {
       }}
     >
       <View 
-        className="bg-white border-t border-gray-200 flex-row justify-end items-center px-3"
-        style={{ paddingBottom: Math.max(insets.bottom, 4), paddingTop: 4, height: 36 }}
+        className="flex-row justify-end items-center px-3"
+        style={{ 
+          paddingBottom: 6, 
+          paddingTop: 6,
+        }}
       >
         <TouchableOpacity 
           onPress={() => Keyboard.dismiss()}
-          className="px-3 py-1.5 flex-row items-center rounded-full bg-gray-50"
-          activeOpacity={0.7}
+          className="px-4 py-2 rounded-full bg-black"
+          activeOpacity={0.8}
+          style={{
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 4,
+            elevation: 5,
+          }}
         >
-          <IconSymbol name="chevron.down" size={14} color="#6B7280" />
-          <Text className="text-gray-600 text-xs font-medium ml-1">Done</Text>
+          <Text className="text-white text-sm font-medium">Done</Text>
         </TouchableOpacity>
       </View>
     </Animated.View>

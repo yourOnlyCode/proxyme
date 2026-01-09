@@ -1,10 +1,13 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Dimensions, Image, Linking, Modal, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Dimensions, Image, Linking, Platform, Pressable, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
+import { GlassCard } from '../../components/ui/GlassCard';
 import { useAuth } from '../../lib/auth';
 import { getReferralShareContent } from '../../lib/referral';
 import { supabase } from '../../lib/supabase';
@@ -52,7 +55,6 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showShareOptions, setShowShareOptions] = useState(false);
   const router = useRouter();
 
   const fetchProfile = async () => {
@@ -63,10 +65,18 @@ export default function ProfileScreen() {
         .from('profiles')
         .select(`username, full_name, bio, avatar_url, detailed_interests, relationship_goals, social_links, is_verified, friend_code, referral_count`)
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
     if (error) {
         console.error(error);
+        setLoading(false);
+        return;
+    }
+
+    // If profile doesn't exist yet, redirect to onboarding
+    if (!data) {
+        console.log('Profile not found, redirecting to onboarding');
+        router.replace('/onboarding');
         setLoading(false);
         return;
     }
@@ -121,7 +131,6 @@ export default function ProfileScreen() {
         title: 'Join me on Proxyme!',
         url: content.appStoreLink, // iOS will use this for better sharing
       });
-      setShowShareOptions(false);
     } catch (error) {
       console.error('Error sharing:', error);
     }
@@ -151,16 +160,31 @@ export default function ProfileScreen() {
       }
   };
 
-  if (!profile && loading) return <View className="flex-1 bg-slate-50" />;
-
   const primaryGoal = profile?.relationship_goals?.[0];
   const theme = getTheme(primaryGoal);
+
+  const intentMeta = useMemo(() => {
+    const goal = primaryGoal;
+    if (!goal) return null;
+    if (goal === 'Romance') return { icon: 'heart.fill', label: 'Romance', pillBg: 'bg-romance/15', pillText: 'text-romance' };
+    if (goal === 'Friendship') return { icon: 'person.2.fill', label: 'Friendship', pillBg: 'bg-friendship/15', pillText: 'text-friendship' };
+    if (goal === 'Professional') return { icon: 'briefcase.fill', label: 'Professional', pillBg: 'bg-business/15', pillText: 'text-business' };
+    return { icon: 'sparkles', label: goal, pillBg: 'bg-slate-100', pillText: 'text-slate-700' };
+  }, [primaryGoal]);
+
+  const [hoverPhotoIdx, setHoverPhotoIdx] = useState<number | null>(null);
+
+  // Hooks must run on every render (no early returns before this point).
+  if (!profile && loading) return <View className="flex-1 bg-slate-50" />;
+  if (!profile) return <View className="flex-1 bg-slate-50" />;
 
   return (
     <View className="flex-1 bg-slate-50">
         <ScrollView 
             refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchProfile} />}
-            contentContainerStyle={{ paddingBottom: 40 }}
+            contentContainerStyle={{ paddingBottom: 140 }}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
         >
             {/* Header / Cover Area - Taller */}
             <View className={`h-80 relative ${theme.bg}`}>
@@ -183,173 +207,353 @@ export default function ProfileScreen() {
 
             {/* Profile Info */}
             <View className="px-5 -mt-16">
-                <View 
-                  className="rounded-full w-36 h-36 overflow-hidden bg-white shadow-md"
-                  style={{
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.1,
-                    shadowRadius: 8,
-                    elevation: 4,
-                  }}
-                >
-                     <ProfileImage path={profile?.avatar_url || null} style={{ width: '100%', height: '100%' }} />
+                {/* Profile Photo Circle with Apple Glass Morphism - Centered horizontally */}
+                <View className="items-center mb-4">
+                  <View
+                    style={{
+                      width: 144,
+                      height: 144,
+                      borderRadius: 72,
+                      overflow: 'hidden',
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 8 },
+                      shadowOpacity: 0.25,
+                      shadowRadius: 24,
+                      elevation: 20,
+                    }}
+                  >
+                    {/* Blur Background - Apple Style Glass */}
+                    <BlurView
+                      intensity={80}
+                      tint="light"
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        borderRadius: 72,
+                      }}
+                    />
+                    {/* Subtle gradient overlay for glass effect */}
+                    <LinearGradient
+                      colors={[
+                        'rgba(255, 255, 255, 0.25)',
+                        'rgba(255, 255, 255, 0.1)',
+                        'rgba(255, 255, 255, 0.05)',
+                        'rgba(255, 255, 255, 0.1)',
+                        'rgba(255, 255, 255, 0.25)',
+                      ]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      locations={[0, 0.3, 0.5, 0.7, 1]}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        borderRadius: 72,
+                      }}
+                    />
+                    {/* Subtle border */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        borderRadius: 72,
+                        borderWidth: 1.5,
+                        borderColor: 'rgba(255, 255, 255, 0.6)',
+                      }}
+                    />
+                    {/* Profile Image Container with inset */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 4,
+                        left: 4,
+                        right: 4,
+                        bottom: 4,
+                        borderRadius: 68,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <ProfileImage path={profile?.avatar_url || null} style={{ width: '100%', height: '100%' }} />
+                    </View>
+                  </View>
                 </View>
                 
-                <View className="mt-4">
-                    <View className="flex-row items-center flex-wrap">
-                        <Text className="text-3xl font-extrabold text-slate-900 mr-2">{profile?.full_name || 'No Name'}</Text>
+                <View className="mt-4 items-center">
+                    <View className="flex-row items-center justify-center flex-wrap">
+                        <Text className="text-3xl font-extrabold text-slate-900 mr-2 text-center">{profile?.full_name || 'No Name'}</Text>
                         {profile?.is_verified && (
                             <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" />
                         )}
                     </View>
-                    <View className="flex-row items-center mt-1 flex-wrap">
-                        <Text className={`text-base font-semibold ${theme.text} opacity-80`}>@{profile?.username || 'username'}</Text>
+                    <View className="flex-row items-center justify-center mt-1 flex-wrap">
+                        <Text className={`text-base font-semibold ${theme.text} opacity-80 text-center`}>@{profile?.username || 'username'}</Text>
                         {stats && stats.total > 0 && (
                             <>
                                 <Text className={`text-base font-semibold ${theme.text} opacity-60 mx-2`}>•</Text>
-                                <Text className={`text-base font-semibold ${theme.text} opacity-80`}>
-                                    {stats.total} {stats.total === 1 ? 'connection' : 'connections'}
-                                </Text>
+                                <Pressable
+                                  onPress={() => {
+                                    if (user?.id) router.push(`/connections/${user.id}`);
+                                  }}
+                                >
+                                  <View className="flex-row items-center">
+                                    <Text className={`text-base font-semibold ${theme.text} opacity-80 text-center`}>
+                                        {stats.total} {stats.total === 1 ? 'connection' : 'connections'}
+                                    </Text>
+                                    <View className="ml-2 opacity-60">
+                                      <IconSymbol name="chevron.right" size={16} color="#64748B" />
+                                    </View>
+                                  </View>
+                                </Pressable>
                             </>
                         )}
                     </View>
-                </View>
 
-                {/* Friend Code Section - Only show if not verified */}
-                {!profile?.is_verified && profile?.friend_code && (
-                    <View 
-                      className="mt-4 bg-slate-50 p-2 rounded-lg flex-row items-center justify-between"
-                      style={{
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 1 },
-                        shadowOpacity: 0.04,
-                        shadowRadius: 3,
-                        elevation: 1,
-                      }}
-                    >
-                        <View className="flex-row items-center flex-1">
-                            <IconSymbol name="gift.fill" size={14} color="#3B82F6" />
-                            <Text className="text-slate-700 font-semibold text-xs ml-2">Friend Code: {profile.friend_code}</Text>
-                        </View>
-                        <TouchableOpacity
-                            onPress={() => setShowShareOptions(true)}
-                            className="bg-ink px-2 py-1 rounded"
-                        >
-                            <IconSymbol name="paperplane.fill" size={12} color="white" />
-                        </TouchableOpacity>
-                    </View>
-                )}
-
-                {/* Relationship Goals with Intent Label */}
-                {profile?.relationship_goals && profile.relationship_goals.length > 0 && (
-                    <View className="mt-6">
-                        <View className="flex-row items-center mb-2">
-                            <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mr-2">Intent</Text>
-                        </View>
-                        <View className="flex-row flex-wrap">
-                            {profile.relationship_goals.map((goal, idx) => {
-                                const badgeColors = getTheme(goal);
-                                return (
-                                    <View key={idx} className={`px-4 py-2 rounded-full mr-2 mb-2 ${badgeColors.badge}`}>
-                                        <Text className={`${badgeColors.text} font-bold`}>{goal}</Text>
-                                    </View>
-                                );
-                            })}
-                        </View>
-                    </View>
-                )}
-
-                {/* Bio */}
-                {profile?.bio && (
-                    <Text className="mt-6 text-slate-900 text-lg leading-7 font-medium opacity-90">
-                        {profile.bio}
-                    </Text>
-                )}
-
-                {/* Detailed Interests - Now More Prominent */}
-                <View className="mt-8">
-                    <Text className="text-2xl font-bold mb-4 text-slate-900">Interests</Text>
-                    {profile?.detailed_interests && Object.keys(profile.detailed_interests).length > 0 ? (
-                        Object.entries(profile.detailed_interests).map(([category, items]) => (
-                            <View 
-                              key={category} 
-                              className="mb-4 bg-white p-4 rounded-2xl shadow-sm"
-                              style={{
-                                borderWidth: 1,
-                                borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
-                              }}
-                            >
-                                <Text className="text-sm font-bold text-slate-500 mb-3 uppercase tracking-wider">{category}</Text>
-                                <View className="flex-row flex-wrap">
-                                    {items && items.length > 0 ? (
-                                        items.map((item, idx) => (
-                                            <View 
-                                              key={idx} 
-                                              className={`px-3 py-1.5 rounded-lg mr-2 mb-2 ${theme.bg}`}
-                                              style={{
-                                                shadowColor: '#000',
-                                                shadowOffset: { width: 0, height: 1 },
-                                                shadowOpacity: 0.03,
-                                                shadowRadius: 2,
-                                                elevation: 1,
-                                              }}
-                                            >
-                                                <Text className={`font-semibold text-sm ${theme.text}`}>{item}</Text>
-                                            </View>
-                                        ))
-                                    ) : (
-                                        <Text className="text-slate-400 italic text-sm">General Interest</Text>
-                                    )}
-                                </View>
+                    {/* Intent pill (no label) */}
+                    {!!intentMeta && (
+                      <View className="mt-3">
+                        <Pressable onPress={() => router.push('/(settings)/edit-profile')}>
+                          <View className={`flex-row items-center px-4 py-2 rounded-full ${intentMeta.pillBg}`}>
+                            <IconSymbol name={intentMeta.icon as any} size={14} color={intentMeta.label === 'Romance' ? '#E11D48' : intentMeta.label === 'Friendship' ? '#059669' : intentMeta.label === 'Professional' ? '#2563EB' : '#334155'} />
+                            <Text className={`ml-2 font-bold ${intentMeta.pillText}`}>{intentMeta.label}</Text>
+                            <View className="ml-2 opacity-60">
+                              <IconSymbol name="pencil" size={12} color="#64748B" />
                             </View>
-                        ))
-                    ) : (
-                        <View 
-                          className="bg-slate-50 p-6 rounded-2xl items-center"
-                          style={{
-                            borderWidth: 1,
-                            borderStyle: 'dashed',
-                            borderColor: 'rgba(148, 163, 184, 0.3)',
-                            shadowColor: '#000',
-                            shadowOffset: { width: 0, height: 1 },
-                            shadowOpacity: 0.03,
-                            shadowRadius: 2,
-                            elevation: 1,
-                          }}
-                        >
-                             <Text className="text-slate-400 italic">No interests added yet.</Text>
+                          </View>
+                        </Pressable>
+                      </View>
+                    )}
+
+                    {/* Social links (wrapped row) */}
+                    {profile?.social_links && Object.keys(profile.social_links).length > 0 && (
+                      <View className="mt-3 px-2">
+                        <View className="flex-row flex-wrap justify-center">
+                          {Object.entries(profile.social_links).map(([platform, handle]) => {
+                            if (!handle) return null;
+                            const cfg = SOCIAL_PLATFORMS_MAP[platform];
+                            if (!cfg) return null;
+                            const IconComp = cfg.lib;
+                            const url = getSocialUrl(platform, String(handle));
+
+                            return (
+                              <TouchableOpacity
+                                key={platform}
+                                onPress={() => openLink(url)}
+                                activeOpacity={0.9}
+                                className="mr-2 mb-2"
+                                style={{
+                                  borderRadius: 999,
+                                  borderWidth: 1,
+                                  borderColor: 'rgba(148,163,184,0.25)',
+                                  backgroundColor: 'rgba(255,255,255,0.65)',
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 8,
+                                  shadowColor: '#000',
+                                  shadowOffset: { width: 0, height: 6 },
+                                  shadowOpacity: 0.08,
+                                  shadowRadius: 12,
+                                  elevation: 4,
+                                }}
+                              >
+                                <View className="flex-row items-center">
+                                  <IconComp name={cfg.icon as any} size={14} color={cfg.color} />
+                                  <Text className="ml-2 text-slate-700 font-semibold text-xs">
+                                    {String(handle).startsWith('http') ? platform : String(handle)}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
                         </View>
+                      </View>
                     )}
                 </View>
 
-                {/* Photos Gallery - Moved to Bottom with Larger Thumbnails */}
-                {profile?.photos && profile.photos.length > 0 && (
-                    <View className="mt-8">
-                        <Text className="text-2xl font-bold mb-4 text-slate-900">Photos</Text>
-                        <ScrollView 
-                            horizontal 
+                {/* Friend Code Section */}
+                {profile?.friend_code && (
+                    <GlassCard className="mt-4" contentClassName="p-3" tint="light" intensity={18}>
+                        <View className="flex-row items-center justify-between mb-2">
+                            <View className="flex-row items-center flex-1">
+                                <IconSymbol name="gift.fill" size={14} color="#3B82F6" />
+                                <Text className="text-slate-700 font-semibold text-xs ml-2">Friend Code: {profile.friend_code}</Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={handleShareFriendCode}
+                                className="bg-ink px-2 py-1 rounded"
+                            >
+                                <IconSymbol name="paperplane.fill" size={12} color="white" />
+                            </TouchableOpacity>
+                        </View>
+                        {profile.referral_count !== undefined && profile.referral_count !== null && (
+                            <View className="flex-row items-center mt-1">
+                                <View className="bg-blue-100 px-2 py-1 rounded-full">
+                                    <Text className="text-blue-700 font-bold text-xs">
+                                        {profile.referral_count} / 3 referrals
+                                    </Text>
+                                </View>
+                                <Text className="text-slate-600 text-xs ml-2">
+                                    {profile.referral_count >= 3 
+                                        ? '✓ Verified!' 
+                                        : `${3 - profile.referral_count} more for verification`}
+                                </Text>
+                            </View>
+                        )}
+                    </GlassCard>
+                )}
+
+                {/* (Intent moved under username) */}
+
+                {/* Bio */}
+                {profile?.bio && (
+                    <Pressable onPress={() => router.push('/(settings)/edit-profile')} style={({ pressed }) => ({
+                      opacity: pressed ? 0.75 : 1,
+                    })}>
+                      <Text className="mt-6 text-slate-900 text-lg leading-7 font-medium opacity-90">
+                          {profile.bio}
+                      </Text>
+                    </Pressable>
+                )}
+
+                {/* Detailed Interests */}
+                <View className="mt-8">
+                    <View className="flex-row items-center justify-between mb-4">
+                      <Text className="text-2xl font-bold text-slate-900">Interests</Text>
+                      <View className="flex-row items-center">
+                        <IconSymbol name="sparkles" size={16} color="#94A3B8" />
+                      </View>
+                    </View>
+
+                    {profile?.detailed_interests && Object.keys(profile.detailed_interests).length > 0 ? (
+                      <>
+                        {/* Full-width silver strip behind interests carousel */}
+                        <View className="-mx-5 bg-slate-100/80 py-5 border-y border-slate-200/70">
+                          <ScrollView
+                            horizontal
                             showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingRight: 20 }}
-                        >
-                            {profile.photos.map((p, i) => (
-                                <View 
-                                  key={i} 
-                                  className="mr-4 rounded-2xl overflow-hidden shadow-md bg-slate-100"
+                            contentContainerStyle={{ paddingHorizontal: 20, paddingRight: 20 }}
+                            nestedScrollEnabled
+                          >
+                            {Object.entries(profile.detailed_interests).map(([category, items]) => {
+                              const safeItems = (items || []).filter(Boolean).slice(0, 4);
+                              return (
+                                <Pressable
+                                  key={category}
+                                  onPress={() => router.push('/(settings)/edit-interests')}
                                   style={{
-                                    width: 200,
-                                    height: 250,
+                                    width: 260,
+                                    marginRight: 16,
+                                    borderRadius: 22,
+                                    overflow: 'hidden',
+                                    backgroundColor: 'rgba(255,255,255,0.75)',
+                                    borderWidth: 1,
+                                    borderColor: 'rgba(148,163,184,0.25)',
                                     shadowColor: '#000',
-                                    shadowOffset: { width: 0, height: 4 },
-                                    shadowOpacity: 0.1,
-                                    shadowRadius: 8,
-                                    elevation: 4,
+                                    shadowOffset: { width: 0, height: 14 },
+                                    shadowOpacity: 0.14,
+                                    shadowRadius: 24,
+                                    elevation: 14,
                                   }}
                                 >
-                                    <ProfileImage path={p.url} style={{ width: '100%', height: '100%' }} />
-                                </View>
-                            ))}
-                        </ScrollView>
+                                  <View className="p-4">
+                                    <View className="flex-row items-center justify-between">
+                                      <Text className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">
+                                        {category}
+                                      </Text>
+                                      <IconSymbol name="pencil" size={14} color="#94A3B8" />
+                                    </View>
+                                    <View className="mt-3 flex-row flex-wrap">
+                                      {safeItems.length > 0 ? (
+                                        safeItems.map((item, idx) => (
+                                          <View
+                                            key={`${category}-${idx}`}
+                                            className={`px-3 py-1.5 rounded-lg mr-2 mb-2 ${theme.bg}`}
+                                            style={{
+                                              borderWidth: 1,
+                                              borderColor: 'rgba(148,163,184,0.18)',
+                                            }}
+                                          >
+                                            <Text className={`font-semibold text-sm ${theme.text}`}>{item}</Text>
+                                          </View>
+                                        ))
+                                      ) : (
+                                        <Text className="text-slate-400 italic text-sm">General Interest</Text>
+                                      )}
+                                    </View>
+                                  </View>
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                        </View>
+                      </>
+                    ) : (
+                      <View className="-mx-5 bg-slate-100/80 py-5 border-y border-slate-200/70">
+                        <View className="px-5">
+                          <GlassCard contentClassName="p-6 items-center" tint="light" intensity={14}>
+                            <Text className="text-slate-400 italic">No interests added yet.</Text>
+                          </GlassCard>
+                        </View>
+                      </View>
+                    )}
+                </View>
+
+                {/* Spacer (no divider line) */}
+                <View className="mt-8" />
+
+                {/* Photos Gallery */}
+                {profile?.photos && profile.photos.length > 0 && (
+                    <View>
+                        <Text className="text-2xl font-bold mb-4 text-slate-900">Photos</Text>
+
+                        {/* Full-width "silver" strip behind the carousel */}
+                        <View className="-mx-5 bg-slate-100/80 py-5 border-y border-slate-200/70">
+                          <ScrollView
+                              horizontal
+                              showsHorizontalScrollIndicator={false}
+                              contentContainerStyle={{ paddingHorizontal: 20, paddingRight: 20 }}
+                              nestedScrollEnabled
+                          >
+                              {profile.photos.map((p, i) => {
+                                const isHovered = Platform.OS === 'web' && hoverPhotoIdx === i;
+                                return (
+                                  <Pressable
+                                    key={i}
+                                    onHoverIn={() => setHoverPhotoIdx(i)}
+                                    onHoverOut={() => setHoverPhotoIdx(null)}
+                                    onPress={() => router.push('/(settings)/edit-profile')}
+                                    style={({ pressed }) => ({
+                                      width: 200,
+                                      height: 250,
+                                      marginRight: 16,
+                                      borderRadius: 20,
+                                      overflow: 'hidden',
+                                      backgroundColor: '#E2E8F0',
+                                      borderWidth: 1,
+                                      borderColor: 'rgba(148,163,184,0.35)',
+                                      transform: [
+                                        { translateY: pressed ? 2 : isHovered ? -4 : 0 },
+                                        { scale: pressed ? 0.99 : isHovered ? 1.02 : 1 },
+                                      ],
+                                      shadowColor: '#000',
+                                      shadowOffset: { width: 0, height: pressed ? 8 : 14 },
+                                      shadowOpacity: pressed ? 0.16 : isHovered ? 0.24 : 0.18,
+                                      shadowRadius: pressed ? 14 : 24,
+                                      elevation: pressed ? 8 : 14,
+                                    })}
+                                  >
+                                      <ProfileImage path={p.url} style={{ width: 200, height: 250 }} />
+                                  </Pressable>
+                                );
+                              })}
+                          </ScrollView>
+                        </View>
                     </View>
                 )}
 
@@ -362,38 +566,6 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
             </View>
         </ScrollView>
-
-        {/* Share Options Modal */}
-        <Modal
-            visible={showShareOptions}
-            transparent
-            animationType="slide"
-            onRequestClose={() => setShowShareOptions(false)}
-        >
-            <View className="flex-1 bg-black/60 items-end justify-end">
-                <View className="bg-white rounded-t-3xl w-full p-6 pb-8">
-                    <View className="items-center mb-6">
-                        <View className="w-12 h-1 bg-gray-300 rounded-full mb-4" />
-                        <Text className="text-2xl font-bold text-slate-900">Share Friend Code</Text>
-                    </View>
-
-                    <TouchableOpacity
-                        onPress={handleShareFriendCode}
-                        className="bg-blue-600 py-4 rounded-xl flex-row items-center justify-center mb-4"
-                    >
-                        <IconSymbol name="square.and.arrow.up.fill" size={20} color="white" />
-                        <Text className="text-white font-semibold ml-2 text-lg">Share</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        onPress={() => setShowShareOptions(false)}
-                        className="mt-4 py-3 rounded-xl items-center"
-                    >
-                        <Text className="text-slate-700 font-semibold">Cancel</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </Modal>
     </View>
   );
 }
@@ -402,9 +574,21 @@ function ProfileImage({ path, style }: { path: string | null, style: any }) {
     const [url, setUrl] = useState<string | null>(null);
   
     useEffect(() => {
-      if (!path) return;
-      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
-      setUrl(data.publicUrl);
+      if (!path) {
+        setUrl(null);
+        return;
+      }
+
+      // If we already stored a full URL in the DB, use it directly.
+      if (path.startsWith('http://') || path.startsWith('https://')) {
+        setUrl(path);
+        return;
+      }
+
+      // Handle older formats that may include "public/avatars/..."
+      const cleaned = path.includes('public/avatars/') ? path.split('public/avatars/')[1] : path;
+      const { data } = supabase.storage.from('avatars').getPublicUrl(cleaned);
+      setUrl(data?.publicUrl ?? null);
     }, [path]);
   
     if (!url) return <View style={style} className="bg-slate-200 animate-pulse" />;

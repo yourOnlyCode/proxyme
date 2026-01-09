@@ -28,7 +28,7 @@ export default function ProfileGallery({ userId, onSetAvatar }: ProfileGalleryPr
   const fetchPhotos = async () => {
     const { data } = await supabase
       .from('profile_photos')
-      .select('*')
+      .select('id, image_url, display_order')
       .eq('user_id', userId)
       .order('display_order', { ascending: true });
     

@@ -31,6 +31,7 @@ type Conversation = {
     sender_id: string;
   } | null;
   unread_count?: number;
+  created_at?: string; // connection created_at fallback for sorting when no messages exist
 };
 
 type InboxItem = {
@@ -95,9 +96,8 @@ export default function InboxScreen() {
     setLoading(true);
 
     try {
-      // Fetch all data in parallel
-      const [requestsResult, connectionsResult] = await Promise.all([
-        // Fetch pending requests
+      // Fetch pending requests + optimized conversations in parallel
+      const [requestsResult, conversationsResult] = await Promise.all([
         supabase
           .from('interests')
           .select(`
@@ -109,86 +109,29 @@ export default function InboxScreen() {
           .eq('receiver_id', user.id)
           .eq('status', 'pending')
           .order('created_at', { ascending: false }),
-        
-        // Fetch conversations (accepted connections)
-        supabase
-          .from('interests')
-          .select('id, sender_id, receiver_id, created_at')
-          .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-          .eq('status', 'accepted')
+        supabase.rpc('get_my_inbox_conversations'),
       ]);
 
       const requestsData = requestsResult.data;
-      const connectionsData = connectionsResult.data;
+      const conversationsRows = (conversationsResult as any).data as any[] | null;
 
-      const conversations: Conversation[] = [];
-      
-      if (connectionsData && connectionsData.length > 0) {
-        const connectionIds = connectionsData.map(c => c.id);
-        const partnerIds = connectionsData.map(c => 
-          c.sender_id === user.id ? c.receiver_id : c.sender_id
-        );
-
-        // Fetch all messages and profiles in parallel
-        const [messagesResult, profilesResult] = await Promise.all([
-          // Fetch all messages for all conversations at once
-          supabase
-            .from('messages')
-            .select('conversation_id, content, created_at, sender_id, read')
-            .in('conversation_id', connectionIds)
-            .order('created_at', { ascending: false }),
-          
-          // Fetch all partner profiles at once
-          supabase
-            .from('profiles')
-            .select('id, username, avatar_url')
-            .in('id', partnerIds)
-        ]);
-
-        const allMessages = messagesResult.data || [];
-        const profiles = profilesResult.data || [];
-        
-        // Create maps for quick lookup
-        const profileMap = new Map(profiles.map(p => [p.id, p]));
-        const messagesByConversation = new Map<string, typeof allMessages>();
-        
-        // Group messages by conversation
-        allMessages.forEach(msg => {
-          const convId = msg.conversation_id;
-          if (!messagesByConversation.has(convId)) {
-            messagesByConversation.set(convId, []);
-          }
-          messagesByConversation.get(convId)!.push(msg);
-        });
-
-        // Build conversations
-        connectionsData.forEach(conn => {
-          const partnerId = conn.sender_id === user.id ? conn.receiver_id : conn.sender_id;
-          const partner = profileMap.get(partnerId);
-          const messages = messagesByConversation.get(conn.id) || [];
-          
-          // Get last message and unread count
-          const lastMessage = messages.length > 0 ? messages[0] : null;
-          const unreadCount = messages.filter(m => m.sender_id !== user.id && !m.read).length;
-
-          if (partner) {
-            conversations.push({
-              id: conn.id,
-              partner: {
-                id: partner.id,
-                username: partner.username,
-                avatar_url: partner.avatar_url,
-              },
-              last_message: lastMessage ? {
-                content: lastMessage.content,
-                created_at: lastMessage.created_at,
-                sender_id: lastMessage.sender_id,
-              } : null,
-              unread_count: unreadCount,
-            });
-          }
-        });
-      }
+      const conversations: Conversation[] = (conversationsRows || []).map((row) => ({
+        id: row.id,
+        created_at: row.connection_created_at,
+        partner: {
+          id: row.partner_id,
+          username: row.partner_username,
+          avatar_url: row.partner_avatar_url,
+        },
+        last_message: row.last_message_created_at
+          ? {
+              content: row.last_message_content,
+              created_at: row.last_message_created_at,
+              sender_id: row.last_message_sender_id,
+            }
+          : null,
+        unread_count: row.unread_count || 0,
+      }));
 
       // Combine and sort by timestamp
       const inboxItems: InboxItem[] = [
@@ -202,7 +145,7 @@ export default function InboxScreen() {
           type: 'message' as const,
           id: conv.id,
           conversation: conv,
-          timestamp: conv.last_message?.created_at || conv.partner.id, // Use partner id as fallback for sorting
+          timestamp: conv.last_message?.created_at || conv.created_at || conv.partner.id, // Use partner id as final fallback for sorting
         })),
       ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
@@ -217,7 +160,7 @@ export default function InboxScreen() {
   const openProfile = async (userId: string, interestId?: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, username, full_name, bio, avatar_url, detailed_interests, relationship_goals, is_verified, city, state, social_links, status_text, status_image_url, status_created_at')
       .eq('id', userId)
       .single();
     

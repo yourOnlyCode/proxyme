@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, FlatList, TouchableOpacity } from 'react-native';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { GlassCard } from '@/components/ui/GlassCard';
 import EventCard from './EventCard';
 import { ClubEvent } from '@/lib/types';
 
@@ -29,16 +30,18 @@ export default function ClubEventsTab({
 }: ClubEventsTabProps) {
     return (
         <View className="flex-1">
-            <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
-                <Text className="font-bold text-gray-500">{events.length} Events</Text>
-                {isAdmin && (
-                    <TouchableOpacity 
-                        onPress={() => onSetEventModalVisible(true)}
-                        className="bg-black px-4 py-2 rounded-full"
-                    >
-                        <Text className="text-white text-xs font-bold">Create Event</Text>
-                    </TouchableOpacity>
-                )}
+            <View className="px-4 pt-4">
+                <GlassCard contentClassName="p-4 flex-row justify-between items-center" tint="light" intensity={20}>
+                    <Text className="font-bold text-gray-600">{events.length} Events</Text>
+                    {isAdmin && (
+                        <TouchableOpacity 
+                            onPress={() => onSetEventModalVisible(true)}
+                            className="bg-black px-4 py-2 rounded-full"
+                        >
+                            <Text className="text-white text-xs font-bold">Create Event</Text>
+                        </TouchableOpacity>
+                    )}
+                </GlassCard>
             </View>
             <FlatList
                 data={events}
@@ -61,6 +64,7 @@ export default function ClubEventsTab({
                         <Text className="text-gray-500 mt-4 font-medium">No events scheduled</Text>
                     </View>
                 }
+                contentContainerStyle={{ paddingBottom: 16 }}
             />
         </View>
     );

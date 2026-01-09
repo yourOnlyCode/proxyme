@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS public.notifications (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK (type IN ('forum_reply', 'club_event', 'club_member', 'connection_request', 'connection_accepted', 'message')),
+    type TEXT NOT NULL CHECK (type IN ('forum_reply', 'club_event', 'club_member', 'club_invite', 'connection_request', 'connection_accepted', 'message')),
     title TEXT NOT NULL,
     body TEXT NOT NULL,
     data JSONB, -- Additional data like club_id, event_id, topic_id, etc.

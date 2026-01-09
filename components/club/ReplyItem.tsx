@@ -39,10 +39,13 @@ export default function ReplyItem({
                         <Avatar url={reply.creator.avatar_url} size={32} onUpload={() => {}} editable={false} />
                     </TouchableOpacity>
                     <View className="flex-1">
-                        <TouchableOpacity onPress={() => onViewProfile(reply.created_by)}>
+                        <TouchableOpacity onPress={() => onViewProfile(reply.created_by)} className="flex-row items-center">
                             <Text className="text-sm font-semibold text-ink">
                                 {reply.creator.full_name || reply.creator.username}
                             </Text>
+                            {reply.creator.is_verified && (
+                                <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
+                            )}
                         </TouchableOpacity>
                         <Text className="text-xs text-gray-500">
                             {new Date(reply.created_at).toLocaleDateString('en-US', {

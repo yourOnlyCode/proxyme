@@ -27,6 +27,7 @@ import {
     useWindowDimensions
 } from 'react-native';
 import { CameraModal } from './CameraModal';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const LAST_STATUS_TAB_KEY = 'last_status_tab';
@@ -76,6 +77,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [statusText, setStatusText] = useState('');
   const [statusImage, setStatusImage] = useState<string | null>(null);
   const [activeStatuses, setActiveStatuses] = useState<StatusItem[]>([]);
+  const statusTabScrollRef = useRef<ScrollView | null>(null);
   
   // Penpal Data
   const [penpalMessage, setPenpalMessage] = useState('');
@@ -124,7 +126,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       const now = new Date().toISOString();
       const { data, error } = await supabase
         .from('club_events')
-        .select('*')
+        .select('id, club_id, title, description, event_date, location, created_by, created_at')
         .eq('club_id', clubId)
         .gte('event_date', now)
         .order('event_date', { ascending: true })
@@ -555,6 +557,9 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           if (error) throw error;
 
           toast.show('Status added!', 'success');
+          // Clear draft state so reopening Status Manager doesn't show the old photo/text
+          setStatusText('');
+          setStatusImage(null);
           fetchStatus(); 
       } catch (error: any) {
           toast.show(error.message || 'Failed to update status', 'error');
@@ -567,7 +572,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   // Render Status Tab Content
   const renderStatusTab = () => {
     return (
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView ref={statusTabScrollRef} showsVerticalScrollIndicator={false}>
                         {/* Active Statuses List */}
                         {activeStatuses.length > 0 && (
                             <View className="mb-6" style={{ width: '100%' }}>
@@ -639,18 +644,22 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                         <Text className="text-sm font-bold text-slate-500 mb-3 ml-1">Add to Status</Text>
                         
                         {/* Photo/Camera Buttons */}
-                        <View className="flex-row mb-4">
+                        <View className="mb-4">
                             {statusImage ? (
-                                <TouchableOpacity onPress={pickImage} className="flex-1">
-                                    <View className="w-full h-16 rounded-2xl overflow-hidden border border-slate-200 relative">
-                                        <Image source={{ uri: statusImage }} className="w-full h-full" resizeMode="cover" />
-                                        <View className="absolute inset-0 bg-black/20 items-center justify-center">
+                                <TouchableOpacity onPress={pickImage} className="w-full">
+                                    <View className="w-full rounded-2xl overflow-hidden border border-slate-200 relative" style={{ maxHeight: 400 }}>
+                                        <Image 
+                                            source={{ uri: statusImage }} 
+                                            style={{ width: '100%', height: undefined, aspectRatio: 3/4, maxHeight: 400 }} 
+                                            resizeMode="contain" 
+                                        />
+                                        <View className="absolute top-2 right-2 bg-black/60 p-2 rounded-full">
                                             <IconSymbol name="pencil" size={18} color="white" />
                                         </View>
                                     </View>
                                 </TouchableOpacity>
                             ) : (
-                                <>
+                                <View className="flex-row">
                                     <TouchableOpacity 
                                         onPress={pickImage} 
                                         className="flex-1 h-16 rounded-2xl bg-slate-100 items-center justify-center border border-slate-200"
@@ -668,7 +677,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                     >
                                         <IconSymbol name="camera.fill" size={22} color="#9CA3AF" />
                                     </TouchableOpacity>
-                                </>
+                                </View>
                             )}
                         </View>
                         
@@ -683,6 +692,12 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                             returnKeyType="done"
                             blurOnSubmit={true}
                             onSubmitEditing={() => Keyboard.dismiss()}
+                            onFocus={() => {
+                                // Ensure the input is visible (scroll to bottom) when the keyboard opens
+                                requestAnimationFrame(() => {
+                                    statusTabScrollRef.current?.scrollToEnd({ animated: true });
+                                });
+                            }}
                         />
 
                         <Text className="text-slate-400 text-xs text-center mb-6">
@@ -710,8 +725,8 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           id,
           type,
           status,
-          sender:profiles!interests_sender_id_fkey(id, username, full_name, avatar_url, city),
-          receiver:profiles!interests_receiver_id_fkey(id, username, full_name, avatar_url, city)
+          sender:profiles!interests_sender_id_fkey(id, username, full_name, avatar_url, city, is_verified),
+          receiver:profiles!interests_receiver_id_fkey(id, username, full_name, avatar_url, city, is_verified)
         `)
         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
         .eq('type', 'penpal')
@@ -764,7 +779,12 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                   </View>
                 )}
                 <View className="flex-1">
-                  <Text className="font-bold text-slate-900">{penpal.partner?.full_name || penpal.partner?.username || 'Unknown'}</Text>
+                  <View className="flex-row items-center">
+                    <Text className="font-bold text-slate-900">{penpal.partner?.full_name || penpal.partner?.username || 'Unknown'}</Text>
+                    {penpal.partner?.is_verified && (
+                      <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" style={{ marginLeft: 4 }} />
+                    )}
+                  </View>
                   {penpal.partner?.city && <Text className="text-slate-500 text-sm">{penpal.partner.city}</Text>}
                 </View>
                 <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
@@ -879,13 +899,15 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
             ) : (
               <ScrollView
                 horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingRight: 24 }}
-                style={{ flexGrow: 0 }}
+                showsHorizontalScrollIndicator={true}
+                contentContainerStyle={{ paddingRight: 16 }}
+                style={{ flexGrow: 0, flexShrink: 0 }}
                 nestedScrollEnabled={true}
                 scrollEventThrottle={16}
-                bounces={false}
-                decelerationRate="fast"
+                bounces={true}
+                decelerationRate="normal"
+                scrollEnabled={true}
+                directionalLockEnabled={true}
               >
                 {upcomingEvents.map((event) => (
                   <View key={event.id} className="bg-slate-50 rounded-xl p-4 mr-3" style={{ width: 280 }}>
@@ -1030,10 +1052,13 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                           <View className="bg-white rounded-t-3xl max-h-[90%] flex-1">
                         {/* Header */}
                         <View className="flex-row justify-between items-center p-6 pb-4">
-                            <Text className="text-2xl font-bold text-slate-900">Manager</Text>
-                            <TouchableOpacity onPress={closeModal} className="p-2 bg-slate-100 rounded-full">
-                                <IconSymbol name="xmark" size={20} color="#1A1A1A" />
-                            </TouchableOpacity>
+                            <View style={{ flex: 1 }} />
+                            <Text className="text-2xl text-slate-900 text-center" style={{ fontFamily: 'LibertinusSans-Regular' }}>Status Manager</Text>
+                            <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                <TouchableOpacity onPress={closeModal} className="p-2 bg-slate-100 rounded-full">
+                                    <IconSymbol name="xmark" size={20} color="#1A1A1A" />
+                                </TouchableOpacity>
+                            </View>
                         </View>
 
                         {/* Tab Content Carousel - Swipeable */}
@@ -1258,6 +1283,7 @@ function StatusPreviewModal({
     onDelete: (id: string) => Promise<void>;
 }) {
     const { width, height } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const [activeIndex, setActiveIndex] = useState(startIndex);
     
     // Reset index when statuses change
@@ -1336,7 +1362,10 @@ function StatusPreviewModal({
         >
             <View className="flex-1 bg-black">
                 {/* Status Progress Bars */}
-                <View className="absolute top-14 left-2 right-2 flex-row gap-1 z-50 h-1">
+                <View
+                    className="absolute left-2 right-2 flex-row gap-1 z-50 h-1"
+                    style={{ top: insets.top + 10 }}
+                >
                     {statuses.map((_, i) => (
                         <View 
                             key={i} 
@@ -1370,7 +1399,10 @@ function StatusPreviewModal({
                 </TouchableWithoutFeedback>
 
                 {/* Top Overlay: Compact Header */}
-                <View className="absolute top-0 left-0 right-0 pt-16 pb-4 px-4 pointer-events-none">
+                <View
+                    className="absolute left-0 right-0 pb-4 px-4 pointer-events-none"
+                    style={{ top: insets.top + 10, paddingTop: 26 }}
+                >
                     <View className="flex-row items-center mt-4">
                         <View className="flex-row items-center">
                             <View className="w-8 h-8 rounded-full overflow-hidden mr-2 border border-white/50">
@@ -1431,7 +1463,8 @@ function StatusPreviewModal({
                 {/* Close Button */}
                 <TouchableOpacity
                     onPress={onClose}
-                    className="absolute top-12 right-4 bg-black/50 p-3 rounded-full z-50"
+                    className="absolute right-4 bg-black/50 p-3 rounded-full z-50"
+                    style={{ top: insets.top + 6 }}
                 >
                     <IconSymbol name="xmark" size={20} color="white" />
                 </TouchableOpacity>

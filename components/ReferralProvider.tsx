@@ -10,7 +10,7 @@ const LAST_SESSION_KEY = 'last_referral_popup_session_id';
 const NEVER_SHOW_AGAIN_KEY = 'referral_popup_never_show_again';
 
 export function ReferralProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
   const [showPopup, setShowPopup] = useState(false);
   const [friendCode, setFriendCode] = useState<string | null>(null);
@@ -19,7 +19,7 @@ export function ReferralProvider({ children }: { children: React.ReactNode }) {
   const hasCheckedThisSession = useRef(false);
 
   const checkAndShowPopup = async () => {
-    if (!user || hasCheckedThisSession.current) {
+    if (authLoading || !user || hasCheckedThisSession.current) {
       setLoading(false);
       return;
     }
@@ -30,10 +30,19 @@ export function ReferralProvider({ children }: { children: React.ReactNode }) {
         .from('profiles')
         .select('city, friend_code')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (profileError || !profile) {
+      // If profile can't be loaded, treat it like "account isn't ready" and send user to sign-in.
+      // This prevents onboarding loops/crashes during partial auth states.
+      if (profileError) {
         console.error('Error fetching profile:', profileError);
+        await signOut();
+        router.replace('/(auth)/sign-in');
+        return;
+      }
+
+      // Profile row not present yet: don't show popup and don't crash.
+      if (!profile) {
         setLoading(false);
         return;
       }
@@ -85,6 +94,8 @@ export function ReferralProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    if (authLoading) return;
+
     if (!user) {
       setLoading(false);
       return;

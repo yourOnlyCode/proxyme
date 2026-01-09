@@ -48,6 +48,41 @@ export default function CityFeedScreen() {
 
   const router = useRouter();
 
+  // Track initial touch position for swipe detection
+  const initialTouchX = useRef<number | null>(null);
+
+  // Swipe gesture handler (swipe left for inbox)
+  const cityFeedPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Store initial touch position
+        if (initialTouchX.current === null) {
+          initialTouchX.current = evt.nativeEvent.pageX;
+        }
+        
+        // Only respond to horizontal swipes
+        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasEnoughMovement = Math.abs(gestureState.dx) > 30;
+        
+        return isHorizontal && hasEnoughMovement;
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        // Swipe left (dx < 0) to open inbox
+        if (gestureState.dx < -100) {
+          router.push('/inbox');
+        }
+        
+        // Reset initial touch position
+        initialTouchX.current = null;
+      },
+      onPanResponderTerminate: () => {
+        // Reset on cancel
+        initialTouchX.current = null;
+      },
+    })
+  ).current;
+
   useEffect(() => {
     if (user) {
         supabase.from('profiles').select('detailed_interests, relationship_goals').eq('id', user.id).single()
@@ -269,16 +304,29 @@ export default function CityFeedScreen() {
       setModalVisible(true);
   };
 
-  const calculateMatchPercentage = (score: number) => {
-    if (!myInterests) return 0;
-    const myCatCount = Object.keys(myInterests).length;
-    if (myCatCount === 0) return 0;
-    const maxScore = myCatCount * 16; 
-    return Math.round((score / maxScore) * 100);
+  const calculateMatchPercentage = (userInterests: Record<string, string[]> | null) => {
+    if (!myInterests || !userInterests) return 0;
+    
+    // Count the actual number of matching interests/tags
+    const commonInterests = getCommonInterests(userInterests);
+    const matchCount = commonInterests.length;
+    
+    // Map match count to percentage
+    if (matchCount >= 4) {
+      return 98; // 4+ things in common: 98%+ match
+    } else if (matchCount === 3) {
+      return 95; // 3 things in common: 95% match
+    } else if (matchCount === 2) {
+      return 80; // 2 things in common: 80% match
+    } else if (matchCount === 1) {
+      return 60; // 1 thing in common: 60% match
+    } else {
+      return 0; // No matches: 0% match
+    }
   };
 
   return (
-    <View className="flex-1 bg-ink">
+    <View className="flex-1 bg-ink" {...cityFeedPanResponder.panHandlers}>
       <FlatList
         data={feed}
         renderItem={({ item }) => (
@@ -291,7 +339,7 @@ export default function CityFeedScreen() {
                 sendInterest={sendInterest} 
                 handleSafety={handleSafety} 
                 openProfile={openProfile}
-                percentage={calculateMatchPercentage(item.shared_interests_count || 0)}
+                percentage={calculateMatchPercentage(item.detailed_interests)}
                 getCommonInterests={getCommonInterests}
                 handleAcceptRequest={handleAcceptRequest}
                 handleDeclineRequest={handleDeclineRequest}
@@ -576,8 +624,33 @@ function CityFeedCard({
                             }}
                         >
                             <View style={{ alignItems: 'center' }}>
-                                <View className="w-32 h-32 rounded-full overflow-hidden mb-4 border-4 border-white/50">
+                                <View className="w-32 h-32 rounded-full overflow-hidden mb-4 border-4 border-white/50" style={{ position: 'relative' }}>
                                     <FeedImage path={item.avatar_url} containerHeight={128} containerWidth={128} />
+                                    {/* Verified badge on avatar */}
+                                    {item.is_verified && (
+                                        <View
+                                            style={{
+                                                position: 'absolute',
+                                                bottom: 0,
+                                                right: 0,
+                                                backgroundColor: '#3B82F6',
+                                                borderRadius: 14,
+                                                width: 28,
+                                                height: 28,
+                                                justifyContent: 'center',
+                                                alignItems: 'center',
+                                                shadowColor: '#000',
+                                                shadowOffset: { width: 0, height: 2 },
+                                                shadowOpacity: 0.3,
+                                                shadowRadius: 4,
+                                                elevation: 5,
+                                                borderWidth: 2.5,
+                                                borderColor: '#fff',
+                                            }}
+                                        >
+                                            <IconSymbol name="checkmark.seal.fill" size={16} color="#fff" />
+                                        </View>
+                                    )}
                                 </View>
                                 <Text className="text-white text-3xl font-bold mb-2 text-center shadow-lg">
                                     View {item.full_name}'s Profile
@@ -632,8 +705,33 @@ function CityFeedCard({
             <View className="flex-row items-center mt-4">
                  <TouchableOpacity onPress={() => openProfile(item)} className="flex-row items-center">
                     {/* Small Avatar next to name */}
-                    <View className="w-8 h-8 rounded-full overflow-hidden mr-2 border border-white/50">
+                    <View className="w-8 h-8 rounded-full overflow-hidden mr-2 border border-white/50" style={{ position: 'relative' }}>
                         <FeedImage path={item.avatar_url} containerHeight={32} containerWidth={32} />
+                        {/* Verified badge on small avatar */}
+                        {item.is_verified && (
+                            <View
+                                style={{
+                                    position: 'absolute',
+                                    bottom: -2,
+                                    right: -2,
+                                    backgroundColor: '#3B82F6',
+                                    borderRadius: 7,
+                                    width: 14,
+                                    height: 14,
+                                    justifyContent: 'center',
+                                    alignItems: 'center',
+                                    shadowColor: '#000',
+                                    shadowOffset: { width: 0, height: 1 },
+                                    shadowOpacity: 0.3,
+                                    shadowRadius: 2,
+                                    elevation: 4,
+                                    borderWidth: 1.5,
+                                    borderColor: '#fff',
+                                }}
+                            >
+                                <IconSymbol name="checkmark.seal.fill" size={8} color="#fff" />
+                            </View>
+                        )}
                     </View>
                     <View>
                         <View className="flex-row items-center">
