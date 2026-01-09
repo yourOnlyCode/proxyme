@@ -39,14 +39,14 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png",
       "bundler": "metro",
-      "name": "Proxy",
-      "shortName": "Proxy",
+      "name": "proxyme",
+      "shortName": "proxyme",
       "lang": "en",
       "themeColor": "#E6F4FE",
       "backgroundColor": "#ffffff",
       "display": "standalone",
       "startUrl": "/",
-      "description": "Connect with people nearby",
+      "description": "Find your people where you are.",
       "meta": {
         "apple-mobile-web-app-capable": "yes",
         "apple-mobile-web-app-status-bar-style": "black-translucent"

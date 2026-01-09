@@ -3,6 +3,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Image, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
@@ -61,6 +62,7 @@ type InboxItem = {
 
 export default function InboxScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -462,8 +464,18 @@ export default function InboxScreen() {
         }}
       />
       
-      <View className="flex-row justify-between items-center mb-6 pt-12 px-4">
-        <Text className="text-3xl font-bold flex-1 text-center">Inbox</Text>
+      <View
+        className="flex-row justify-between items-center mb-4 px-4"
+        style={{ paddingTop: insets.top + 12 }}
+      >
+        <View className="w-10" />
+        <Text
+          className="text-xl text-ink"
+          style={{ fontFamily: 'LibertinusSans-Regular' }}
+        >
+          Inbox
+        </Text>
+        <View className="w-10" />
       </View>
 
       {loading ? (

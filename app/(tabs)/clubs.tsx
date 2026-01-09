@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Modal, RefreshControl, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { supabase } from '../../lib/supabase';
@@ -23,6 +24,7 @@ export default function ClubsScreen() {
   const { user } = useAuth();
   const { address } = useProxyLocation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [myClubs, setMyClubs] = useState<Club[]>([]);
   const [cityClubs, setCityClubs] = useState<Club[]>([]); // Discovery
   const [loading, setLoading] = useState(true);
@@ -277,9 +279,10 @@ export default function ClubsScreen() {
   );
 
   return (
-    <View className="flex-1 bg-slate-50 pt-12 px-4">
+    <View className="flex-1 bg-slate-50 px-4" style={{ paddingTop: insets.top + 12 }}>
         <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-3xl font-bold text-ink">Social Clubs</Text>
+            <View className="w-10" />
+            <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular' }}>Social Clubs</Text>
             {/* Create Button - verify limit logic handled in backend or assume UI check needed? */}
             <TouchableOpacity 
                 onPress={() => setCreateModalVisible(true)}
