@@ -329,12 +329,24 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
     }).start();
   };
 
+  // If a nested horizontal scroller (like Upcoming Events) is being interacted with,
+  // we should NOT let the outer tab-swipe PanResponder steal the gesture.
+  const blockTabSwipeRef = useRef(false);
+
   // PanResponder for swipe gestures
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (evt, gestureState) => {
+        if (blockTabSwipeRef.current) return false;
         // Only respond to horizontal swipes that are more horizontal than vertical
+        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasEnoughMovement = Math.abs(gestureState.dx) > 15;
+        return isHorizontalSwipe && hasEnoughMovement;
+      },
+      onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
+        if (blockTabSwipeRef.current) return false;
         const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
         const hasEnoughMovement = Math.abs(gestureState.dx) > 15;
         return isHorizontalSwipe && hasEnoughMovement;
@@ -897,41 +909,53 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                 <Text className="text-slate-500 text-sm text-center">No upcoming events</Text>
               </View>
             ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={true}
-                contentContainerStyle={{ paddingRight: 16 }}
-                style={{ flexGrow: 0, flexShrink: 0 }}
-                nestedScrollEnabled={true}
-                scrollEventThrottle={16}
-                bounces={true}
-                decelerationRate="normal"
-                scrollEnabled={true}
-                directionalLockEnabled={true}
-              >
-                {upcomingEvents.map((event) => (
-                  <View key={event.id} className="bg-slate-50 rounded-xl p-4 mr-3" style={{ width: 280 }}>
-                    <Text className="text-slate-900 font-bold text-base mb-1">{event.title}</Text>
-                    {event.description && (
-                      <Text className="text-slate-600 text-sm mb-2" numberOfLines={2}>
-                        {event.description}
+              // Profile-style horizontal card carousel (reliable side-to-side scrolling)
+              <View className="bg-white py-3 border-y border-slate-200/70" style={{ marginHorizontal: -24 }}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingLeft: 24, paddingRight: 24 }}
+                  nestedScrollEnabled
+                >
+                  {upcomingEvents.map((event) => (
+                    <View
+                      key={event.id}
+                      className="bg-white/80 rounded-2xl p-4 mr-4 border border-slate-200/70"
+                      style={{
+                        width: 280,
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 10 },
+                        shadowOpacity: 0.10,
+                        shadowRadius: 18,
+                        elevation: 8,
+                      }}
+                    >
+                      <Text className="text-slate-900 font-bold text-base mb-1" numberOfLines={1}>
+                        {event.title}
                       </Text>
-                    )}
-                    <View className="flex-row items-center mt-2">
-                      <IconSymbol name="calendar" size={16} color="#6B7280" />
-                      <Text className="text-slate-600 text-sm ml-2 flex-1" numberOfLines={1}>
-                        {formatEventDate(event.event_date)} at {formatEventTime(event.event_date)}
-                      </Text>
-                    </View>
-                    {event.location && (
-                      <View className="flex-row items-center mt-1">
-                        <IconSymbol name="location.fill" size={16} color="#6B7280" />
-                        <Text className="text-slate-600 text-sm ml-2 flex-1" numberOfLines={1}>{event.location}</Text>
+                      {event.description && (
+                        <Text className="text-slate-600 text-sm mb-2" numberOfLines={2}>
+                          {event.description}
+                        </Text>
+                      )}
+                      <View className="flex-row items-center mt-2">
+                        <IconSymbol name="calendar" size={16} color="#6B7280" />
+                        <Text className="text-slate-600 text-sm ml-2 flex-1" numberOfLines={1}>
+                          {formatEventDate(event.event_date)} at {formatEventTime(event.event_date)}
+                        </Text>
                       </View>
-                    )}
-                  </View>
-                ))}
-              </ScrollView>
+                      {event.location && (
+                        <View className="flex-row items-center mt-1">
+                          <IconSymbol name="location.fill" size={16} color="#6B7280" />
+                          <Text className="text-slate-600 text-sm ml-2 flex-1" numberOfLines={1}>
+                            {event.location}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
             )}
           </View>
 
@@ -1010,13 +1034,12 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                 className="bg-slate-50 rounded-xl p-4 mb-3"
               >
                 <View className="flex-row items-center">
-                  {club.image_url ? (
-                    <Image source={{ uri: club.image_url }} className="w-16 h-16 rounded-xl mr-4" />
-                  ) : (
-                    <View className="w-16 h-16 rounded-xl bg-gray-300 mr-4 items-center justify-center">
-                      <IconSymbol name="person.3.fill" size={24} color="#9CA3AF" />
-                    </View>
-                  )}
+                  <View
+                    className="mr-4 overflow-hidden bg-slate-200 border border-slate-200"
+                    style={{ width: 56, height: 56, borderRadius: 12 }}
+                  >
+                    <ClubCoverImage path={club.image_url} />
+                  </View>
                   <View className="flex-1">
                     <Text className="font-bold text-slate-900 text-lg">{club.name}</Text>
                     {club.description && <Text className="text-slate-500 text-sm mt-1" numberOfLines={2}>{club.description}</Text>}
@@ -1043,13 +1066,16 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
         animationType="fade"
       >
           <Animated.View style={{ flex: 1, transform: [{ translateY: modalTranslateY }] }}>
-              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                  <KeyboardAvoidingView 
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    className="flex-1 justify-end bg-black/60"
-                  >
-                      <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()} accessible={false}>
-                          <View className="bg-white rounded-t-3xl max-h-[90%] flex-1">
+              <KeyboardAvoidingView 
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                className="flex-1 justify-end bg-black/60"
+              >
+                      {/* Backdrop: tap to dismiss keyboard without stealing scroll gestures inside the sheet */}
+                      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+                          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+                      </TouchableWithoutFeedback>
+
+                      <View className="bg-white rounded-t-3xl max-h-[90%] flex-1">
                         {/* Header */}
                         <View className="flex-row justify-between items-center p-6 pb-4">
                             <View style={{ flex: 1 }} />
@@ -1064,7 +1090,6 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                         {/* Tab Content Carousel - Swipeable */}
                         <View style={{ flex: 1, overflow: 'hidden', width: SCREEN_WIDTH }}>
                             <Animated.View 
-                                {...panResponder.panHandlers}
                                 style={{
                                     flexDirection: 'row',
                                     width: SCREEN_WIDTH * tabs.length,
@@ -1150,6 +1175,9 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                 shadowRadius: 8,
                                 elevation: 2,
                             }}
+                            // Only allow swipe-to-change-tabs from the tab bar area.
+                            // This prevents nested horizontal carousels (Upcoming Events) from being blocked.
+                            {...panResponder.panHandlers}
                         >
                             <View className="flex-row relative" style={{ padding: 4 }}>
                                 {/* Glassy sliding indicator */}
@@ -1212,9 +1240,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                             </View>
                         </View>
                       </View>
-                  </TouchableWithoutFeedback>
               </KeyboardAvoidingView>
-              </TouchableWithoutFeedback>
           </Animated.View>
       </Modal>
       
@@ -1549,4 +1575,31 @@ function PreviewFeedImage({ path, containerHeight, containerWidth }: { path: str
             resizeMode="cover"
         />
     );
+}
+
+function ClubCoverImage({ path }: { path: string | null }) {
+    const [url, setUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!path) {
+            setUrl(null);
+            return;
+        }
+        if (path.startsWith('http')) {
+            setUrl(path);
+            return;
+        }
+        const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+        setUrl(data.publicUrl);
+    }, [path]);
+
+    if (!url) {
+        return (
+            <View className="flex-1 items-center justify-center">
+                <IconSymbol name="person.3.fill" size={22} color="#94A3B8" />
+            </View>
+        );
+    }
+
+    return <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />;
 }
