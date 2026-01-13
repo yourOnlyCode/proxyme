@@ -27,14 +27,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const fetchSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      setLoading(false);
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          // Common when local storage has an old/invalid refresh token.
+          console.warn('auth.getSession error:', error.message);
+          await supabase.auth.signOut({ scope: 'local' });
+          setSession(null);
+        } else {
+          setSession(data.session);
+        }
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // If refresh fails, clear the local session so we don't spam errors or get stuck.
+      if (event === 'TOKEN_REFRESH_FAILED') {
+        console.warn('Supabase auth token refresh failed; clearing local session.');
+        try {
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch {
+          // Ignore; we mainly want local storage cleared.
+        }
+        setSession(null);
+        setLoading(false);
+        return;
+      }
+
       setSession(session);
       setLoading(false);
     });
