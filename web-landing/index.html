@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Verified - Proxyme</title>
+    <title>Proxyme</title>
     <style>
         * {
             margin: 0;
@@ -11,190 +11,342 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --ink: #0f172a;
+            --muted: rgba(15, 23, 42, 0.62);
+            --card: rgba(255, 255, 255, 0.62);
+            --card-border: rgba(15, 23, 42, 0.08);
+            --shadow: 0 18px 60px rgba(2, 6, 23, 0.12);
+            --shadow-strong: 0 22px 70px rgba(2, 6, 23, 0.18);
+            --blue: #2563eb;
+            --blue-hover: #1d4ed8;
+        }
+
+        @font-face {
+            font-family: "LibertinusSans";
+            src: url("/assets/fonts/LibertinusSans-Regular.ttf") format("truetype");
+            font-weight: 400;
+            font-style: normal;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: "LibertinusSans";
+            src: url("/assets/fonts/LibertinusSans-Bold.ttf") format("truetype");
+            font-weight: 700;
+            font-style: normal;
+            font-display: swap;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: "LibertinusSans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #ffffff;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
+            color: var(--ink);
+            overflow-x: hidden;
         }
 
-        .container {
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            max-width: 500px;
+        /* White sheet with soft scattered orbs (no harsh seams). */
+        .bg {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+        }
+        .bg::before {
+            content: "";
+            position: absolute;
+            inset: -10%;
+            background:
+                radial-gradient(600px 600px at 12% 18%, rgba(37, 99, 235, 0.22) 0%, rgba(37, 99, 235, 0.00) 60%),
+                radial-gradient(560px 560px at 88% 22%, rgba(20, 184, 166, 0.20) 0%, rgba(20, 184, 166, 0.00) 58%),
+                radial-gradient(520px 520px at 70% 84%, rgba(37, 99, 235, 0.18) 0%, rgba(37, 99, 235, 0.00) 62%),
+                radial-gradient(520px 520px at 18% 82%, rgba(250, 204, 21, 0.16) 0%, rgba(250, 204, 21, 0.00) 58%),
+                radial-gradient(420px 420px at 45% 40%, rgba(56, 189, 248, 0.12) 0%, rgba(56, 189, 248, 0.00) 58%);
+            filter: blur(26px) saturate(115%);
+            opacity: 1;
+            transform: translateZ(0);
+        }
+
+        .shell {
             width: 100%;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            text-align: center;
+            max-width: 520px;
+            position: relative;
         }
 
-        .checkmark {
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 20px;
-            background: #10b981;
-            border-radius: 50%;
+        .card {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            padding: 28px 22px;
+            text-align: center;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+
+        .title {
+            font-size: 44px;
+            letter-spacing: -0.02em;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            margin-top: 12px;
+            display: grid;
+            gap: 8px;
+            justify-items: center;
+            color: var(--muted);
+            font-size: 18px;
+            line-height: 1.25;
+        }
+
+        .subtitle .word {
+            color: var(--ink);
+            font-weight: 700;
+            font-size: 24px;
+            line-height: 1.1;
+            opacity: 1;
+            transition: opacity 220ms ease;
+            will-change: opacity;
+        }
+
+        .subtitle .underline {
+            height: 4px;
+            border-radius: 999px;
+            width: 60px;
+            background: #2563eb;
+            /* Slow this down a bit so it feels smoother/less jumpy. */
+            transition: width 900ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 300ms ease;
+            transform: translateZ(0);
+        }
+
+        .lead {
+            margin-top: 16px;
+            color: var(--muted);
+            font-size: 16px;
+            line-height: 1.55;
+        }
+
+        .actions {
+            margin-top: 18px;
+            display: grid;
+            gap: 12px;
+            justify-items: center;
+        }
+
+        .btn {
+            width: 100%;
+            max-width: 260px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 14px 16px;
+            font-size: 18px;
+            font-weight: 400;
+            text-decoration: none;
+            border-radius: 18px;
+            transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease, opacity 160ms ease;
+            box-shadow: var(--shadow-strong);
+            user-select: none;
+        }
+
+        .btn-primary {
+            /* Glassy blue button */
+            background-image:
+                linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.00) 45%),
+                linear-gradient(180deg, rgba(37, 99, 235, 0.92) 0%, rgba(37, 99, 235, 0.74) 100%);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.32);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow:
+                0 18px 55px rgba(37, 99, 235, 0.22),
+                0 14px 46px rgba(2, 6, 23, 0.12);
+        }
+
+        .btn-primary:hover {
+            background-image:
+                linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.00) 45%),
+                linear-gradient(180deg, rgba(29, 78, 216, 0.95) 0%, rgba(29, 78, 216, 0.76) 100%);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-1px);
+        }
+
+        .store {
+            width: 100%;
+            max-width: 360px;
             display: flex;
+            flex-direction: row;
+            gap: 14px;
             align-items: center;
             justify-content: center;
         }
 
-        .checkmark svg {
-            width: 50px;
-            height: 50px;
-            fill: white;
-        }
-
-        h1 {
-            color: #1a1a1a;
-            font-size: 32px;
-            margin-bottom: 16px;
-            font-weight: 700;
-        }
-
-        p {
-            color: #666;
-            font-size: 18px;
-            line-height: 1.6;
-            margin-bottom: 30px;
-        }
-
-        .btn {
-            display: inline-block;
-            padding: 16px 32px;
-            font-size: 18px;
-            font-weight: 600;
-            text-decoration: none;
-            border-radius: 12px;
-            transition: all 0.3s ease;
-            margin: 10px;
-        }
-
-        .btn-primary {
-            background: #667eea;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #5568d3;
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-
-        .btn-secondary {
-            background: #f3f4f6;
-            color: #374151;
-        }
-
-        .btn-secondary:hover {
-            background: #e5e7eb;
-            transform: translateY(-2px);
-        }
-
-        .divider {
-            margin: 30px 0;
-            color: #9ca3af;
-            font-size: 14px;
-        }
-
-        .app-links {
-            display: flex;
-            gap: 15px;
+        .store a {
+            display: inline-flex;
+            align-items: center;
             justify-content: center;
-            flex-wrap: wrap;
+            flex: 1;
+            min-width: 140px;
+            border-radius: 16px;
+            overflow: visible;
+            background: transparent;
+            border: 0;
+            box-shadow: none;
+            transition: transform 160ms ease;
         }
 
-        .app-link {
-            display: inline-block;
+        .store a:hover {
+            transform: translateY(-1px);
         }
 
-        .app-link img {
-            height: 50px;
-            transition: transform 0.3s ease;
+        .store img {
+            display: block;
+            width: 100%;
+            height: 54px;
+            object-fit: contain;
+            filter: drop-shadow(0 18px 44px rgba(2, 6, 23, 0.16));
         }
 
-        .app-link:hover img {
-            transform: scale(1.05);
+        /* Google Play badge PNG tends to render visually smaller than Apple's SVG badge. */
+        .store img.badge-google {
+            transform: scale(1.34);
+            transform-origin: center;
+        }
+
+        @media (max-width: 360px) {
+            .store {
+                flex-wrap: wrap;
+            }
+        }
+
+        .fineprint {
+            margin-top: 14px;
+            color: rgba(15, 23, 42, 0.50);
+            font-size: 12px;
+            line-height: 1.45;
         }
 
         @media (max-width: 600px) {
-            .container {
-                padding: 30px 20px;
+            .card {
+                padding: 24px 18px;
             }
-
-            h1 {
-                font-size: 26px;
+            .title {
+                font-size: 40px;
             }
-
-            p {
-                font-size: 16px;
-            }
-
-            .btn {
-                padding: 14px 28px;
-                font-size: 16px;
+            .subtitle {
+                font-size: 17px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="checkmark">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
-            </svg>
-        </div>
-        
-        <h1>Email Verified! ✓</h1>
-        <p>Your email has been successfully verified. You're all set to start connecting with people nearby!</p>
-        
-        <a href="proxybusiness://" class="btn btn-primary" id="openAppBtn">
-            Open Proxyme App
-        </a>
-        
-        <div class="divider">or</div>
-        
-        <p style="font-size: 16px; color: #9ca3af; margin-bottom: 20px;">
-            Don't have the app yet? Download it now:
-        </p>
-        
-        <div class="app-links">
-            <a href="https://apps.apple.com/app/proxyme" class="app-link" target="_blank">
-                <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on App Store">
-            </a>
-            <a href="https://play.google.com/store/apps/details?id=com.proxy-social.app" class="app-link" target="_blank">
-                <img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" style="height: 70px;">
-            </a>
-        </div>
-    </div>
+    <div class="bg" aria-hidden="true"></div>
+
+    <main class="shell">
+        <section class="card">
+            <div class="title">proxyme</div>
+
+            <div class="subtitle" aria-label="Proxyme tagline">
+                <div>your next</div>
+                <div class="word" id="intentWord">friend</div>
+                <div class="underline" id="intentUnderline"></div>
+                <div>is one tap away</div>
+            </div>
+
+            <p class="lead">
+                Open the app to continue. If you don’t have Proxyme installed yet, download it below.
+            </p>
+
+            <div class="actions">
+                <a href="proxybusiness://" class="btn btn-primary" id="openAppBtn">Open Proxyme</a>
+
+                <div class="store" aria-label="Download links">
+                    <a href="https://apps.apple.com/app/proxyme" target="_blank" rel="noreferrer">
+                        <img class="badge-apple" src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store">
+                    </a>
+                    <a href="https://play.google.com/store/apps/details?id=com.proxy-social.app" target="_blank" rel="noreferrer">
+                        <img class="badge-google" src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play">
+                    </a>
+                </div>
+
+                <div class="fineprint">
+                    If “Open Proxyme” doesn’t work, your browser may not support deep links—use the store buttons instead.
+                </div>
+            </div>
+        </section>
+    </main>
 
     <script>
-        // Attempt to open the app automatically on mobile
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        
-        if (isMobile) {
-            // Try to open the app after a short delay
-            setTimeout(() => {
-                window.location.href = 'proxybusiness://';
-            }, 1000);
+        // Soft intent animation similar to the in-app sign-in tagline.
+        // Mirror the in-app rotating words/colors (components/auth/AuthShell.tsx).
+        const intents = [
+            { word: "adventure", color: "#FBBF24" },
+            { word: "spark", color: "#F472B6" },
+            { word: "collaboration", color: "#60A5FA" },
+            { word: "bestie", color: "#FBBF24" },
+            { word: "connection", color: "#F472B6" },
+            { word: "opportunity", color: "#60A5FA" },
+            { word: "squad mate", color: "#FBBF24" },
+            { word: "love story", color: "#F472B6" },
+            { word: "breakthrough", color: "#60A5FA" },
+        ];
+
+        const wordEl = document.getElementById("intentWord");
+        const underlineEl = document.getElementById("intentUnderline");
+
+        function measureWordWidth(text) {
+            const temp = document.createElement("span");
+            temp.style.position = "absolute";
+            temp.style.visibility = "hidden";
+            temp.style.whiteSpace = "nowrap";
+            temp.style.fontFamily = getComputedStyle(wordEl).fontFamily;
+            temp.style.fontSize = getComputedStyle(wordEl).fontSize;
+            temp.style.fontWeight = getComputedStyle(wordEl).fontWeight;
+            temp.textContent = text;
+            document.body.appendChild(temp);
+            const w = Math.ceil(temp.getBoundingClientRect().width);
+            document.body.removeChild(temp);
+            return Math.max(44, w);
         }
 
-        // Add click tracking
-        document.getElementById('openAppBtn').addEventListener('click', function(e) {
-            // Let the default behavior happen (opening the deep link)
-            // If the app isn't installed, the user will see an error or nothing happens
-            
-            // Optional: After 2 seconds, if still on this page, show app store links
+        let i = 0;
+        function setIntent(next) {
+            wordEl.style.opacity = "0";
+
             setTimeout(() => {
-                if (document.hasFocus()) {
-                    // Still on this page, app probably not installed
-                    alert('App not installed? Download it from the links below!');
-                }
-            }, 2000);
+                wordEl.textContent = next.word;
+                underlineEl.style.backgroundColor = next.color;
+                underlineEl.style.width = measureWordWidth(next.word) + "px";
+                wordEl.style.opacity = "1";
+            }, 400);
+        }
+
+        // Init underline width after first paint.
+        requestAnimationFrame(() => {
+            underlineEl.style.width = measureWordWidth(intents[0].word) + "px";
+            underlineEl.style.backgroundColor = intents[0].color;
         });
+
+        setInterval(() => {
+            i = (i + 1) % intents.length;
+            setIntent(intents[i]);
+        }, 2500);
+
+        // Attempt to open the app automatically on mobile (non-blocking; store links are always visible).
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile) {
+            setTimeout(() => {
+                window.location.href = "proxybusiness://";
+            }, 900);
+        }
     </script>
 </body>
 </html>
