@@ -18,7 +18,7 @@ const ExpoSecureStoreAdapter = {
       return Promise.resolve();
     }
     return SecureStore.setItemAsync(key, value, {
-      keychainAccessibility: SecureStore.AFTER_FIRST_UNLOCK,
+      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
     });
   },
   removeItem: (key: string) => {
@@ -39,6 +39,8 @@ export const supabase = createClient(url, key, {
     storage: ExpoSecureStoreAdapter,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    // On web, Supabase completes OAuth by parsing the redirect URL and exchanging the code.
+    // On native, we handle the exchange manually in lib/socialAuth.ts (via openAuthSessionAsync).
+    detectSessionInUrl: Platform.OS === 'web',
   },
 });

@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "proxyme",
-    "slug": "proxyme",
+    "slug": "proxy-business",
     "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -39,14 +39,14 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png",
       "bundler": "metro",
-      "name": "proxyme",
-      "shortName": "proxyme",
+      "name": "Proxy",
+      "shortName": "Proxy",
       "lang": "en",
       "themeColor": "#E6F4FE",
       "backgroundColor": "#ffffff",
       "display": "standalone",
       "startUrl": "/",
-      "description": "Find your people where you are.",
+      "description": "Connect with people nearby",
       "meta": {
         "apple-mobile-web-app-capable": "yes",
         "apple-mobile-web-app-status-bar-style": "black-translucent"
