@@ -2,7 +2,7 @@ import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, FlatList, Image, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Image, Modal, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
@@ -50,6 +50,7 @@ type Notification = {
     | 'event_rsvp'
     | 'event_rsvp_update'
     | 'event_update'
+    | 'event_comment'
     | 'event_reminder'
     | 'event_cancelled';
   title: string;
@@ -77,6 +78,17 @@ type InboxItem = {
   timestamp: string;
 };
 
+type UpcomingEvent = {
+  id: string;
+  club_id: string;
+  title: string;
+  event_date: string;
+  location: string | null;
+  club?: { id: string; name: string; image_url: string | null } | null;
+  kind: 'rsvp' | 'interested';
+  rsvp_status?: 'going' | 'maybe' | 'cant' | null;
+};
+
 export default function InboxScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -85,6 +97,8 @@ export default function InboxScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
   const [selectedInterestId, setSelectedInterestId] = useState<string | null>(null);
+  const [upcomingVisible, setUpcomingVisible] = useState(false);
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -141,7 +155,7 @@ export default function InboxScreen() {
 
     try {
       // Fetch pending requests + optimized conversations + notifications in parallel
-      const [requestsResult, conversationsResult, notificationsResult] = await Promise.all([
+      const [requestsResult, conversationsResult, notificationsResult, rsvpsResult, interestsResult] = await Promise.all([
         supabase
           .from('interests')
           .select(`
@@ -160,11 +174,68 @@ export default function InboxScreen() {
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .limit(50), // Limit to recent 50 notifications
+        supabase
+          .from('club_event_rsvps')
+          .select('event_id, status')
+          .eq('user_id', user.id),
+        // Backwards compatible if the table isn't deployed yet
+        supabase
+          .from('event_interests')
+          .select('event_id, status')
+          .eq('user_id', user.id)
+          .eq('status', 'interested'),
       ]);
 
       let requestsData = requestsResult.data as any[] | null;
       const conversationsRows = (conversationsResult as any).data as any[] | null;
       const notificationsData = notificationsResult.data;
+
+      // Upcoming events: union of RSVP'd + Interested events (future only)
+      try {
+        const rsvps = ((rsvpsResult as any)?.data || []) as Array<{ event_id: string; status: 'going' | 'maybe' | 'cant' }>;
+        const interestsErr = (interestsResult as any)?.error;
+        const interests =
+          interestsErr && interestsErr.code === '42P01'
+            ? []
+            : (((interestsResult as any)?.data || []) as Array<{ event_id: string; status: 'interested' }>);
+
+        const ids = Array.from(new Set<string>([...rsvps.map((r) => r.event_id), ...interests.map((i) => i.event_id)].filter(Boolean)));
+        if (ids.length === 0) {
+          setUpcomingEvents([]);
+        } else {
+          const nowIso = new Date().toISOString();
+          const { data: eventsData } = await supabase
+            .from('club_events')
+            .select('id, club_id, title, event_date, location, club:clubs(id, name, image_url)')
+            .in('id', ids)
+            .gt('event_date', nowIso)
+            .order('event_date', { ascending: true });
+
+          const rsvpMap = new Map(rsvps.map((r) => [r.event_id, r.status]));
+          const interestedSet = new Set(interests.map((i) => i.event_id));
+
+          const upcoming: UpcomingEvent[] = ((eventsData as any[]) || []).map((e: any) => ({
+            id: e.id,
+            club_id: e.club_id,
+            title: e.title,
+            event_date: e.event_date,
+            location: e.location,
+            club: e.club || null,
+            kind: rsvpMap.has(e.id) ? 'rsvp' : 'interested',
+            rsvp_status: rsvpMap.get(e.id) || null,
+          }));
+
+          // Put RSVP'd first, then Interested
+          upcoming.sort((a, b) => {
+            if (a.kind !== b.kind) return a.kind === 'rsvp' ? -1 : 1;
+            return new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
+          });
+
+          setUpcomingEvents(upcoming);
+        }
+      } catch {
+        // Don't block inbox if events fetch fails
+      }
 
       // Defensive cleanup:
       // If two users are already connected (any accepted interest either direction),
@@ -437,6 +508,17 @@ export default function InboxScreen() {
             return { name: 'checkmark.seal.fill' as const, color: '#10B981' };
           case 'connection_accepted':
             return { name: 'sparkles' as const, color: '#2563EB' };
+          case 'event_update':
+            return { name: 'calendar.badge.clock' as const, color: '#10B981' };
+          case 'event_comment':
+            return { name: 'bubble.left.and.bubble.right.fill' as const, color: '#3B82F6' };
+          case 'event_rsvp':
+          case 'event_rsvp_update':
+            return { name: 'calendar.badge.checkmark' as const, color: '#2563EB' };
+          case 'event_cancelled':
+            return { name: 'calendar.badge.minus' as const, color: '#EF4444' };
+          case 'event_reminder':
+            return { name: 'bell.badge.fill' as const, color: '#F59E0B' };
           default:
             return { name: 'bell.fill' as const, color: '#6B7280' };
         }
@@ -520,6 +602,20 @@ export default function InboxScreen() {
         await markNotificationRead();
 
         // Navigate based on notification type
+        if (
+          (notif.type === 'event_update' ||
+            notif.type === 'event_comment' ||
+            notif.type === 'event_rsvp' ||
+            notif.type === 'event_rsvp_update' ||
+            notif.type === 'event_reminder' ||
+            notif.type === 'event_cancelled') &&
+          notif.data?.event_id
+        ) {
+          router.push(`/events/${notif.data.event_id}`);
+          fetchData();
+          return;
+        }
+
         if (notif.type === 'forum_reply' && notif.data?.club_id) {
           router.push(`/clubs/${notif.data.club_id}?tab=forum`);
         } else if (notif.type === 'club_event' && notif.data?.club_id) {
@@ -642,6 +738,26 @@ export default function InboxScreen() {
         <View className="w-10" />
       </View>
 
+      {/* Upcoming Events always at the top */}
+      <TouchableOpacity
+        className="mx-4 mb-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+        activeOpacity={0.85}
+        onPress={() => setUpcomingVisible(true)}
+      >
+        <View className="w-9 h-9 rounded-full bg-business/10 items-center justify-center mr-3">
+          <IconSymbol name="calendar" size={18} color="#2563EB" />
+        </View>
+        <View className="flex-1">
+          <Text className="text-ink font-bold text-base">Upcoming Events</Text>
+          <Text className="text-gray-500 text-xs" numberOfLines={1}>
+            RSVP’d + Interested events
+          </Text>
+        </View>
+        <View className="bg-gray-100 px-3 py-1 rounded-full">
+          <Text className="text-gray-700 font-bold text-xs">{String(upcomingEvents.length)}</Text>
+        </View>
+      </TouchableOpacity>
+
       {loading ? (
         <View className="flex-1 items-center justify-center">
           <Text className="text-gray-400 mt-4">Loading inbox...</Text>
@@ -661,6 +777,64 @@ export default function InboxScreen() {
           }
         />
       )}
+
+      <Modal transparent animationType="fade" visible={upcomingVisible} onRequestClose={() => setUpcomingVisible(false)}>
+        <TouchableOpacity
+          activeOpacity={1}
+          className="flex-1 bg-black/50 items-center justify-center px-4"
+          onPress={() => setUpcomingVisible(false)}
+        >
+          <TouchableOpacity activeOpacity={1} className="w-full max-w-[420px] bg-white rounded-3xl overflow-hidden max-h-[84%]">
+            <View className="p-5 border-b border-gray-100 flex-row items-center">
+              <Text className="text-ink font-bold text-xl flex-1">Upcoming Events</Text>
+              <TouchableOpacity onPress={() => setUpcomingVisible(false)} className="p-2">
+                <IconSymbol name="xmark" size={18} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            <View className="p-5">
+              {upcomingEvents.length === 0 ? (
+                <View className="items-center py-8">
+                  <IconSymbol name="calendar.badge.exclamationmark" size={32} color="#9CA3AF" />
+                  <Text className="text-gray-500 mt-3 font-semibold">No upcoming events yet.</Text>
+                  <Text className="text-gray-400 mt-1 text-xs text-center">
+                    Tap “Interested” on events in the City tab to save them here.
+                  </Text>
+                </View>
+              ) : (
+                <View>
+                  {upcomingEvents.map((ev) => (
+                    <TouchableOpacity
+                      key={ev.id}
+                      className="bg-gray-50 border border-gray-100 rounded-2xl p-4 mb-3"
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        setUpcomingVisible(false);
+                        router.push(`/events/${ev.id}`);
+                      }}
+                    >
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-ink font-bold flex-1 pr-2" numberOfLines={1}>
+                          {ev.title}
+                        </Text>
+                        <View className={`px-2 py-1 rounded-full ${ev.kind === 'rsvp' ? 'bg-green-100' : 'bg-blue-100'}`}>
+                          <Text className={`text-xs font-bold ${ev.kind === 'rsvp' ? 'text-green-700' : 'text-blue-700'}`}>
+                            {ev.kind === 'rsvp' ? 'RSVP’D' : 'INTERESTED'}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text className="text-gray-500 mt-1 text-xs">
+                        {new Date(ev.event_date).toLocaleString()}
+                      </Text>
+                      {ev.location ? <Text className="text-gray-400 mt-1 text-xs">📍 {ev.location}</Text> : null}
+                      {ev.club?.name ? <Text className="text-gray-400 mt-1 text-xs">From {ev.club.name}</Text> : null}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }

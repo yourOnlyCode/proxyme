@@ -138,6 +138,7 @@ function InitialLayout() {
         <Stack.Screen name="connections/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="requests" options={{ headerShown: false }} />
         <Stack.Screen name="inbox" options={{ headerShown: false }} />
+        <Stack.Screen name="events/[id]" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="dark" />
     </ThemeProvider>

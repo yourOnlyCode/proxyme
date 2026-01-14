@@ -1051,6 +1051,272 @@ CREATE TRIGGER trigger_notify_event_rsvp_to_admins
 
 
 -- ==========================================
+-- 5b. Public Event Interests + Comments
+-- ==========================================
+
+-- Users can mark public events as Interested / Not Interested.
+CREATE TABLE IF NOT EXISTS public.event_interests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id UUID NOT NULL REFERENCES public.club_events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('interested', 'not_interested')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(event_id, user_id)
+);
+
+ALTER TABLE public.event_interests ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own event interests" ON public.event_interests;
+DROP POLICY IF EXISTS "Users can add own event interests" ON public.event_interests;
+DROP POLICY IF EXISTS "Users can update own event interests" ON public.event_interests;
+DROP POLICY IF EXISTS "Users can remove own event interests" ON public.event_interests;
+
+CREATE POLICY "Users can view own event interests"
+  ON public.event_interests FOR SELECT
+  USING (user_id = auth.uid());
+
+CREATE POLICY "Users can add own event interests"
+  ON public.event_interests FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update own event interests"
+  ON public.event_interests FOR UPDATE
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can remove own event interests"
+  ON public.event_interests FOR DELETE
+  USING (user_id = auth.uid());
+
+
+-- Public event comments (discussion thread).
+CREATE TABLE IF NOT EXISTS public.event_comments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  event_id UUID NOT NULL REFERENCES public.club_events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.event_comments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view event comments" ON public.event_comments;
+DROP POLICY IF EXISTS "Users can add event comments" ON public.event_comments;
+DROP POLICY IF EXISTS "Users can update own event comments" ON public.event_comments;
+DROP POLICY IF EXISTS "Users can delete own event comments" ON public.event_comments;
+
+-- View comments if:
+-- - The event is public; OR
+-- - The viewer is an accepted club member (for non-public / club-only events).
+CREATE POLICY "Users can view event comments"
+  ON public.event_comments FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.club_events e
+      WHERE e.id = event_comments.event_id
+        AND (
+          e.is_public = true
+          OR EXISTS (
+            SELECT 1
+            FROM public.club_members cm
+            WHERE cm.club_id = e.club_id
+              AND cm.user_id = auth.uid()
+              AND cm.status = 'accepted'
+          )
+        )
+    )
+  );
+
+-- Only allow commenting if the user is following the event (RSVP'd or Interested).
+CREATE POLICY "Users can add event comments"
+  ON public.event_comments FOR INSERT
+  WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM public.club_events e
+      WHERE e.id = event_comments.event_id
+        AND e.is_public = true
+    )
+    AND (
+      EXISTS (
+        SELECT 1 FROM public.club_event_rsvps r
+        WHERE r.event_id = event_comments.event_id
+          AND r.user_id = auth.uid()
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.event_interests i
+        WHERE i.event_id = event_comments.event_id
+          AND i.user_id = auth.uid()
+          AND i.status = 'interested'
+      )
+    )
+  );
+
+CREATE POLICY "Users can update own event comments"
+  ON public.event_comments FOR UPDATE
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can delete own event comments"
+  ON public.event_comments FOR DELETE
+  USING (user_id = auth.uid());
+
+
+-- Ensure notifications type constraint includes event_comment (idempotent).
+DO $$
+BEGIN
+  IF to_regclass('public.notifications') IS NOT NULL THEN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'notifications_type_check') THEN
+      ALTER TABLE public.notifications DROP CONSTRAINT notifications_type_check;
+    END IF;
+
+    ALTER TABLE public.notifications
+      ADD CONSTRAINT notifications_type_check
+      CHECK (
+        type IN (
+          'forum_reply',
+          'club_event',
+          'club_member',
+          'club_invite',
+          'club_join_request',
+          'club_join_accepted',
+          'connection_request',
+          'connection_accepted',
+          'message',
+          'event_rsvp',
+          'event_update',
+          'event_reminder',
+          'event_cancelled',
+          'event_rsvp_update',
+          'event_comment'
+        )
+      );
+  END IF;
+END $$;
+
+
+-- Notify followers when an event is updated.
+CREATE OR REPLACE FUNCTION public.notify_event_update_to_followers()
+RETURNS TRIGGER AS $$
+DECLARE
+  event_title text;
+  club_id uuid;
+  follower_id uuid;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Only public events, and only when meaningful fields change.
+  IF NEW.is_public <> true THEN
+    RETURN NEW;
+  END IF;
+
+  IF (NEW.title IS NOT DISTINCT FROM OLD.title)
+     AND (NEW.description IS NOT DISTINCT FROM OLD.description)
+     AND (NEW.event_date IS NOT DISTINCT FROM OLD.event_date)
+     AND (NEW.location IS NOT DISTINCT FROM OLD.location)
+     AND (NEW.image_url IS NOT DISTINCT FROM OLD.image_url)
+     AND (NEW.is_public IS NOT DISTINCT FROM OLD.is_public)
+  THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.event_date <= now() THEN
+    RETURN NEW;
+  END IF;
+
+  event_title := COALESCE(NEW.title, 'an event');
+  club_id := NEW.club_id;
+
+  FOR follower_id IN
+    (
+      SELECT DISTINCT x.user_id
+      FROM (
+        SELECT r.user_id FROM public.club_event_rsvps r WHERE r.event_id = NEW.id
+        UNION
+        SELECT i.user_id FROM public.event_interests i WHERE i.event_id = NEW.id AND i.status = 'interested'
+      ) x
+    )
+  LOOP
+    INSERT INTO public.notifications (user_id, type, title, body, data)
+    VALUES (
+      follower_id,
+      'event_update',
+      'Event updated',
+      '"' || event_title || '" was updated.',
+      jsonb_build_object('event_id', NEW.id, 'club_id', club_id)
+    );
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_event_update_to_followers ON public.club_events;
+CREATE TRIGGER trigger_notify_event_update_to_followers
+  AFTER UPDATE ON public.club_events
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_event_update_to_followers();
+
+
+-- Notify followers when someone comments on an event.
+CREATE OR REPLACE FUNCTION public.notify_event_comment_to_followers()
+RETURNS TRIGGER AS $$
+DECLARE
+  event_title text;
+  club_id uuid;
+  commenter_username text;
+  follower_id uuid;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT e.title, e.club_id INTO event_title, club_id
+  FROM public.club_events e
+  WHERE e.id = NEW.event_id;
+
+  SELECT p.username INTO commenter_username
+  FROM public.profiles p
+  WHERE p.id = NEW.user_id;
+
+  FOR follower_id IN
+    (
+      SELECT DISTINCT x.user_id
+      FROM (
+        SELECT r.user_id FROM public.club_event_rsvps r WHERE r.event_id = NEW.event_id
+        UNION
+        SELECT i.user_id FROM public.event_interests i WHERE i.event_id = NEW.event_id AND i.status = 'interested'
+      ) x
+      WHERE x.user_id <> NEW.user_id
+    )
+  LOOP
+    INSERT INTO public.notifications (user_id, type, title, body, data)
+    VALUES (
+      follower_id,
+      'event_comment',
+      'New event comment',
+      COALESCE(commenter_username, 'Someone') || ' commented on "' || COALESCE(event_title, 'an event') || '".',
+      jsonb_build_object('event_id', NEW.event_id, 'club_id', club_id)
+    );
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_event_comment_to_followers ON public.event_comments;
+CREATE TRIGGER trigger_notify_event_comment_to_followers
+  AFTER INSERT ON public.event_comments
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_event_comment_to_followers();
+
+
+-- ==========================================
 -- 6. Club Forum (from club_forum_schema.sql & enhancements)
 -- ==========================================
 

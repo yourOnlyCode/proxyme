@@ -41,6 +41,7 @@ type PublicEvent = {
     detailed_interests?: Record<string, string[]> | null;
   } | null;
   my_rsvp?: 'going' | 'maybe' | 'cant' | null;
+  my_interest?: 'interested' | 'not_interested' | null;
   match_score?: number;
   common_interests?: string[];
 };
@@ -225,6 +226,23 @@ export default function CityFeedScreen() {
                   .in('event_id', publicEvents.map((e) => e.id));
 
                 const rsvpMap = new Map<string, any>((myRsvps || []).map((r: any) => [r.event_id, r.status]));
+
+                // Get my Interested / Not Interested state for these events (if the table exists)
+                let interestMap = new Map<string, any>();
+                try {
+                  const { data: myInterestsRows, error: myInterestsErr } = await supabase
+                    .from('event_interests')
+                    .select('event_id, status')
+                    .eq('user_id', user.id)
+                    .in('event_id', publicEvents.map((e) => e.id));
+
+                  if (!myInterestsErr && myInterestsRows) {
+                    interestMap = new Map<string, any>(myInterestsRows.map((r: any) => [r.event_id, r.status]));
+                  }
+                } catch {
+                  // Backwards compat if table doesn't exist yet.
+                }
+
                 publicEvents = publicEvents.map((e) => {
                   const clubInterests = (e as any)?.club?.detailed_interests || null;
                   const score = calculateRawMatchScore(clubInterests);
@@ -232,10 +250,15 @@ export default function CityFeedScreen() {
                   return {
                     ...e,
                     my_rsvp: rsvpMap.get(e.id) || null,
+                    my_interest: interestMap.get(e.id) || null,
                     match_score: score,
                     common_interests: common,
                   };
                 });
+
+                // Never show events the user explicitly acted on (Interested / Not interested)
+                // Interested events live in Inbox -> Upcoming Events instead.
+                publicEvents = publicEvents.filter((e) => e.my_interest !== 'not_interested' && e.my_interest !== 'interested');
               }
             }
 
@@ -499,6 +522,7 @@ export default function CityFeedScreen() {
                 width={width}
                 listHeight={listHeight}
                 myIsVerified={myIsVerified}
+                myInterest={item.event.my_interest || null}
                 onView={() => {
                   setSelectedEvent(item.event);
                   setEventDetailVisible(true);
@@ -541,6 +565,43 @@ export default function CityFeedScreen() {
                         })),
                       );
                     });
+                }}
+                onInterested={async () => {
+                  if (!user?.id) return;
+                  try {
+                    const { error } = await supabase
+                      .from('event_interests')
+                      .upsert(
+                        { event_id: item.event.id, user_id: user.id, status: 'interested' },
+                        { onConflict: 'event_id,user_id' },
+                      );
+                    if (error) throw error;
+
+                    // Remove it immediately from the discovery feed (it will appear in Inbox -> Upcoming Events).
+                    setFeed((prev) => prev.filter((it) => !(it.kind === 'event' && it.event.id === item.event.id)));
+
+                    // Jump straight to the event page (also reachable via Inbox -> Upcoming Events).
+                    router.push({ pathname: '/events/[id]', params: { id: item.event.id } } as any);
+                  } catch (e: any) {
+                    Alert.alert('Error', e?.message || 'Could not mark interested.');
+                  }
+                }}
+                onNotInterested={async () => {
+                  if (!user?.id) return;
+                  try {
+                    const { error } = await supabase
+                      .from('event_interests')
+                      .upsert(
+                        { event_id: item.event.id, user_id: user.id, status: 'not_interested' },
+                        { onConflict: 'event_id,user_id' },
+                      );
+                    if (error) throw error;
+
+                    // Remove it immediately and never show again
+                    setFeed((prev) => prev.filter((it) => !(it.kind === 'event' && it.event.id === item.event.id)));
+                  } catch (e: any) {
+                    Alert.alert('Error', e?.message || 'Could not hide this event.');
+                  }
                 }}
                 onRSVP={async () => {
                   if (!user?.id) return;
@@ -725,14 +786,20 @@ function CityEventCard({
   width,
   listHeight,
   myIsVerified,
+  myInterest,
   onView,
+  onInterested,
+  onNotInterested,
   onRSVP,
 }: {
   event: PublicEvent;
   width: number;
   listHeight: number;
   myIsVerified: boolean;
+  myInterest: 'interested' | 'not_interested' | null;
   onView: () => void;
+  onInterested: () => void;
+  onNotInterested: () => void;
   onRSVP: () => void;
 }) {
   const d = new Date(event.event_date);
@@ -791,6 +858,28 @@ function CityEventCard({
             {myIsVerified ? (event.my_rsvp ? 'RSVP’d (Going)' : 'RSVP (Going)') : 'Get verified to RSVP'}
           </Text>
         </TouchableOpacity>
+
+        {/* Event-level interest actions (public events don't require club membership to attend) */}
+        <View className="flex-row mt-3">
+        <TouchableOpacity
+            onPress={onNotInterested}
+            className="flex-1 py-3 rounded-2xl items-center bg-white/10 border border-white/15 mr-2"
+            activeOpacity={0.85}
+          >
+            <Text className="text-white/90 font-bold">Not interested</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onInterested}
+            disabled={myInterest === 'interested'}
+            className={`flex-1 py-3 rounded-2xl items-center ${myInterest === 'interested' ? 'bg-green-500/25 border border-green-400/30' : 'bg-white/15 border border-white/20'}`}
+            activeOpacity={0.85}
+          >
+            <Text className={`font-bold ${myInterest === 'interested' ? 'text-white' : 'text-white'}`}>
+              {myInterest === 'interested' ? 'Interested ✓' : 'Interested'}
+            </Text>
+          </TouchableOpacity>
+
+        </View>
 
         <TouchableOpacity
           onPress={onView}
