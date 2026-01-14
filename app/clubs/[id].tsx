@@ -49,6 +49,7 @@ export default function ClubDetailScreen() {
 
   // Members State
   const [members, setMembers] = useState<ClubMember[]>([]);
+  const [leaders, setLeaders] = useState<Array<{ user_id: string; role: 'owner' | 'admin'; profile: { id: string; username: string; full_name: string | null; avatar_url: string | null; is_verified?: boolean } }>>([]);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [eventMenuVisible, setEventMenuVisible] = useState(false);
@@ -144,7 +145,59 @@ export default function ClubDetailScreen() {
         setSettingsDescription(data.description || '');
         setSettingsMaxMembers(data.max_member_count?.toString() || '');
           setSettingsJoinPolicy((data as any).join_policy || 'invite_only');
+
+        // Fetch leadership (owner/admins) for both members and non-members (for the access-control view)
+        fetchLeaders(data.id, data.owner_id);
       } else console.error(error);
+  };
+
+  const fetchLeaders = async (clubId: string, ownerId?: string) => {
+    try {
+      const { data: rows } = await supabase
+        .from('club_members')
+        .select('user_id, role')
+        .eq('club_id', clubId)
+        .eq('status', 'accepted')
+        .in('role', ['owner', 'admin']);
+
+      const ids = new Set<string>();
+      if (ownerId) ids.add(ownerId);
+      (rows || []).forEach((r: any) => {
+        if (r?.user_id) ids.add(r.user_id);
+      });
+
+      const idList = Array.from(ids);
+      if (idList.length === 0) {
+        setLeaders([]);
+        return;
+      }
+
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, username, full_name, avatar_url, is_verified')
+        .in('id', idList);
+
+      const pmap = new Map<string, any>((profs || []).map((p: any) => [p.id, p]));
+
+      const ownerProfile = ownerId ? pmap.get(ownerId) : null;
+      const admins = (rows || [])
+        .filter((r: any) => r?.role === 'admin' && r?.user_id)
+        .map((r: any) => ({
+          user_id: r.user_id,
+          role: 'admin' as const,
+          profile: pmap.get(r.user_id),
+        }))
+        .filter((x: any) => !!x.profile);
+
+      const combined: Array<any> = [];
+      if (ownerId && ownerProfile) {
+        combined.push({ user_id: ownerId, role: 'owner' as const, profile: ownerProfile });
+      }
+      combined.push(...admins);
+      setLeaders(combined);
+    } catch (e) {
+      setLeaders([]);
+    }
   };
 
   const updateClubSettings = async () => {
@@ -1298,6 +1351,39 @@ export default function ClubDetailScreen() {
         {!isMember ? (
             <View className="flex-1 p-6 items-center">
                 <Text className="text-gray-600 text-center mb-6 text-lg">{club.description || 'No description provided.'}</Text>
+
+                {leaders.length > 0 && (
+                  <View className="w-full bg-white border border-gray-100 rounded-2xl p-4 mb-6">
+                    <Text className="text-gray-500 font-bold text-xs mb-3">OWNER & ADMINS</Text>
+                    <View className="flex-row flex-wrap">
+                      {leaders.map((l) => (
+                        <TouchableOpacity
+                          key={`${l.role}:${l.user_id}`}
+                          className="flex-row items-center mr-4 mb-3"
+                          activeOpacity={0.85}
+                          onPress={() => viewUserProfile(l.profile.id)}
+                        >
+                          <View className="mr-2">
+                            <Avatar url={l.profile.avatar_url} size={34} onUpload={() => {}} editable={false} />
+                          </View>
+                          <View>
+                            <View className="flex-row items-center">
+                              <Text className="text-ink font-bold text-sm">
+                                {l.profile.full_name || l.profile.username}
+                              </Text>
+                              {l.profile.is_verified && (
+                                <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
+                              )}
+                            </View>
+                            <Text className="text-gray-400 text-[10px] font-bold uppercase">
+                              {l.role}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
                 
                 <IconSymbol name="lock.fill" size={64} color="#CBD5E0" />
                 <Text className="text-xl font-bold mt-4 mb-2 text-ink">Private Club</Text>

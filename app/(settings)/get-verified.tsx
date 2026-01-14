@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../../lib/auth';
 import { REQUIRED_REFERRALS_FOR_VERIFICATION, checkVerificationStatus } from '../../lib/verification';
@@ -57,7 +57,11 @@ export default function GetVerifiedScreen() {
             <View className="w-12 h-1.5 bg-gray-300 rounded-full" />
         </View>
 
-        <View className="flex-1 p-6">
+        <ScrollView
+          className="flex-1"
+          contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+        >
           <Text className="text-3xl font-extrabold mb-3 text-ink text-center">
             {isVerified ? 'You’re Verified' : 'Get Verified'}
           </Text>
@@ -122,7 +126,7 @@ export default function GetVerifiedScreen() {
           <TouchableOpacity onPress={() => router.back()} className="py-3 items-center">
             <Text className="text-gray-400 font-medium">Go Back</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </View>
   );
 }

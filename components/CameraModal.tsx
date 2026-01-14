@@ -2,7 +2,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, Image, Modal, PanResponder, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, Easing, Image, Modal, PanResponder, Text, TouchableOpacity, View } from 'react-native';
+import { State, TapGestureHandler } from 'react-native-gesture-handler';
 
 const getScreenDimensions = () => {
     const { width, height } = Dimensions.get('window');
@@ -33,6 +34,9 @@ export function CameraModal({
     const slideAnim = useRef(new Animated.Value(0)).current;
     const swipeAnim = useRef(new Animated.Value(0)).current;
     const isClosing = useRef(false);
+    const toggleFacing = () => {
+        setFacing((f) => (f === 'back' ? 'front' : 'back'));
+    };
     
     // Update screen dimensions on mount and when window changes
     useEffect(() => {
@@ -51,11 +55,11 @@ export function CameraModal({
             const screenWidth = Number(SCREEN_WIDTH) || 0;
             if (screenWidth > 0) {
                 slideAnim.setValue(-screenWidth);
-                Animated.spring(slideAnim, {
+                Animated.timing(slideAnim, {
                     toValue: 0,
+                    duration: 260,
+                    easing: Easing.out(Easing.cubic),
                     useNativeDriver: true,
-                    tension: 50,
-                    friction: 7,
                 }).start();
             }
         } else if (!visible && slideFromRight) {
@@ -397,11 +401,22 @@ export function CameraModal({
                     style={{ transform: transformStyle }}
                     {...panResponder.panHandlers}
                 >
-                    <CameraView
-                        ref={cameraRef}
-                        style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
-                        facing={facing}
-                    />
+                    <TapGestureHandler
+                        numberOfTaps={2}
+                        onHandlerStateChange={({ nativeEvent }) => {
+                            if (nativeEvent.state !== State.ACTIVE) return;
+                            if (capturedPhoto) return;
+                            toggleFacing();
+                        }}
+                    >
+                        <View style={{ flex: 1 }}>
+                            <CameraView
+                                ref={cameraRef}
+                                style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+                                facing={facing}
+                            />
+                        </View>
+                    </TapGestureHandler>
 
                     {/* Bottom Controls - Reorganized */}
                     <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
@@ -423,7 +438,7 @@ export function CameraModal({
                         
                         {/* Front/Back Toggle - Right of capture */}
                         <TouchableOpacity 
-                            onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+                            onPress={toggleFacing}
                             className="bg-black/50 p-3 rounded-full ml-8"
                         >
                             <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
@@ -450,11 +465,22 @@ export function CameraModal({
                 style={{ transform: transformStyle }}
                 {...panResponder.panHandlers}
             >
-                <CameraView
-                    ref={cameraRef}
-                    style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
-                    facing={facing}
-                />
+                <TapGestureHandler
+                    numberOfTaps={2}
+                    onHandlerStateChange={({ nativeEvent }) => {
+                        if (nativeEvent.state !== State.ACTIVE) return;
+                        if (capturedPhoto) return;
+                        toggleFacing();
+                    }}
+                >
+                    <View style={{ flex: 1 }}>
+                        <CameraView
+                            ref={cameraRef}
+                            style={{ flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+                            facing={facing}
+                        />
+                    </View>
+                </TapGestureHandler>
 
                 {/* Bottom Controls - Reorganized */}
                 <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
@@ -476,7 +502,7 @@ export function CameraModal({
                     
                     {/* Front/Back Toggle - Right of capture */}
                     <TouchableOpacity 
-                        onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+                        onPress={toggleFacing}
                         className="bg-black/50 p-3 rounded-full ml-8"
                     >
                         <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />

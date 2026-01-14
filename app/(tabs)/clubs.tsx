@@ -327,8 +327,17 @@ export default function ClubsScreen() {
                       </View>
                   ) : (
                       <View className="flex-row items-center">
-                          <IconSymbol name="lock.fill" size={12} color="#6B7280" />
-                          <Text className="text-gray-500 font-bold text-xs ml-1">Invite Only</Text>
+                          {(item as any)?.join_policy === 'request_to_join' ? (
+                            <>
+                              <IconSymbol name="person.crop.circle.badge.plus" size={14} color="#2563EB" />
+                              <Text className="text-business font-bold text-xs ml-1">Request to join</Text>
+                            </>
+                          ) : (
+                            <>
+                              <IconSymbol name="lock.fill" size={12} color="#6B7280" />
+                              <Text className="text-gray-500 font-bold text-xs ml-1">Invite Only</Text>
+                            </>
+                          )}
                       </View>
                   )}
               </View>

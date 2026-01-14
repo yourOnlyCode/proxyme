@@ -415,6 +415,10 @@ export default function HomeScreen() {
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
+      onPanResponderGrant: (evt) => {
+        // Capture start position immediately so edge detection is accurate.
+        initialTouchX.current = evt.nativeEvent.pageX;
+      },
       onMoveShouldSetPanResponder: (evt, gestureState) => {
         // Store initial touch position
         if (initialTouchX.current === null) {
@@ -429,10 +433,16 @@ export default function HomeScreen() {
       },
       onPanResponderRelease: (evt, gestureState) => {
         const startX = initialTouchX.current ?? evt.nativeEvent.pageX;
-        const isFromLeftEdge = startX < 100;
+        const screenWidth = Dimensions.get('window').width || 0;
+        const edgeZone = Math.min(140, screenWidth * 0.25); // easier to trigger (bigger edge zone)
+        const isFromLeftEdge = startX < edgeZone;
         
         // Swipe right from left edge (dx > 0) to open camera
-        if (gestureState.dx > 100 && isFromLeftEdge) {
+        const shouldOpen =
+          isFromLeftEdge &&
+          (gestureState.dx > 70 || (gestureState.vx > 0.65 && gestureState.dx > 30)); // allow quick flicks
+
+        if (shouldOpen) {
           openCamera(true, 'proxy'); // Pass true to indicate it's from swipe, and 'proxy' as source
         }
         

@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from '../lib/auth';
 import { LocationProvider } from '../lib/location'; // New Import
 import { registerForPushNotificationsAsync } from '../lib/push';
 import { supabase } from '../lib/supabase';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -147,16 +148,18 @@ function InitialLayout() {
 
 export default function RootLayout() {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <LocationProvider>
-          <TutorialProvider>
-            <ReferralProvider>
-              <InitialLayout />
-            </ReferralProvider>
-          </TutorialProvider>
-        </LocationProvider>
-      </AuthProvider>
-    </ToastProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ToastProvider>
+        <AuthProvider>
+          <LocationProvider>
+            <TutorialProvider>
+              <ReferralProvider>
+                <InitialLayout />
+              </ReferralProvider>
+            </TutorialProvider>
+          </LocationProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </GestureHandlerRootView>
   );
 }

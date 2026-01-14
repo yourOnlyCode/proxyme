@@ -5,8 +5,8 @@ import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Dimensions, Image, Linking, Platform, Pressable, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Dimensions, Image, Linking, PanResponder, Platform, Pressable, RefreshControl, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { useAuth } from '../../lib/auth';
 import { getReferralShareContent } from '../../lib/referral';
@@ -56,6 +56,40 @@ export default function ProfileScreen() {
   const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  // Swipe left (from right edge) to open Settings
+  const initialTouchX = useRef<number | null>(null);
+  const settingsSwipeResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onPanResponderGrant: (evt) => {
+        initialTouchX.current = evt.nativeEvent.pageX;
+      },
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasEnoughMovement = Math.abs(gestureState.dx) > 20;
+        return isHorizontal && hasEnoughMovement;
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const startX = initialTouchX.current ?? evt.nativeEvent.pageX;
+        const screenWidth = Dimensions.get('window').width || 0;
+        const edgeZone = Math.min(140, screenWidth * 0.25);
+        const isFromRightEdge = startX > screenWidth - edgeZone;
+
+        const shouldOpen =
+          isFromRightEdge && (gestureState.dx < -80 || (gestureState.vx < -0.65 && gestureState.dx < -30));
+
+        if (shouldOpen) {
+          router.push('/(settings)/edit-profile');
+        }
+
+        initialTouchX.current = null;
+      },
+      onPanResponderTerminate: () => {
+        initialTouchX.current = null;
+      },
+    })
+  ).current;
 
   const fetchProfile = async () => {
     if (!user) return;
@@ -179,7 +213,7 @@ export default function ProfileScreen() {
   if (!profile) return <View className="flex-1 bg-slate-50" />;
 
   return (
-    <View className="flex-1 bg-slate-50">
+    <View className="flex-1 bg-slate-50" {...settingsSwipeResponder.panHandlers}>
         <ScrollView 
             refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchProfile} />}
             contentContainerStyle={{ paddingBottom: 140 }}
@@ -195,14 +229,16 @@ export default function ProfileScreen() {
                         <IconSymbol name="camera.fill" size={48} color={theme.icon} />
                     </View>
                 )}
-                
-                {/* Settings Button */}
+
+                {/* Settings Button (back in banner) */}
                 <TouchableOpacity 
                     className="absolute top-12 right-4 bg-paper/90 p-2 rounded-full shadow-sm backdrop-blur-md"
                     onPress={() => router.push('/(settings)/edit-profile')}
+                    activeOpacity={0.85}
                 >
-                     <IconSymbol name="gear" size={24} color="#2D3748" />
+                     <IconSymbol name="gearshape.fill" size={22} color="#1A1A1A" />
                 </TouchableOpacity>
+                
             </View>
 
             {/* Profile Info */}
@@ -557,13 +593,6 @@ export default function ProfileScreen() {
                     </View>
                 )}
 
-                {/* Sign Out Button */}
-                <TouchableOpacity 
-                    onPress={() => signOut()} 
-                    className="mt-8 mb-8 bg-slate-100 py-4 rounded-2xl items-center"
-                >
-                    <Text className="text-red-500 font-bold text-lg">Sign Out</Text>
-                </TouchableOpacity>
             </View>
         </ScrollView>
     </View>
