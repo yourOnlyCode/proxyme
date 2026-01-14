@@ -1,4 +1,4 @@
-import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
+import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -243,6 +243,7 @@ export default function OnboardingScreen() {
   if (loading) return <View className="flex-1 justify-center"><ActivityIndicator /></View>;
 
   return (
+    <KeyboardDismissWrapper>
     <View className="flex-1 bg-white pt-12">
       <View className="px-6 mb-6">
         <View className="mb-2">
@@ -416,8 +417,8 @@ export default function OnboardingScreen() {
         </View>
       </View>
 
-      <KeyboardToolbar />
     </View>
+    </KeyboardDismissWrapper>
   );
 }
 

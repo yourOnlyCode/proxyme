@@ -164,6 +164,153 @@ create policy "Receiver can update status"
   on public.interests for update
   using ( (SELECT auth.uid()) = receiver_id );
 
+-- =========================================================
+-- Connections edge cases: auto-connect + cleanup + notify
+--
+-- Problem:
+-- - If A->B is pending and B->A is pending, accepting one can leave the other pending,
+--   causing a stale request in the receiver's inbox even though they're connected.
+--
+-- Solution:
+-- - BEFORE INSERT: if a reciprocal pending/accepted exists, auto-connect (accept the existing row)
+--   and skip inserting the new row (keeps a single canonical row per pair).
+-- - AFTER UPDATE to accepted: delete any reciprocal pending rows and create "connection_accepted"
+--   notifications for both sides with an icebreaker prompt.
+-- =========================================================
+
+create or replace function public.interests_before_insert_autoconnect()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  existing_id uuid;
+  existing_status text;
+begin
+  -- Prevent duplicate "same direction" pending rows
+  select i.id, i.status
+  into existing_id, existing_status
+  from public.interests i
+  where i.sender_id = new.sender_id
+    and i.receiver_id = new.receiver_id
+    and i.status in ('pending', 'accepted')
+  order by i.created_at desc
+  limit 1;
+
+  if existing_id is not null then
+    -- Already have a pending/accepted request in this direction; skip creating another row.
+    return null;
+  end if;
+
+  -- If the other user already sent a pending request, auto-connect by accepting the existing row
+  -- and skip inserting this new row (avoids double-counting accepted connections).
+  select i.id, i.status
+  into existing_id, existing_status
+  from public.interests i
+  where i.sender_id = new.receiver_id
+    and i.receiver_id = new.sender_id
+    and i.status in ('pending', 'accepted')
+  order by i.created_at desc
+  limit 1;
+
+  if existing_id is not null then
+    if existing_status = 'pending' then
+      update public.interests
+      set status = 'accepted'
+      where id = existing_id;
+    end if;
+
+    -- Skip insert; connection will be represented by the existing row.
+    return null;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trigger_interests_before_insert_autoconnect on public.interests;
+create trigger trigger_interests_before_insert_autoconnect
+before insert on public.interests
+for each row
+execute function public.interests_before_insert_autoconnect();
+
+
+create or replace function public.interests_after_update_on_accept()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a_id uuid;
+  b_id uuid;
+  a_username text;
+  b_username text;
+  questions text[];
+  pick text;
+begin
+  -- Only act when transitioning into accepted
+  if new.status <> 'accepted' or old.status = 'accepted' then
+    return new;
+  end if;
+
+  a_id := new.sender_id;
+  b_id := new.receiver_id;
+
+  -- Cleanup: remove any reciprocal pending request row (prevents stale "request" in inbox)
+  delete from public.interests i
+  where i.sender_id = b_id
+    and i.receiver_id = a_id
+    and i.status = 'pending';
+
+  -- Optional cleanup: if there are multiple pending duplicates in the same direction, remove extras.
+  delete from public.interests i
+  where i.sender_id = a_id
+    and i.receiver_id = b_id
+    and i.status = 'pending'
+    and i.id <> new.id;
+
+  -- Notifications table is created by supabase/club_notifications.sql; only attempt if present.
+  if exists (
+    select 1 from information_schema.tables
+    where table_schema = 'public' and table_name = 'notifications'
+  ) then
+    select username into a_username from public.profiles where id = a_id;
+    select username into b_username from public.profiles where id = b_id;
+
+    questions := array[
+      'What''s your go-to coffee order?',
+      'What are you excited about this week?',
+      'What''s a hobby you''re into lately?',
+      'If you could teleport anywhere right now, where would you go?',
+      'What''s your perfect weekend look like?'
+    ];
+    pick := questions[1 + floor(random() * array_length(questions, 1))::int];
+
+    insert into public.notifications (user_id, type, title, body, data)
+    values
+      (a_id, 'connection_accepted', 'New Connection',
+        'You connected with ' || coalesce(b_username, 'someone') || '. Break the ice: ' || pick,
+        jsonb_build_object('partner_id', b_id, 'icebreaker', pick)
+      ),
+      (b_id, 'connection_accepted', 'New Connection',
+        'You connected with ' || coalesce(a_username, 'someone') || '. Break the ice: ' || pick,
+        jsonb_build_object('partner_id', a_id, 'icebreaker', pick)
+      );
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trigger_interests_after_update_on_accept on public.interests;
+create trigger trigger_interests_after_update_on_accept
+after update of status on public.interests
+for each row
+when (new.status = 'accepted' and (old.status is distinct from new.status))
+execute function public.interests_after_update_on_accept();
+
 -- Allow either side to disconnect via SECURITY DEFINER function
 create or replace function public.remove_connection(p_partner_id uuid)
 returns void
@@ -457,16 +604,172 @@ CREATE POLICY "Users can delete own stories"
 -- 4. Clubs & Members (from clubs_schema.sql)
 -- ==========================================
 
+-- Notifications: join request + join accepted
+-- This is optional and only activates if public.notifications exists.
+DO $$
+BEGIN
+  IF to_regclass('public.notifications') IS NOT NULL THEN
+    -- Expand notifications type constraint to include join-request types (idempotent)
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'notifications_type_check') THEN
+      ALTER TABLE public.notifications DROP CONSTRAINT notifications_type_check;
+    END IF;
+
+    ALTER TABLE public.notifications
+      ADD CONSTRAINT notifications_type_check
+      CHECK (
+        type IN (
+          'forum_reply',
+          'club_event',
+          'club_member',
+          'club_invite',
+          'club_join_request',
+          'club_join_accepted',
+          'connection_request',
+          'connection_accepted',
+          'message',
+          'event_rsvp',
+          'event_update',
+          'event_reminder',
+          'event_cancelled',
+          'event_rsvp_update'
+        )
+      );
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.notify_club_join_request()
+RETURNS TRIGGER AS $$
+DECLARE
+  club_name text;
+  requester_username text;
+  owner_id uuid;
+BEGIN
+  -- Only for join requests
+  IF NEW.status <> 'pending' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Only when the club allows requests
+  IF EXISTS (SELECT 1 FROM public.clubs c WHERE c.id = NEW.club_id AND c.join_policy = 'invite_only') THEN
+    RETURN NEW;
+  END IF;
+
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT c.name, c.owner_id INTO club_name, owner_id
+  FROM public.clubs c
+  WHERE c.id = NEW.club_id;
+
+  SELECT p.username INTO requester_username
+  FROM public.profiles p
+  WHERE p.id = NEW.user_id;
+
+  EXECUTE $q$
+    INSERT INTO public.notifications (user_id, type, title, body, data)
+    VALUES ($1, 'club_join_request', 'Join Request',
+      $2,
+      jsonb_build_object('club_id', $3, 'requester_id', $4)
+    )
+  $q$
+  USING owner_id,
+        coalesce(requester_username, 'Someone') || ' requested to join ' || coalesce(club_name, 'your club'),
+        NEW.club_id,
+        NEW.user_id;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_club_join_request ON public.club_members;
+CREATE TRIGGER trigger_notify_club_join_request
+  AFTER INSERT ON public.club_members
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_club_join_request();
+
+CREATE OR REPLACE FUNCTION public.notify_club_join_accepted()
+RETURNS TRIGGER AS $$
+DECLARE
+  club_name text;
+  owner_username text;
+BEGIN
+  -- Only when pending -> accepted
+  IF NEW.status <> 'accepted' OR OLD.status = 'accepted' OR OLD.status IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF OLD.status <> 'pending' THEN
+    RETURN NEW;
+  END IF;
+
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT c.name, p.username INTO club_name, owner_username
+  FROM public.clubs c
+  JOIN public.profiles p ON p.id = c.owner_id
+  WHERE c.id = NEW.club_id;
+
+  EXECUTE $q$
+    INSERT INTO public.notifications (user_id, type, title, body, data)
+    VALUES ($1, 'club_join_accepted', 'You''re In!',
+      $2,
+      jsonb_build_object('club_id', $3)
+    )
+  $q$
+  USING NEW.user_id,
+        coalesce(owner_username, 'A club owner') || ' accepted your request for ' || coalesce(club_name, 'the club') ||
+        '. Say hi in the forum and check out upcoming events!',
+        NEW.club_id;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_club_join_accepted ON public.club_members;
+CREATE TRIGGER trigger_notify_club_join_accepted
+  AFTER UPDATE OF status ON public.club_members
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_club_join_accepted();
+
 CREATE TABLE IF NOT EXISTS public.clubs (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
     image_url TEXT,
+    detailed_interests JSONB,
     city TEXT NOT NULL,
     owner_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    join_policy TEXT NOT NULL DEFAULT 'request_to_join' CHECK (join_policy IN ('invite_only', 'request_to_join')),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     max_member_count INTEGER CHECK (max_member_count IS NULL OR max_member_count > 0)
 );
+
+-- If the table already existed (older schema), ensure detailed_interests exists.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'clubs' AND column_name = 'detailed_interests'
+  ) THEN
+    ALTER TABLE public.clubs
+      ADD COLUMN detailed_interests JSONB;
+  END IF;
+END $$;
+
+-- If the table already existed (older schema), ensure join_policy exists.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'clubs' AND column_name = 'join_policy'
+  ) THEN
+    ALTER TABLE public.clubs
+      ADD COLUMN join_policy TEXT NOT NULL DEFAULT 'request_to_join'
+      CHECK (join_policy IN ('invite_only', 'request_to_join'));
+  END IF;
+END $$;
 
 -- One club per owner (DB enforcement)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_clubs_owner_one_club
@@ -485,11 +788,29 @@ CREATE POLICY "Clubs are viewable by everyone"
 
 CREATE POLICY "Users can create clubs"
     ON public.clubs FOR INSERT
-    WITH CHECK ((SELECT auth.uid()) = owner_id);
+    WITH CHECK (
+      (SELECT auth.uid()) = owner_id
+      and exists (
+        select 1
+        from public.profiles p
+        where p.id = auth.uid()
+          and p.is_verified = true
+      )
+    );
 
 CREATE POLICY "Owners can update their clubs"
     ON public.clubs FOR UPDATE
-    USING ((SELECT auth.uid()) = owner_id);
+    USING (
+      (SELECT auth.uid()) = owner_id
+      OR EXISTS (
+        SELECT 1
+        FROM public.club_members cm
+        WHERE cm.club_id = clubs.id
+          AND cm.user_id = (SELECT auth.uid())
+          AND cm.status = 'accepted'
+          AND cm.role IN ('owner', 'admin')
+      )
+    );
 
 CREATE POLICY "Owners can delete their clubs"
     ON public.clubs FOR DELETE
@@ -519,12 +840,42 @@ CREATE POLICY "Members can view other members"
 
 CREATE POLICY "Users can join/leave clubs"
     ON public.club_members FOR INSERT
-    WITH CHECK ((SELECT auth.uid()) = user_id OR 
-               EXISTS (SELECT 1 FROM public.clubs WHERE id = club_id AND owner_id = (SELECT auth.uid())));
+    WITH CHECK (
+      (
+        (SELECT auth.uid()) = user_id
+        AND status = 'pending'
+        AND EXISTS (
+          SELECT 1 FROM public.clubs c
+          WHERE c.id = club_id
+            AND c.join_policy = 'request_to_join'
+        )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.clubs c
+        WHERE c.id = club_id
+          AND c.owner_id = (SELECT auth.uid())
+      )
+    );
 
 CREATE POLICY "Users can leave clubs"
     ON public.club_members FOR DELETE
     USING ((SELECT auth.uid()) = user_id);
+
+-- Allow owners/admins to remove members or decline join requests
+DROP POLICY IF EXISTS "Admins/Owners can remove members" ON public.club_members;
+CREATE POLICY "Admins/Owners can remove members"
+    ON public.club_members FOR DELETE
+    USING (
+      EXISTS (
+        SELECT 1
+        FROM public.club_members cm
+        WHERE cm.club_id = club_members.club_id
+          AND cm.user_id = (SELECT auth.uid())
+          AND cm.role IN ('owner', 'admin')
+          AND cm.status = 'accepted'
+      )
+      AND club_members.user_id <> (SELECT auth.uid())
+    );
 
 CREATE POLICY "Admins/Owners can update member status"
     ON public.club_members FOR UPDATE
@@ -546,20 +897,52 @@ CREATE TABLE IF NOT EXISTS public.club_events (
     event_date TIMESTAMPTZ NOT NULL,
     location TEXT,
     created_by UUID NOT NULL REFERENCES public.profiles(id) ON DELETE SET NULL,
+    is_public BOOLEAN NOT NULL DEFAULT false,
+    image_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     rsvp_count_going INTEGER DEFAULT 0,
     rsvp_count_maybe INTEGER DEFAULT 0,
     rsvp_count_cant INTEGER DEFAULT 0
 );
 
+-- If the table already existed (older schema), ensure is_public exists.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'is_public'
+  ) THEN
+    ALTER TABLE public.club_events
+      ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
+-- If the table already existed (older schema), ensure image_url exists.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'image_url'
+  ) THEN
+    ALTER TABLE public.club_events
+      ADD COLUMN image_url TEXT;
+  END IF;
+END $$;
+
 ALTER TABLE public.club_events ENABLE ROW LEVEL SECURITY;
 
 drop policy if exists "Events viewable by club members" on public.club_events;
+drop policy if exists "Public events are viewable by everyone" on public.club_events;
 drop policy if exists "Admins/Owners can create events" on public.club_events;
 
 CREATE POLICY "Events viewable by club members"
     ON public.club_events FOR SELECT
     USING (EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_events.club_id AND user_id = (SELECT auth.uid()) AND status = 'accepted'));
+
+-- Public events are visible to all users (for City tab discovery)
+CREATE POLICY "Public events are viewable by everyone"
+    ON public.club_events FOR SELECT
+    USING (club_events.is_public = true and club_events.event_date > now());
 
 CREATE POLICY "Admins/Owners can create events"
     ON public.club_events FOR INSERT
@@ -582,14 +965,89 @@ ALTER TABLE public.club_event_rsvps ENABLE ROW LEVEL SECURITY;
 
 drop policy if exists "Members can view event RSVPs" on public.club_event_rsvps;
 drop policy if exists "Members can manage their own RSVPs" on public.club_event_rsvps;
+drop policy if exists "Verified users can RSVP" on public.club_event_rsvps;
+drop policy if exists "Verified users can update their RSVP" on public.club_event_rsvps;
+drop policy if exists "Users can remove their RSVP" on public.club_event_rsvps;
 
 CREATE POLICY "Members can view event RSVPs"
     ON public.club_event_rsvps FOR SELECT
     USING (true);
 
-CREATE POLICY "Members can manage their own RSVPs"
-    ON public.club_event_rsvps FOR ALL
-    USING (user_id = (SELECT auth.uid()));
+-- Only verified users may RSVP (insert/update). This is enforced at the DB level.
+CREATE POLICY "Verified users can RSVP"
+    ON public.club_event_rsvps FOR INSERT
+    WITH CHECK (
+      user_id = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.is_verified = true
+      )
+    );
+
+CREATE POLICY "Verified users can update their RSVP"
+    ON public.club_event_rsvps FOR UPDATE
+    USING (user_id = auth.uid())
+    WITH CHECK (
+      user_id = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.is_verified = true
+      )
+    );
+
+CREATE POLICY "Users can remove their RSVP"
+    ON public.club_event_rsvps FOR DELETE
+    USING (user_id = auth.uid());
+
+-- Notify club owners/admins when someone RSVPs (profile submission)
+CREATE OR REPLACE FUNCTION public.notify_event_rsvp_to_club_admins()
+RETURNS TRIGGER AS $$
+DECLARE
+  club_id uuid;
+  event_title text;
+  rsvp_username text;
+  admin_record record;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT e.club_id, e.title INTO club_id, event_title
+  FROM public.club_events e
+  WHERE e.id = NEW.event_id;
+
+  SELECT p.username INTO rsvp_username
+  FROM public.profiles p
+  WHERE p.id = NEW.user_id;
+
+  FOR admin_record IN
+    SELECT cm.user_id
+    FROM public.club_members cm
+    WHERE cm.club_id = club_id
+      AND cm.status = 'accepted'
+      AND cm.role IN ('owner', 'admin')
+  LOOP
+    INSERT INTO public.notifications (user_id, type, title, body, data)
+    VALUES (
+      admin_record.user_id,
+      'event_rsvp',
+      'New Event RSVP',
+      COALESCE(rsvp_username, 'Someone') || ' RSVP''d "' || COALESCE(event_title, 'your event') || '". Their profile was submitted to your club.',
+      jsonb_build_object('club_id', club_id, 'event_id', NEW.event_id, 'rsvp_user_id', NEW.user_id, 'rsvp_status', NEW.status)
+    );
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_event_rsvp_to_admins ON public.club_event_rsvps;
+CREATE TRIGGER trigger_notify_event_rsvp_to_admins
+  AFTER INSERT ON public.club_event_rsvps
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_event_rsvp_to_club_admins();
 
 
 -- ==========================================
@@ -623,7 +1081,15 @@ CREATE POLICY "Members can view topics"
 
 CREATE POLICY "Members can create topics"
     ON public.club_forum_topics FOR INSERT
-    WITH CHECK (EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_forum_topics.club_id AND user_id = (SELECT auth.uid()) AND status = 'accepted'));
+    WITH CHECK (
+      EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_forum_topics.club_id AND user_id = (SELECT auth.uid()) AND status = 'accepted')
+      and exists (
+        select 1
+        from public.profiles p
+        where p.id = auth.uid()
+          and p.is_verified = true
+      )
+    );
 
 -- Forum Replies
 CREATE TABLE IF NOT EXISTS public.club_forum_replies (
@@ -649,7 +1115,15 @@ CREATE POLICY "Members can view replies"
 
 CREATE POLICY "Members can create replies"
     ON public.club_forum_replies FOR INSERT
-    WITH CHECK ((SELECT auth.uid()) = created_by);
+    WITH CHECK (
+      (SELECT auth.uid()) = created_by
+      and exists (
+        select 1
+        from public.profiles p
+        where p.id = auth.uid()
+          and p.is_verified = true
+      )
+    );
 
 -- Forum Reactions (Support/Oppose)
 CREATE TABLE IF NOT EXISTS public.club_forum_reactions (
@@ -727,6 +1201,71 @@ begin
         alter publication supabase_realtime add table public.club_forum_reactions;
     end if;
 end $$;
+
+-- ==========================================
+-- Statuses (24h updates)
+-- ==========================================
+
+create table if not exists public.statuses (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  content text, -- Text content or Storage path for images
+  type text check (type in ('text', 'image')),
+  caption text,
+  created_at timestamptz default now(),
+  expires_at timestamptz default (now() + interval '24 hours')
+);
+
+alter table public.statuses enable row level security;
+
+drop policy if exists "Users can insert their own statuses" on public.statuses;
+drop policy if exists "Users can update their own statuses" on public.statuses;
+drop policy if exists "Users can delete their own statuses" on public.statuses;
+drop policy if exists "Anyone can view active statuses" on public.statuses;
+
+-- Trust-based system:
+-- - Only verified users may post *image* statuses
+-- - Anyone may post *text* statuses
+create policy "Users can insert their own statuses"
+on public.statuses for insert
+with check (
+  auth.uid() = user_id
+  and (
+    type <> 'image'
+    or exists (
+      select 1
+      from public.profiles p
+      where p.id = auth.uid()
+        and p.is_verified = true
+    )
+  )
+);
+
+create policy "Users can update their own statuses"
+on public.statuses for update
+using (auth.uid() = user_id);
+
+create policy "Users can delete their own statuses"
+on public.statuses for delete
+using (auth.uid() = user_id);
+
+-- Trust-based system: active statuses are viewable to everyone (until expiry).
+create policy "Anyone can view active statuses"
+on public.statuses for select
+using (expires_at > now());
+
+drop function if exists public.get_my_statuses();
+create or replace function public.get_my_statuses()
+returns setof public.statuses
+language sql
+security definer
+as $$
+  select *
+  from public.statuses
+  where user_id = auth.uid()
+    and expires_at > now()
+  order by created_at desc;
+$$;
 
 -- ==========================================
 -- 8. Functions & RPCs
@@ -874,7 +1413,8 @@ begin
             ) order by s.created_at asc
         )
         from public.statuses s
-        where s.user_id = p.id and s.expires_at > now()
+        where s.user_id = p.id
+          and s.expires_at > now()
     ) as statuses,
     (
         select i.id 

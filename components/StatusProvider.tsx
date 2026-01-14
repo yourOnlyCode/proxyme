@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
@@ -446,12 +447,20 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
 
   const submitStatus = async () => {
       if (!user) return;
-      console.log('Submitting status - Image:', statusImage, 'Text:', statusText);
+      // Snapshot draft state so we can clear the UI immediately,
+      // but still upload the intended content (and restore on error).
+      const draftImage = statusImage;
+      const draftText = statusText;
+
+      console.log('Submitting status - Image:', draftImage, 'Text:', draftText);
       setUpdating(true);
       // Don't close modal immediately, wait for upload so we can show result in the list
       // Or close it? The user might want to add multiple. Let's keep it open or close it?
       // Usually "Post" closes the modal.
       setModalVisible(false); 
+      // Clear the composer immediately so reopening Status Manager doesn't keep the last photo in the upload block.
+      setStatusText('');
+      setStatusImage(null);
 
       try {
           modalTranslateY.setValue(0);
@@ -460,97 +469,57 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           let content = null;
           let type = 'text';
 
-          if (statusImage) {
-               type = 'image';
-               if (!statusImage.startsWith('http')) {
-                   try {
-                       console.log('Uploading image from:', statusImage);
-                       
-                       // Use expo-file-system for reliable local file reading
-                       // Note: EncodingType might not be available, use string literal instead
-                       const base64 = await FileSystem.readAsStringAsync(statusImage, {
-                           encoding: 'base64' as any,
-                       });
-                       
-                       console.log('File read successfully, length:', base64.length);
-                       
-                       // Content Moderation: Check image before uploading
-                       console.log('Checking content moderation... (BYPASSED FOR TESTING)');
-                       
-                       /* 
-                       const { data: moderationResult, error: moderationError } = await supabase.functions.invoke('moderate-content', {
-                           body: {
-                               base64Image: base64,
-                               userId: user.id,
-                               contentType: 'status_image'
-                           }
-                       });
-                       */
+          if (draftImage) {
+              type = 'image';
 
-                       // Mock success for testing
-                       const moderationResult = { safe: true, blocked: false };
-                       const moderationError = null;
+              // Trust-based system:
+              // Image statuses are only allowed for verified users.
+              const { data: me, error: meErr } = await supabase
+                  .from('profiles')
+                  .select('is_verified')
+                  .eq('id', user.id)
+                  .maybeSingle();
 
-                       if (moderationError) {
-                           console.error('Moderation check error:', moderationError);
-                           toast.show('Content check failed. Please try again.', 'error');
-                           setUpdating(false);
-                           return;
-                       }
+              if (meErr) throw meErr;
+              if (!me?.is_verified) {
+                  throw new Error('You must be verified to post a status image.');
+              }
 
-                       if (moderationResult?.blocked) {
-                           // Content is inappropriate - block upload and show error
-                           console.log('Content blocked:', moderationResult);
-                           toast.show(moderationResult.message || 'Content violates community guidelines', 'error');
-                           setUpdating(false);
-                           return;
-                       }
+              if (draftImage.startsWith('http')) {
+                  // For now, only allow local uploads; remote URLs are easy to spoof.
+                  throw new Error('Unsupported image source.');
+              }
 
-                       if (!moderationResult?.safe) {
-                           // If moderation check failed or returned unsafe, block by default
-                           console.log('Content moderation check failed or returned unsafe');
-                           toast.show('Content could not be verified. Please try a different image.', 'error');
-                           setUpdating(false);
-                           return;
-                       }
+              // Prepare upload image (compressed for speed).
+              const uploadImage = await ImageManipulator.manipulateAsync(
+                  draftImage,
+                  [{ resize: { width: 1080 } }],
+                  { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+              );
+              const uploadBase64 = uploadImage.base64 || '';
+              if (!uploadBase64) {
+                  throw new Error('Failed to prepare image for upload.');
+              }
 
-                       console.log('Content moderation passed, proceeding with upload...');
-                       
-                       // Convert base64 to ArrayBuffer
-                       const binaryString = atob(base64);
-                       const bytes = new Uint8Array(binaryString.length);
-                       for (let i = 0; i < binaryString.length; i++) {
-                           bytes[i] = binaryString.charCodeAt(i);
-                       }
-                       const arraybuffer = bytes.buffer;
-                       
-                       const fileExt = statusImage.split('.').pop()?.toLowerCase() ?? 'jpeg';
-                       const path = `status/${user.id}/${Date.now()}.${fileExt}`;
-                       
-                       console.log('Uploading to path:', path);
-                       
-                       const { data: uploadData, error: uploadError } = await supabase.storage
-                        .from('avatars') // Using avatars bucket for now
-                        .upload(path, arraybuffer, { contentType: `image/${fileExt}` });
+              // Convert upload base64 to ArrayBuffer
+              const binaryString = atob(uploadBase64);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+              }
+              const arraybuffer = bytes.buffer;
 
-                       if (uploadError) {
-                           console.error('Upload error:', uploadError);
-                           throw uploadError;
-                       }
-                       
-                       console.log('Upload successful:', uploadData);
-                       content = path; 
-                   } catch (fileError: any) {
-                       console.error('File upload error:', fileError);
-                       toast.show(`Upload failed: ${fileError.message}`, 'error');
-                       throw fileError;
-                   }
-               } else {
-                   content = statusImage;
-               }
-          } else if (statusText.trim()) {
-               type = 'text';
-               content = statusText;
+              const path = `status/${user.id}/${Date.now()}.jpeg`;
+
+              const { error: uploadError } = await supabase.storage
+                  .from('avatars')
+                  .upload(path, arraybuffer, { contentType: `image/jpeg` });
+
+              if (uploadError) throw uploadError;
+              content = path;
+          } else if (draftText.trim()) {
+              type = 'text';
+              content = draftText;
           } else {
               toast.show('Status cannot be empty.', 'error');
               setUpdating(false);
@@ -561,19 +530,19 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
               user_id: user.id,
               content: content,
               type: type,
-              caption: type === 'image' ? statusText : null, // If image, text becomes caption
+              caption: type === 'image' ? draftText : null,
               created_at: new Date().toISOString(),
-              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours default
+              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
           });
 
           if (error) throw error;
 
           toast.show('Status added!', 'success');
-          // Clear draft state so reopening Status Manager doesn't show the old photo/text
-          setStatusText('');
-          setStatusImage(null);
           fetchStatus(); 
       } catch (error: any) {
+          // Restore the draft so the user can retry without losing their work.
+          setStatusText(draftText);
+          setStatusImage(draftImage);
           toast.show(error.message || 'Failed to update status', 'error');
           setModalVisible(true); // Re-open on error
       } finally {

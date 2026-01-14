@@ -2,14 +2,24 @@ import { signInWithProvider } from '@/lib/socialAuth';
 import { useState } from 'react';
 import { FontAwesome } from '@expo/vector-icons';
 import { Alert, Platform, Text, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 
 export function SocialAuthButtons() {
   const [loadingProvider, setLoadingProvider] = useState<null | 'apple' | 'google' | 'facebook'>(null);
+  const router = useRouter();
 
   const run = async (provider: 'apple' | 'google' | 'facebook') => {
     try {
       setLoadingProvider(provider);
       await signInWithProvider(provider);
+
+      // Ensure we actually have a session before leaving the auth screen.
+      // RootLayout will still redirect to onboarding if needed.
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) {
+        router.replace('/(tabs)');
+      }
     } catch (e: any) {
       Alert.alert('Sign-in failed', e?.message || 'Please try again.');
     } finally {

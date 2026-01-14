@@ -3,9 +3,11 @@ export type ClubDetail = {
   name: string;
   description: string;
   image_url: string | null;
+  detailed_interests?: Record<string, string[]> | null;
   city: string;
   owner_id: string;
   max_member_count: number | null;
+  join_policy?: 'invite_only' | 'request_to_join';
 };
 
 export type ClubMember = {
@@ -72,13 +74,25 @@ export type ClubEvent = {
     description: string | null;
     event_date: string;
     location: string | null;
+    is_public?: boolean;
+    image_url?: string | null;
     created_by: string;
     created_at: string;
     creator: {
+        id?: string;
         username: string;
         full_name: string | null;
+        avatar_url?: string | null;
         is_verified?: boolean;
     }
+    attendees?: Array<{
+        id: string;
+        username: string;
+        full_name: string | null;
+        avatar_url: string | null;
+        is_verified?: boolean;
+    }>;
+    attendees_count?: number;
     rsvp_counts?: {
         going: number;
         maybe: number;

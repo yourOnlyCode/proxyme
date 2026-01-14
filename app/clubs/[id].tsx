@@ -1,6 +1,6 @@
 import EventCard from '@/components/club/EventCard';
 import ReplyItem from '@/components/club/ReplyItem';
-import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
+import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import Avatar from '@/components/profile/Avatar';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { GlassCard } from '@/components/ui/GlassCard';
@@ -8,6 +8,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { ClubDetail, ClubEvent, ClubMember, ForumReply, ForumTopic } from '@/lib/types';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Calendar from 'expo-calendar';
+import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -56,6 +57,7 @@ export default function ClubDetailScreen() {
 
   // Events State
   const [events, setEvents] = useState<ClubEvent[]>([]);
+  const [showPastEvents, setShowPastEvents] = useState(false);
   
   // Edit Event State
   const [editEventModalVisible, setEditEventModalVisible] = useState(false);
@@ -66,6 +68,8 @@ export default function ClubDetailScreen() {
   const [editShowDatePicker, setEditShowDatePicker] = useState(false);
   const [editShowTimePicker, setEditShowTimePicker] = useState(false);
   const [editEventLocation, setEditEventLocation] = useState('');
+  const [editEventIsPublic, setEditEventIsPublic] = useState(false);
+  const [editEventImage, setEditEventImage] = useState<string | null>(null);
   const [updatingEvent, setUpdatingEvent] = useState(false);
 
   // Profile Modal State
@@ -78,12 +82,15 @@ export default function ClubDetailScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [newEventLocation, setNewEventLocation] = useState('');
+  const [newEventIsPublic, setNewEventIsPublic] = useState(false);
+  const [newEventImage, setNewEventImage] = useState<string | null>(null);
   const [creatingEvent, setCreatingEvent] = useState(false);
 
   // Settings State
   const [settingsName, setSettingsName] = useState('');
   const [settingsDescription, setSettingsDescription] = useState('');
   const [settingsMaxMembers, setSettingsMaxMembers] = useState<string>('');
+  const [settingsJoinPolicy, setSettingsJoinPolicy] = useState<'invite_only' | 'request_to_join'>('invite_only');
   const [savingSettings, setSavingSettings] = useState(false);
 
   // Store subscription references for cleanup
@@ -110,17 +117,33 @@ export default function ClubDetailScreen() {
   }, [id, user]);
 
   const fetchClubDetails = async () => {
-      const { data, error } = await supabase
+      const primary = await supabase
         .from('clubs')
-        .select('id, name, description, image_url, city, owner_id, max_member_count')
+        .select('id, name, description, image_url, city, owner_id, max_member_count, join_policy')
         .eq('id', id)
         .single();
+
+      let data: any = primary.data;
+      let error: any = primary.error;
+
+      // join_policy is newer; fallback if DB hasn't been migrated yet.
+      if (error?.code === '42703') {
+        const fallback = await supabase
+          .from('clubs')
+          .select('id, name, description, image_url, city, owner_id, max_member_count')
+          .eq('id', id)
+          .single();
+        data = fallback.data;
+        error = fallback.error;
+      }
+
       if (data) {
-          setClub(data);
-          // Initialize settings form
-          setSettingsName(data.name || '');
-          setSettingsDescription(data.description || '');
-          setSettingsMaxMembers(data.max_member_count?.toString() || '');
+        setClub(data);
+        // Initialize settings form
+        setSettingsName(data.name || '');
+        setSettingsDescription(data.description || '');
+        setSettingsMaxMembers(data.max_member_count?.toString() || '');
+          setSettingsJoinPolicy((data as any).join_policy || 'invite_only');
       } else console.error(error);
   };
 
@@ -136,6 +159,10 @@ export default function ClubDetailScreen() {
               name: settingsName.trim(),
               description: settingsDescription.trim() || null,
           };
+
+          if (isAdmin) {
+            updates.join_policy = settingsJoinPolicy;
+          }
 
           // Only update max_member_count if a value is provided
           if (settingsMaxMembers.trim()) {
@@ -157,10 +184,18 @@ export default function ClubDetailScreen() {
               updates.max_member_count = null; // Remove limit
           }
 
-          const { error } = await supabase
+          const primary = await supabase
               .from('clubs')
               .update(updates)
               .eq('id', id);
+
+          let error: any = primary.error;
+          if (error?.code === '42703') {
+            // join_policy may not exist yet on older DBs; retry without it
+            const { join_policy, ...withoutJoin } = updates;
+            const retry = await supabase.from('clubs').update(withoutJoin).eq('id', id);
+            error = retry.error;
+          }
 
           if (error) throw error;
 
@@ -744,11 +779,25 @@ export default function ClubDetailScreen() {
 
   const fetchEvents = async () => {
       try {
-          const { data: eventsData, error } = await supabase
+          // `is_public` is a newer column; fall back if DB hasn't been migrated yet.
+          const primary = await supabase
             .from('club_events')
-            .select('id, club_id, title, description, event_date, location, created_by, created_at')
+            .select('id, club_id, title, description, event_date, location, created_by, created_at, is_public, image_url')
             .eq('club_id', id)
             .order('event_date', { ascending: true });
+
+          let eventsData: any[] | null = primary.data as any[] | null;
+          let error: any = primary.error;
+
+          if (error?.code === '42703') {
+              const fallback = await supabase
+                .from('club_events')
+                .select('id, club_id, title, description, event_date, location, created_by, created_at')
+                .eq('club_id', id)
+                .order('event_date', { ascending: true });
+              eventsData = fallback.data as any[] | null;
+              error = fallback.error;
+          }
           
           if (error) throw error;
           
@@ -768,6 +817,13 @@ export default function ClubDetailScreen() {
                 .from('club_event_rsvps')
                 .select('event_id, user_id, status')
                 .in('event_id', eventIds);
+
+              // Fetch attendee profiles for "going" RSVPs (for the attendee list modal)
+              const attendeeIds = [...new Set((rsvps || []).filter(r => r.status === 'going').map(r => r.user_id))];
+              const { data: attendeeProfiles } = attendeeIds.length > 0
+                ? await supabase.from('profiles').select('id, username, full_name, avatar_url, is_verified').in('id', attendeeIds)
+                : { data: [] as any[] };
+              const attendeeMap = new Map((attendeeProfiles || []).map((p: any) => [p.id, p]));
               
               // Calculate RSVP counts and user's RSVP
               const rsvpMap = new Map<string, { going: number; maybe: number; cant: number; userRsvp: 'going' | 'maybe' | 'cant' | null }>();
@@ -784,9 +840,16 @@ export default function ClubDetailScreen() {
               
               const formattedEvents = eventsData.map(event => {
                   const rsvpData = rsvpMap.get(event.id) || { going: 0, maybe: 0, cant: 0, userRsvp: null };
+                  const eventRsvps = (rsvps || []).filter(r => r.event_id === event.id);
+                  const goingIds = eventRsvps.filter(r => r.status === 'going').map(r => r.user_id);
+                  const attendees = goingIds.map(uid => attendeeMap.get(uid)).filter(Boolean);
+                  const creatorProfile = profilesMap.get(event.created_by) || { id: event.created_by, username: 'Unknown', full_name: null, avatar_url: null, is_verified: false };
+
                   return {
                       ...event,
-                      creator: profilesMap.get(event.created_by) || { username: 'Unknown', full_name: null, avatar_url: null, is_verified: false },
+                      creator: creatorProfile,
+                      attendees: attendees.length > 0 ? attendees : [creatorProfile],
+                      attendees_count: attendees.length,
                       rsvp_counts: {
                           going: rsvpData.going,
                           maybe: rsvpData.maybe,
@@ -854,10 +917,23 @@ export default function ClubDetailScreen() {
 
       setCreatingEvent(true);
       try {
+          let eventImagePath: string | null = null;
+          if (newEventImage && !newEventImage.startsWith('http')) {
+              const fileExt = newEventImage.split('.').pop()?.toLowerCase() ?? 'jpeg';
+              const path = `events/${id}/${Date.now()}.${fileExt}`;
+              const arraybuffer = await fetch(newEventImage).then((res) => res.arrayBuffer());
+              const { error: uploadError } = await supabase.storage
+                  .from('avatars')
+                  .upload(path, arraybuffer, { contentType: `image/${fileExt}` });
+              if (!uploadError) {
+                  eventImagePath = path;
+              }
+          }
+
           // Format date as ISO string for database
           const eventDateISO = newEventDate.toISOString();
           
-          const { data: newEvent, error } = await supabase
+          const primary = await supabase
             .from('club_events')
             .insert({
                 club_id: id,
@@ -865,10 +941,33 @@ export default function ClubDetailScreen() {
                 title: newEventTitle.trim(),
                 description: newEventDesc.trim() || null,
                 event_date: eventDateISO,
-                location: newEventLocation.trim() || null
+                location: newEventLocation.trim() || null,
+                is_public: newEventIsPublic,
+                image_url: eventImagePath,
             })
             .select()
             .single();
+
+          let newEvent: any = primary.data;
+          let error: any = primary.error;
+
+          if (error?.code === '42703') {
+            // DB hasn't been migrated to include is_public yet. Retry without it.
+            const retry = await supabase
+              .from('club_events')
+              .insert({
+                club_id: id,
+                created_by: user!.id,
+                title: newEventTitle.trim(),
+                description: newEventDesc.trim() || null,
+                event_date: eventDateISO,
+                location: newEventLocation.trim() || null,
+              })
+              .select()
+              .single();
+            newEvent = retry.data;
+            error = retry.error;
+          }
 
           if (error) throw error;
 
@@ -882,6 +981,8 @@ export default function ClubDetailScreen() {
           setNewEventDesc('');
           setNewEventDate(new Date());
           setNewEventLocation('');
+          setNewEventIsPublic(false);
+          setNewEventImage(null);
           fetchEvents();
           Alert.alert('Success', 'Event created! Members will be notified 1 hour before the event.');
       } catch (error: any) {
@@ -897,6 +998,7 @@ export default function ClubDetailScreen() {
       setEditEventDesc(event.description || '');
       setEditEventDate(new Date(event.event_date));
       setEditEventLocation(event.location || '');
+      setEditEventIsPublic(!!(event as any).is_public);
       setEditEventModalVisible(true);
       setEventMenuVisible(false);
       setSelectedEventId(null);
@@ -912,16 +1014,33 @@ export default function ClubDetailScreen() {
       try {
           const eventDateISO = editEventDate.toISOString();
           
-          const { error } = await supabase
+          const primary = await supabase
             .from('club_events')
             .update({
                 title: editEventTitle.trim(),
                 description: editEventDesc.trim() || null,
                 event_date: eventDateISO,
-                location: editEventLocation.trim() || null
+                location: editEventLocation.trim() || null,
+                is_public: editEventIsPublic,
             })
             .eq('id', editingEvent.id)
             .eq('club_id', id);
+
+          let error: any = primary.error;
+          if (error?.code === '42703') {
+            // DB hasn't been migrated to include is_public yet. Retry without it.
+            const retry = await supabase
+              .from('club_events')
+              .update({
+                  title: editEventTitle.trim(),
+                  description: editEventDesc.trim() || null,
+                  event_date: eventDateISO,
+                  location: editEventLocation.trim() || null,
+              })
+              .eq('id', editingEvent.id)
+              .eq('club_id', id);
+            error = retry.error;
+          }
 
           if (error) throw error;
 
@@ -1115,9 +1234,45 @@ export default function ClubDetailScreen() {
 
   const isMember = memberStatus === 'accepted';
   const isAdmin = role === 'admin' || role === 'owner';
+  const joinPolicy = (club as any)?.join_policy || 'invite_only';
+
+  const handleRequestToJoin = async () => {
+      if (!user?.id || !id) return;
+      try {
+          const { error } = await supabase
+              .from('club_members')
+              .insert({
+                  club_id: id,
+                  user_id: user.id,
+                  role: 'member',
+                  status: 'pending',
+              });
+          if (error) throw error;
+          setMemberStatus('pending');
+          Alert.alert('Request sent', 'Your request was sent to the club owner for review.');
+      } catch (e: any) {
+          Alert.alert('Error', e?.message || 'Could not request to join.');
+      }
+  };
+
+  const handleCancelJoinRequest = async () => {
+      if (!user?.id || !id) return;
+      try {
+          const { error } = await supabase
+              .from('club_members')
+              .delete()
+              .eq('club_id', id)
+              .eq('user_id', user.id)
+              .eq('status', 'pending');
+          if (error) throw error;
+          setMemberStatus(null);
+      } catch (e: any) {
+          Alert.alert('Error', e?.message || 'Could not cancel request.');
+      }
+  };
 
   return (
-    <>
+    <KeyboardDismissWrapper>
       <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
@@ -1129,7 +1284,7 @@ export default function ClubDetailScreen() {
                 <IconSymbol name="chevron.left" size={24} color="#1A1A1A" />
             </TouchableOpacity>
             <Text className="text-xl font-bold text-ink flex-1">{club.name}</Text>
-            {role === 'owner' && (
+            {isAdmin && (
                 <TouchableOpacity 
                     onPress={() => setActiveTab('settings')}
                     className="ml-4"
@@ -1146,7 +1301,13 @@ export default function ClubDetailScreen() {
                 
                 <IconSymbol name="lock.fill" size={64} color="#CBD5E0" />
                 <Text className="text-xl font-bold mt-4 mb-2 text-ink">Private Club</Text>
-                <Text className="text-gray-500 text-center mb-8">This club is invite only. You must be invited by an admin to join.</Text>
+                {joinPolicy === 'invite_only' ? (
+                  <Text className="text-gray-500 text-center mb-8">This club is invite only. You must be invited by an admin to join.</Text>
+                ) : memberStatus === 'pending' ? (
+                  <Text className="text-gray-500 text-center mb-8">Request sent. The owner will review it soon.</Text>
+                ) : (
+                  <Text className="text-gray-500 text-center mb-8">Request to join and the owner will review it.</Text>
+                )}
 
                 {memberStatus === 'invited' && (
                     <View className="w-full">
@@ -1163,6 +1324,26 @@ export default function ClubDetailScreen() {
                             <Text className="text-gray-700 font-bold text-lg">Decline</Text>
                         </TouchableOpacity>
                     </View>
+                )}
+
+                {joinPolicy === 'request_to_join' && memberStatus !== 'invited' && (
+                  <View className="w-full">
+                    {memberStatus === 'pending' ? (
+                      <TouchableOpacity
+                        onPress={handleCancelJoinRequest}
+                        className="bg-gray-100 py-4 px-8 rounded-xl w-full items-center"
+                      >
+                        <Text className="text-gray-700 font-bold text-lg">Cancel request</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={handleRequestToJoin}
+                        className="bg-black py-4 px-8 rounded-xl shadow-lg w-full items-center"
+                      >
+                        <Text className="text-white font-bold text-lg">Request to Join</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 )}
             </View>
         ) : (
@@ -1465,13 +1646,15 @@ export default function ClubDetailScreen() {
                 ) : activeTab === 'events' ? (
                     <View className="flex-1">
                         <FlatList
-                            data={events}
+                            data={events.filter((e) => new Date(e.event_date) >= new Date())}
                             keyExtractor={item => item.id}
                             ListHeaderComponent={
                                 <View>
                                     <ClubBanner imagePath={club.image_url} city={club.city} />
                                     <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
-                                        <Text className="font-bold text-gray-500">{events.length} Events</Text>
+                                        <Text className="font-bold text-gray-500">
+                                          {events.filter((e) => new Date(e.event_date) >= new Date()).length} Upcoming
+                                        </Text>
                                         {isAdmin && (
                                             <TouchableOpacity 
                                                 onPress={() => setEventModalVisible(true)}
@@ -1495,6 +1678,42 @@ export default function ClubDetailScreen() {
                                     onViewProfile={viewUserProfile}
                                 />
                             )}
+                            ListFooterComponent={
+                              (() => {
+                                const past = events.filter((e) => new Date(e.event_date) < new Date());
+                                if (past.length === 0) return <View className="h-6" />;
+                                return (
+                                  <View className="px-4 pt-4 pb-10">
+                                    <TouchableOpacity
+                                      onPress={() => setShowPastEvents((v) => !v)}
+                                      className="bg-white border border-gray-200 rounded-2xl px-4 py-4 flex-row items-center justify-between"
+                                      activeOpacity={0.9}
+                                    >
+                                      <Text className="font-bold text-ink">Past events ({past.length})</Text>
+                                      <IconSymbol name={showPastEvents ? "chevron.up" : "chevron.down"} size={18} color="#6B7280" />
+                                    </TouchableOpacity>
+
+                                    {showPastEvents && (
+                                      <View className="mt-3">
+                                        {past.map((ev) => (
+                                          <EventCard
+                                            key={ev.id}
+                                            event={ev}
+                                            isAdmin={isAdmin}
+                                            currentUserId={user?.id}
+                                            onEdit={openEditEvent}
+                                            onDelete={deleteEvent}
+                                            onRSVP={updateRSVP}
+                                            onAddToCalendar={addToCalendar}
+                                            onViewProfile={viewUserProfile}
+                                          />
+                                        ))}
+                                      </View>
+                                    )}
+                                  </View>
+                                );
+                              })()
+                            }
                             ListEmptyComponent={
                                 <View className="items-center mt-20 opacity-50">
                                     <IconSymbol name="calendar" size={48} color="#CBD5E0" />
@@ -1621,6 +1840,43 @@ export default function ClubDetailScreen() {
                                     Leave empty to allow unlimited members
                                 </Text>
                             </View>
+
+                            {/* Privacy / Join Policy */}
+                            {isAdmin && (
+                              <View className="mb-6">
+                                <Text className="font-bold text-gray-500 mb-2">Club Privacy</Text>
+                                <View className="flex-row">
+                                  <TouchableOpacity
+                                    onPress={() => setSettingsJoinPolicy('request_to_join')}
+                                    className={`flex-1 py-3 rounded-xl items-center border mr-2 ${
+                                      settingsJoinPolicy === 'request_to_join' ? 'bg-black border-black' : 'bg-gray-100 border-gray-200'
+                                    }`}
+                                    activeOpacity={0.9}
+                                  >
+                                    <Text className={`font-bold ${settingsJoinPolicy === 'request_to_join' ? 'text-white' : 'text-gray-700'}`}>
+                                      Request to join
+                                    </Text>
+                                    <Text className={`text-[11px] mt-0.5 ${settingsJoinPolicy === 'request_to_join' ? 'text-white/80' : 'text-gray-500'}`}>
+                                      Owner/admin approves requests
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => setSettingsJoinPolicy('invite_only')}
+                                    className={`flex-1 py-3 rounded-xl items-center border ${
+                                      settingsJoinPolicy === 'invite_only' ? 'bg-black border-black' : 'bg-gray-100 border-gray-200'
+                                    }`}
+                                    activeOpacity={0.9}
+                                  >
+                                    <Text className={`font-bold ${settingsJoinPolicy === 'invite_only' ? 'text-white' : 'text-gray-700'}`}>
+                                      Invite only
+                                    </Text>
+                                    <Text className={`text-[11px] mt-0.5 ${settingsJoinPolicy === 'invite_only' ? 'text-white/80' : 'text-gray-500'}`}>
+                                      Only invites can join
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            )}
 
                             {/* Save Button */}
                             <TouchableOpacity
@@ -1897,6 +2153,30 @@ export default function ClubDetailScreen() {
                 </View>
 
                 <ScrollView>
+                    <TouchableOpacity
+                        onPress={async () => {
+                            const result = await ImagePicker.launchImageLibraryAsync({
+                                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                allowsEditing: true,
+                                aspect: [16, 9],
+                                quality: 0.7,
+                            });
+                            if (!result.canceled) setNewEventImage(result.assets[0].uri);
+                        }}
+                        className="h-40 bg-gray-100 rounded-2xl items-center justify-center mb-6 overflow-hidden border border-gray-200"
+                        activeOpacity={0.9}
+                    >
+                        {newEventImage ? (
+                            <Image source={{ uri: newEventImage }} className="w-full h-full" resizeMode="cover" />
+                        ) : (
+                            <View className="items-center">
+                                <IconSymbol name="camera.fill" size={28} color="#9CA3AF" />
+                                <Text className="text-gray-400 font-bold mt-2">Add Event Photo (optional)</Text>
+                                <Text className="text-gray-400 text-xs mt-1">Used as the City tab backdrop</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
                     <View className="mb-4">
                         <Text className="font-bold text-gray-500 mb-2">Event Title *</Text>
                         <TextInput
@@ -2103,6 +2383,36 @@ export default function ClubDetailScreen() {
                         />
                     </View>
 
+                    <View className="mb-6">
+                        <Text className="font-bold text-gray-500 mb-2">Visibility</Text>
+                        <View className="flex-row">
+                            <TouchableOpacity
+                                onPress={() => setNewEventIsPublic(false)}
+                                className={`flex-1 py-3 rounded-xl items-center border mr-2 ${
+                                    !newEventIsPublic ? 'bg-black border-black' : 'bg-gray-100 border-gray-200'
+                                }`}
+                                activeOpacity={0.9}
+                            >
+                                <Text className={`font-bold ${!newEventIsPublic ? 'text-white' : 'text-gray-700'}`}>Private</Text>
+                                <Text className={`text-[11px] mt-0.5 ${!newEventIsPublic ? 'text-white/80' : 'text-gray-500'}`}>
+                                    Club members only
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => setNewEventIsPublic(true)}
+                                className={`flex-1 py-3 rounded-xl items-center border ${
+                                    newEventIsPublic ? 'bg-black border-black' : 'bg-gray-100 border-gray-200'
+                                }`}
+                                activeOpacity={0.9}
+                            >
+                                <Text className={`font-bold ${newEventIsPublic ? 'text-white' : 'text-gray-700'}`}>Public</Text>
+                                <Text className={`text-[11px] mt-0.5 ${newEventIsPublic ? 'text-white/80' : 'text-gray-500'}`}>
+                                    Shown in City tab
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
                     <TouchableOpacity 
                         onPress={createEvent}
                         disabled={creatingEvent || !newEventTitle.trim() || !newEventDate}
@@ -2118,7 +2428,6 @@ export default function ClubDetailScreen() {
             </View>
         </Modal>
       </KeyboardAvoidingView>
-      <KeyboardToolbar />
       
       {/* Profile Modal */}
       <ProfileModal
@@ -2165,7 +2474,7 @@ export default function ClubDetailScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-    </>
+    </KeyboardDismissWrapper>
   );
 }
 

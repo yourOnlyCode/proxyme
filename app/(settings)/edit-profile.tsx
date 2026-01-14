@@ -1,4 +1,4 @@
-import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
+import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -261,14 +261,9 @@ export default function EditProfileScreen() {
 
   const currentPlatformConfig = SOCIAL_PLATFORMS.find(p => p.id === selectedPlatform);
 
-  const Wrapper = Platform.OS === 'web' ? View : TouchableWithoutFeedback;
-  const wrapperProps = Platform.OS === 'web' 
-    ? {} 
-    : { onPress: Keyboard.dismiss, accessible: false };
-
   return (
-    <View className="flex-1 bg-white">
-      <Wrapper {...wrapperProps}>
+    <KeyboardDismissWrapper>
+      <View className="flex-1 bg-white">
         <View className="flex-1">
       {/* Custom Header */}
       <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: insets.top + 12, paddingBottom: 12 }}>
@@ -564,8 +559,7 @@ export default function EditProfileScreen() {
           </KeyboardAvoidingView>
         </Modal>
         </View>
-      </Wrapper>
-      <KeyboardToolbar />
-    </View>
+      </View>
+    </KeyboardDismissWrapper>
   );
 }

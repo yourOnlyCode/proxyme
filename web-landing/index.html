@@ -340,12 +340,37 @@
             setIntent(intents[i]);
         }, 2500);
 
-        // Attempt to open the app automatically on mobile (non-blocking; store links are always visible).
+        // If this page is reached via Supabase OAuth redirect, it may include ?code=... (or error params).
+        // Deep-link back into the app with those params so the native app can finish exchangeCodeForSession.
+        function getAllParams() {
+            const params = new URLSearchParams(window.location.search || "");
+
+            // Also support hash params (some providers put tokens there).
+            const hash = (window.location.hash || "").startsWith("#") ? window.location.hash.slice(1) : (window.location.hash || "");
+            if (hash) {
+                const hashParams = new URLSearchParams(hash);
+                for (const [k, v] of hashParams.entries()) {
+                    if (!params.has(k)) params.set(k, v);
+                }
+            }
+            return params;
+        }
+
+        const params = getAllParams();
+        const hasOAuthParams = params.has("code") || params.has("error") || params.has("access_token");
+        const deepLinkBase = "proxybusiness://auth/callback";
+        const deepLink = hasOAuthParams ? `${deepLinkBase}?${params.toString()}` : "proxybusiness://";
+
+        // Update the button to point at the best deep link for this visit.
+        const openBtn = document.getElementById("openAppBtn");
+        if (openBtn) openBtn.setAttribute("href", deepLink);
+
+        // Attempt to open the app automatically on mobile.
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         if (isMobile) {
             setTimeout(() => {
-                window.location.href = "proxybusiness://";
-            }, 900);
+                window.location.href = deepLink;
+            }, hasOAuthParams ? 200 : 900);
         }
     </script>
 </body>

@@ -47,7 +47,10 @@ function InitialLayout() {
   useEffect(() => {
     if (loading || !fontsLoaded) return;
 
-    const inAuthGroup = segments[0] === '(auth)';
+    // Note: `/auth/callback` is not inside the `(auth)` route group folder,
+    // so segments[0] will be "auth" for that path. Treat it as part of auth routing
+    // so OAuth can complete without being immediately redirected back to sign-in.
+    const inAuthGroup = segments[0] === '(auth)' || segments[0] === 'auth';
     const inOnboardingGroup = segments[0] === 'onboarding';
     const inTabsGroup = segments[0] === '(tabs)';
 

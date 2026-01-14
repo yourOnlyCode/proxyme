@@ -1,4 +1,4 @@
-import { KeyboardToolbar } from '@/components/KeyboardDismissButton';
+import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -265,7 +265,7 @@ export default function ChatScreen() {
   };
 
   return (
-    <>
+    <KeyboardDismissWrapper>
       <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           className="flex-1 bg-white"
@@ -653,8 +653,7 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </Modal>
       </KeyboardAvoidingView>
-      <KeyboardToolbar />
-    </>
+    </KeyboardDismissWrapper>
   );
 }
 

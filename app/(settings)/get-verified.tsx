@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../../lib/auth';
-import { REQUIRED_REFERRALS_FOR_VERIFICATION, checkVerificationStatus } from '../../lib/purchases';
+import { REQUIRED_REFERRALS_FOR_VERIFICATION, checkVerificationStatus } from '../../lib/verification';
 import { supabase } from '../../lib/supabase';
 
 export default function GetVerifiedScreen() {

@@ -1,29 +1,12 @@
 import { supabase } from './supabase';
 
 /**
- * RevenueCat is temporarily disconnected.
- *
- * Verification is currently based on referrals:
+ * Verification is currently referral-based:
  * - A user shares their `friend_code`
  * - Each friend enters it during onboarding (which increments `referral_count`)
- * - When `referral_count >= 3`, the user is considered verified
+ * - When `referral_count >= REQUIRED_REFERRALS_FOR_VERIFICATION`, the user is considered verified
  */
 export const REQUIRED_REFERRALS_FOR_VERIFICATION = 3;
-
-export function isLaunchPeriod(): boolean {
-  // Kept for backwards compatibility with old UI paths.
-  return false;
-}
-
-export async function initPurchases(_userId: string) {
-  // No-op while RevenueCat is disabled.
-  return;
-}
-
-export async function presentCustomerCenter() {
-  // No-op while RevenueCat is disabled.
-  return;
-}
 
 export async function checkVerificationStatus(userId: string) {
   try {
@@ -53,3 +36,4 @@ export async function checkVerificationStatus(userId: string) {
     return false;
   }
 }
+

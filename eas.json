@@ -4,13 +4,23 @@
   },
   "build": {
     "development": {
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1"
+      },
       "developmentClient": true,
       "distribution": "internal"
     },
     "preview": {
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1"
+      },
       "distribution": "internal"
     },
-    "production": {}
+    "production": {
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1"
+      }
+    }
   },
   "submit": {
     "production": {}

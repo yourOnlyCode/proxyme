@@ -15,6 +15,7 @@ type Club = {
   description: string | null;
   image_url: string | null;
   city: string;
+  join_policy?: 'invite_only' | 'request_to_join';
   member_count?: number;
   is_member?: boolean;
   role?: 'owner' | 'admin' | 'member';
@@ -35,6 +36,7 @@ export default function ClubsScreen() {
   const [newClubName, setNewClubName] = useState('');
   const [newClubDesc, setNewClubDesc] = useState('');
   const [newClubImage, setNewClubImage] = useState<string | null>(null);
+  const [newClubJoinPolicy, setNewClubJoinPolicy] = useState<'invite_only' | 'request_to_join'>('request_to_join');
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -50,7 +52,26 @@ export default function ClubsScreen() {
     try {
         if (tab === 'my') {
             // Fetch my clubs
-            const { data, error } = await supabase
+            let data: any[] | null = null;
+            let error: any = null;
+
+            // join_policy is a newer column; if the DB hasn't been migrated yet we fall back.
+            const primary = await supabase
+              .from('club_members')
+              .select(`
+                  role,
+                  club:clubs (
+                      id, name, description, image_url, city, join_policy
+                  )
+              `)
+              .eq('user_id', user.id)
+              .eq('status', 'accepted');
+
+            data = primary.data as any[] | null;
+            error = primary.error as any;
+
+            if (error?.code === '42703') {
+              const fallback = await supabase
                 .from('club_members')
                 .select(`
                     role,
@@ -60,6 +81,9 @@ export default function ClubsScreen() {
                 `)
                 .eq('user_id', user.id)
                 .eq('status', 'accepted');
+              data = fallback.data as any[] | null;
+              error = fallback.error as any;
+            }
             
             if (error) throw error;
             
@@ -89,10 +113,25 @@ export default function ClubsScreen() {
             const myClubIds = new Set((myMemberships || []).map((m: any) => m.club_id));
 
             // Fetch all clubs in city
-            const { data, error } = await supabase
+            let data: any[] | null = null;
+            let error: any = null;
+
+            const primary = await supabase
+              .from('clubs')
+              .select('id, name, description, image_url, city, join_policy')
+              .eq('city', address.city);
+
+            data = primary.data as any[] | null;
+            error = primary.error as any;
+
+            if (error?.code === '42703') {
+              const fallback = await supabase
                 .from('clubs')
                 .select('id, name, description, image_url, city')
                 .eq('city', address.city);
+              data = fallback.data as any[] | null;
+              error = fallback.error as any;
+            }
 
             if (error) throw error;
 
@@ -191,12 +230,30 @@ export default function ClubsScreen() {
                   description: newClubDesc,
                   city: address.city,
                   owner_id: user.id,
-                  image_url: imagePath
+                  image_url: imagePath,
+                  join_policy: newClubJoinPolicy,
               })
               .select()
               .single();
 
-          if (clubError) {
+          if (clubError?.code === '42703') {
+              // DB hasn't been migrated to include join_policy yet. Retry without it.
+              const retry = await supabase
+                .from('clubs')
+                .insert({
+                  name: newClubName,
+                  description: newClubDesc,
+                  city: address.city,
+                  owner_id: user.id,
+                  image_url: imagePath,
+                })
+                .select()
+                .single();
+
+              if (retry.error) throw retry.error;
+              // overwrite for later usage
+              (clubData as any) = retry.data as any;
+          } else if (clubError) {
               // DB-enforced unique index on owner_id will throw 23505
               if (clubError.code === '23505') {
                   Alert.alert('Limit reached', 'You can only create one club. You can still join as many clubs as you want.');
@@ -225,6 +282,7 @@ export default function ClubsScreen() {
           setNewClubName('');
           setNewClubDesc('');
           setNewClubImage(null);
+          setNewClubJoinPolicy('request_to_join');
           setTab('my');
           fetchClubs();
           Alert.alert('Success', 'Club created!');
@@ -378,6 +436,39 @@ export default function ClubsScreen() {
                     blurOnSubmit={true}
                     onSubmitEditing={() => Keyboard.dismiss()}
                 />
+
+                <Text className="font-bold text-gray-500 mb-2">Who can join?</Text>
+                <View className="flex-row mb-6">
+                    <TouchableOpacity
+                        onPress={() => setNewClubJoinPolicy('request_to_join')}
+                        className={`flex-1 py-3 rounded-xl items-center border mr-2 ${
+                            newClubJoinPolicy === 'request_to_join' ? 'bg-black border-black' : 'bg-gray-50 border-gray-200'
+                        }`}
+                        activeOpacity={0.9}
+                    >
+                        <Text className={`font-bold ${newClubJoinPolicy === 'request_to_join' ? 'text-white' : 'text-gray-700'}`}>
+                            Request to join
+                        </Text>
+                        <Text className={`text-[11px] mt-0.5 ${newClubJoinPolicy === 'request_to_join' ? 'text-white/80' : 'text-gray-500'}`}>
+                            Owner approves requests
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => setNewClubJoinPolicy('invite_only')}
+                        className={`flex-1 py-3 rounded-xl items-center border ${
+                            newClubJoinPolicy === 'invite_only' ? 'bg-black border-black' : 'bg-gray-50 border-gray-200'
+                        }`}
+                        activeOpacity={0.9}
+                    >
+                        <Text className={`font-bold ${newClubJoinPolicy === 'invite_only' ? 'text-white' : 'text-gray-700'}`}>
+                            Invite only
+                        </Text>
+                        <Text className={`text-[11px] mt-0.5 ${newClubJoinPolicy === 'invite_only' ? 'text-white/80' : 'text-gray-500'}`}>
+                            Admins send invites
+                        </Text>
+                    </TouchableOpacity>
+                </View>
 
                 <TouchableOpacity 
                     onPress={handleCreateClub}

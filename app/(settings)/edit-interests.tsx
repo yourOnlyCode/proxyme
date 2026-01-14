@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Button, LayoutAnimation, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { InterestSelector } from '../../components/profile/InterestSelector'; // Import component
-import { KeyboardToolbar } from '../../components/KeyboardDismissButton';
+import { KeyboardDismissWrapper } from '../../components/KeyboardDismissButton';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
@@ -83,29 +83,30 @@ export default function EditInterestsScreen() {
   if (loading) return <View className="flex-1 justify-center"><ActivityIndicator /></View>;
 
   return (
-    <View className="flex-1 bg-white">
-      <ScrollView className="flex-1 p-4" keyboardShouldPersistTaps="handled">
-        <View className="mb-6">
-          <Text className="text-2xl font-bold mb-2">Detailed Interests</Text>
-          <Text className="text-gray-500 mb-6 text-base leading-5">
-              Select up to <Text className="font-bold text-black">3 categories</Text>. 
-              For each, list your top 3 specific favorites.
-              {'\n\n'}
-              <Text className="italic text-gray-400">
-                  Example: For <Text className="font-bold text-gray-500">Coffee</Text>, list your favorite local cafe like "Blue Bottle" or "Joe's Coffee".
-              </Text>
-          </Text>
-          
-          <InterestSelector 
-              interests={interestDetails}
-              onChange={setInterestDetails}
-          />
+    <KeyboardDismissWrapper>
+      <View className="flex-1 bg-white">
+        <ScrollView className="flex-1 p-4" keyboardShouldPersistTaps="handled">
+          <View className="mb-6">
+            <Text className="text-2xl font-bold mb-2">Detailed Interests</Text>
+            <Text className="text-gray-500 mb-6 text-base leading-5">
+                Select up to <Text className="font-bold text-black">3 categories</Text>. 
+                For each, list your top 3 specific favorites.
+                {'\n\n'}
+                <Text className="italic text-gray-400">
+                    Example: For <Text className="font-bold text-gray-500">Coffee</Text>, list your favorite local cafe like "Blue Bottle" or "Joe's Coffee".
+                </Text>
+            </Text>
+            
+            <InterestSelector 
+                interests={interestDetails}
+                onChange={setInterestDetails}
+            />
 
-          <Button title={saving ? 'Saving...' : 'Save Interests'} onPress={saveInterests} disabled={saving} color="#000" />
-          <View className="h-20" />
-        </View>
-      </ScrollView>
-      <KeyboardToolbar />
-    </View>
+            <Button title={saving ? 'Saving...' : 'Save Interests'} onPress={saveInterests} disabled={saving} color="#000" />
+            <View className="h-20" />
+          </View>
+        </ScrollView>
+      </View>
+    </KeyboardDismissWrapper>
   );
 }

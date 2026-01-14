@@ -37,7 +37,21 @@ type Conversation = {
 
 type Notification = {
   id: string;
-  type: 'forum_reply' | 'club_event' | 'club_member' | 'club_invite' | 'connection_request' | 'connection_accepted' | 'message';
+  type:
+    | 'forum_reply'
+    | 'club_event'
+    | 'club_member'
+    | 'club_invite'
+    | 'club_join_request'
+    | 'club_join_accepted'
+    | 'connection_request'
+    | 'connection_accepted'
+    | 'message'
+    | 'event_rsvp'
+    | 'event_rsvp_update'
+    | 'event_update'
+    | 'event_reminder'
+    | 'event_cancelled';
   title: string;
   body: string;
   data: {
@@ -46,6 +60,9 @@ type Notification = {
     event_id?: string;
     member_id?: string;
     inviter_id?: string;
+    partner_id?: string;
+    icebreaker?: string;
+    requester_id?: string;
   } | null;
   read: boolean;
   created_at: string;
@@ -145,9 +162,48 @@ export default function InboxScreen() {
           .limit(50), // Limit to recent 50 notifications
       ]);
 
-      const requestsData = requestsResult.data;
+      let requestsData = requestsResult.data as any[] | null;
       const conversationsRows = (conversationsResult as any).data as any[] | null;
       const notificationsData = notificationsResult.data;
+
+      // Defensive cleanup:
+      // If two users are already connected (any accepted interest either direction),
+      // then a remaining "pending" request is stale and should be removed from the inbox.
+      if (requestsData && requestsData.length > 0) {
+        const senderIds = requestsData.map((r) => r?.sender?.id).filter(Boolean);
+        if (senderIds.length > 0) {
+          const { data: accepted, error: acceptedErr } = await supabase
+            .from('interests')
+            .select('id, sender_id, receiver_id')
+            .eq('status', 'accepted')
+            .or(
+              `and(sender_id.eq.${user.id},receiver_id.in.(${senderIds.join(',')})),and(receiver_id.eq.${user.id},sender_id.in.(${senderIds.join(',')}))`
+            );
+
+          if (!acceptedErr && accepted) {
+            const connectedPartnerIds = new Set<string>();
+            for (const row of accepted) {
+              const partnerId = row.sender_id === user.id ? row.receiver_id : row.sender_id;
+              if (partnerId) connectedPartnerIds.add(partnerId);
+            }
+
+            const staleRequestIds = requestsData
+              .filter((r) => connectedPartnerIds.has(r?.sender?.id))
+              .map((r) => r.id);
+
+            if (staleRequestIds.length > 0) {
+              // Update in DB so it doesn't reappear
+              await supabase
+                .from('interests')
+                .update({ status: 'declined' })
+                .in('id', staleRequestIds);
+
+              // Remove from UI
+              requestsData = requestsData.filter((r) => !staleRequestIds.includes(r.id));
+            }
+          }
+        }
+      }
 
       const conversations: Conversation[] = (conversationsRows || []).map((row) => ({
         id: row.id,
@@ -299,6 +355,48 @@ export default function InboxScreen() {
         <TouchableOpacity 
           className="flex-row items-center bg-white p-4 rounded-xl mb-3 shadow-sm border border-gray-100"
           onPress={() => router.push(`/chat/${item.id}`)}
+          onLongPress={() => {
+            if (!user?.id) return;
+            if (unreadCount > 0) return;
+
+            Alert.alert(
+              'Conversation',
+              'Mark this conversation as unread?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Mark as unread',
+                  onPress: async () => {
+                    try {
+                      // Mark the latest received message as unread.
+                      const { data: lastReceived, error: lastErr } = await supabase
+                        .from('messages')
+                        .select('id')
+                        .eq('conversation_id', item.id)
+                        .eq('receiver_id', user.id)
+                        .eq('sender_id', item.conversation!.partner.id)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                      if (lastErr) throw lastErr;
+                      if (!lastReceived?.id) return;
+
+                      const { error: updErr } = await supabase
+                        .from('messages')
+                        .update({ read: false, read_at: null })
+                        .eq('id', lastReceived.id);
+
+                      if (updErr) throw updErr;
+                      fetchData();
+                    } catch (e: any) {
+                      Alert.alert('Error', e?.message || 'Could not mark as unread.');
+                    }
+                  },
+                },
+              ],
+            );
+          }}
         >
           <View className="relative">
             <Avatar path={item.conversation.partner.avatar_url} />
@@ -333,6 +431,12 @@ export default function InboxScreen() {
             return { name: 'person.badge.plus' as const, color: '#8B5CF6' };
           case 'club_invite':
             return { name: 'envelope.badge' as const, color: '#F59E0B' };
+          case 'club_join_request':
+            return { name: 'person.crop.circle.badge.questionmark' as const, color: '#0EA5E9' };
+          case 'club_join_accepted':
+            return { name: 'checkmark.seal.fill' as const, color: '#10B981' };
+          case 'connection_accepted':
+            return { name: 'sparkles' as const, color: '#2563EB' };
           default:
             return { name: 'bell.fill' as const, color: '#6B7280' };
         }
@@ -381,6 +485,37 @@ export default function InboxScreen() {
         }
       };
 
+      const handleJoinRequestResponse = async (response: 'accepted' | 'declined') => {
+        if (!user?.id || !notif.data?.club_id || !notif.data?.requester_id) return;
+
+        try {
+          await markNotificationRead();
+
+          if (response === 'accepted') {
+            const { error } = await supabase
+              .from('club_members')
+              .update({ status: 'accepted' })
+              .eq('club_id', notif.data.club_id)
+              .eq('user_id', notif.data.requester_id)
+              .eq('status', 'pending');
+            if (error) throw error;
+          } else {
+            // Decline = delete pending request row
+            const { error } = await supabase
+              .from('club_members')
+              .delete()
+              .eq('club_id', notif.data.club_id)
+              .eq('user_id', notif.data.requester_id)
+              .eq('status', 'pending');
+            if (error) throw error;
+          }
+
+          fetchData();
+        } catch (e: any) {
+          Alert.alert('Error', e?.message || 'Could not update request.');
+        }
+      };
+
       const handleNotificationPress = async () => {
         await markNotificationRead();
 
@@ -393,6 +528,12 @@ export default function InboxScreen() {
           router.push(`/clubs/${notif.data.club_id}?tab=members`);
         } else if (notif.type === 'club_invite' && notif.data?.club_id) {
           router.push(`/clubs/${notif.data.club_id}`);
+        } else if (notif.type === 'club_join_request' && notif.data?.club_id) {
+          router.push(`/clubs/${notif.data.club_id}?tab=members`);
+        } else if (notif.type === 'club_join_accepted' && notif.data?.club_id) {
+          router.push(`/clubs/${notif.data.club_id}?tab=forum`);
+        } else if (notif.type === 'connection_accepted' && notif.data?.partner_id) {
+          router.push(`/chat/${notif.data.partner_id}`);
         }
 
         fetchData(); // Refresh to update read status
@@ -440,6 +581,29 @@ export default function InboxScreen() {
               <TouchableOpacity
                 className="bg-green-50 px-4 py-2 rounded-full"
                 onPress={() => handleClubInviteResponse('accepted')}
+              >
+                <Text className="text-green-700 font-bold text-xs">Accept</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {notif.type === 'club_join_request' && notif.data?.club_id && notif.data?.requester_id && (
+            <View className="flex-row items-center justify-end mt-3">
+              <TouchableOpacity
+                className="bg-gray-100 px-4 py-2 rounded-full mr-2"
+                onPress={() => router.push(`/clubs/${notif.data!.club_id}?tab=members`)}
+              >
+                <Text className="text-gray-700 font-bold text-xs">View</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="bg-red-50 px-4 py-2 rounded-full mr-2"
+                onPress={() => handleJoinRequestResponse('declined')}
+              >
+                <Text className="text-red-600 font-bold text-xs">Decline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="bg-green-50 px-4 py-2 rounded-full"
+                onPress={() => handleJoinRequestResponse('accepted')}
               >
                 <Text className="text-green-700 font-bold text-xs">Accept</Text>
               </TouchableOpacity>

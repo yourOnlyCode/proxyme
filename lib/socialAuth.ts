@@ -7,11 +7,26 @@ WebBrowser.maybeCompleteAuthSession();
 
 export type OAuthProvider = 'google' | 'facebook' | 'apple';
 
-function getQueryParam(url: string, key: string): string | null {
+function getParam(url: string, key: string): string | null {
   try {
+    // Expo's Linking.parse is convenient, but some providers return params in the hash fragment.
     const parsed = Linking.parse(url);
-    const val = (parsed.queryParams?.[key] as string | undefined) ?? null;
-    return typeof val === 'string' ? val : null;
+    const fromLinking = (parsed.queryParams?.[key] as string | undefined) ?? null;
+    if (typeof fromLinking === 'string' && fromLinking.length) return fromLinking;
+
+    // Fallback: parse with URL and include hash params.
+    const u = new URL(url);
+    const fromSearch = u.searchParams.get(key);
+    if (fromSearch) return fromSearch;
+
+    const hash = u.hash?.startsWith('#') ? u.hash.slice(1) : u.hash ?? '';
+    if (hash) {
+      const hashParams = new URLSearchParams(hash);
+      const fromHash = hashParams.get(key);
+      if (fromHash) return fromHash;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -29,7 +44,11 @@ export async function signInWithProvider(provider: OAuthProvider) {
     return;
   }
 
-  const redirectTo = Linking.createURL('auth/callback'); // proxybusiness://auth/callback
+  const returnUrl = Linking.createURL('auth/callback'); // proxybusiness://auth/callback
+
+  // Apple often ends up completing in a browser context; route it through our web landing page
+  // which will deep-link back into the app with the code.
+  const redirectTo = provider === 'apple' ? 'https://www.proxyme.app/auth/callback' : returnUrl;
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
@@ -41,15 +60,17 @@ export async function signInWithProvider(provider: OAuthProvider) {
   if (error) throw error;
   if (!data?.url) throw new Error('No auth URL returned.');
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
   if (result.type !== 'success' || !result.url) {
     // User cancelled or OS dismissed.
     return;
   }
 
-  const code = getQueryParam(result.url, 'code');
-  const err = getQueryParam(result.url, 'error');
-  const errDesc = getQueryParam(result.url, 'error_description');
+  const code = getParam(result.url, 'code');
+  const err = getParam(result.url, 'error');
+  const errDesc = getParam(result.url, 'error_description');
+  const accessToken = getParam(result.url, 'access_token');
+  const refreshToken = getParam(result.url, 'refresh_token');
 
   if (err) {
     throw new Error(errDesc || err);
@@ -58,6 +79,16 @@ export async function signInWithProvider(provider: OAuthProvider) {
   if (code) {
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
     if (exchangeError) throw exchangeError;
+    return;
+  }
+
+  // Some flows/providers may return tokens directly (hash fragment). Support that as a fallback.
+  if (accessToken && refreshToken) {
+    const { error: setSessionError } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (setSessionError) throw setSessionError;
   }
 }
 

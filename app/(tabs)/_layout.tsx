@@ -69,7 +69,10 @@ export default function TabLayout() {
           .from('messages')
           .select('*', { count: 'exact', head: true })
           .in('conversation_id', connectionIds)
-          .eq('read', false)
+          // Only messages *to me* should contribute to my unread badge
+          .eq('receiver_id', user.id)
+          // Treat NULL as unread too (older rows before read column defaults, or legacy data)
+          .or('read.is.null,read.eq.false')
           .neq('sender_id', user.id);
         
         setUnreadMessagesCount(count || 0);

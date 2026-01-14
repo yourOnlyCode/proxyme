@@ -2,7 +2,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, FlatList, Image, PanResponder, RefreshControl, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, PanResponder, RefreshControl, ScrollView, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
@@ -23,6 +23,32 @@ type FeedProfile = ProfileData & {
   statuses?: StatusItem[];
 };
 
+type PublicEvent = {
+  id: string;
+  club_id: string;
+  created_by?: string;
+  title: string;
+  description: string | null;
+  event_date: string;
+  location: string | null;
+  is_public: boolean;
+  image_url?: string | null;
+  club: {
+    id: string;
+    name: string;
+    image_url: string | null;
+    city: string;
+    detailed_interests?: Record<string, string[]> | null;
+  } | null;
+  my_rsvp?: 'going' | 'maybe' | 'cant' | null;
+  match_score?: number;
+  common_interests?: string[];
+};
+
+type FeedItem =
+  | { kind: 'profile'; id: string; profile: FeedProfile }
+  | { kind: 'event'; id: string; event: PublicEvent };
+
 const CITY_RANGE = 50000; // 50km for "City"
 
 export default function CityFeedScreen() {
@@ -37,7 +63,7 @@ export default function CityFeedScreen() {
   const [listHeight, setListHeight] = useState(windowHeight - tabBarHeight);
   const { user } = useAuth();
   const { location, address } = useProxyLocation();
-  const [feed, setFeed] = useState<FeedProfile[]>([]);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(true); // Start with true to show loading state
   
   // Modal State
@@ -45,6 +71,12 @@ export default function CityFeedScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [myInterests, setMyInterests] = useState<Record<string, string[]> | null>(null);
   const [myGoals, setMyGoals] = useState<string[] | null>(null);
+  const [myIsVerified, setMyIsVerified] = useState(false);
+  const [myFriendCode, setMyFriendCode] = useState<string | null>(null);
+  const [verifyModalVisible, setVerifyModalVisible] = useState(false);
+  const [eventDetailVisible, setEventDetailVisible] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<PublicEvent | null>(null);
+  const [eventAttendees, setEventAttendees] = useState<Array<{ id: string; username: string; full_name: string | null; avatar_url: string | null; is_verified?: boolean; status: string }> | null>(null);
 
   const router = useRouter();
 
@@ -85,11 +117,13 @@ export default function CityFeedScreen() {
 
   useEffect(() => {
     if (user) {
-        supabase.from('profiles').select('detailed_interests, relationship_goals').eq('id', user.id).single()
+        supabase.from('profiles').select('detailed_interests, relationship_goals, is_verified, friend_code').eq('id', user.id).single()
         .then(({ data }) => {
             if (data) {
                 setMyInterests(data.detailed_interests);
                 setMyGoals(data.relationship_goals);
+                setMyIsVerified(!!data.is_verified);
+                setMyFriendCode(data.friend_code || null);
             }
         });
     }
@@ -121,11 +155,11 @@ export default function CityFeedScreen() {
         setFeed([]);
       } else if (data) {
         // 1. Filter: Only show users with active statuses
-        let filtered = data.filter((u: FeedProfile) => u.statuses && u.statuses.length > 0);
+        let filteredProfiles = data.filter((u: FeedProfile) => u.statuses && u.statuses.length > 0);
 
         // 2. Sort: Top down based on Interest Match Score
         if (myInterests) {
-            filtered.sort((a: FeedProfile, b: FeedProfile) => {
+            filteredProfiles.sort((a: FeedProfile, b: FeedProfile) => {
                 const scoreA = calculateRawMatchScore(a.detailed_interests);
                 const scoreB = calculateRawMatchScore(b.detailed_interests);
                 return scoreB - scoreA; // Descending order
@@ -133,7 +167,7 @@ export default function CityFeedScreen() {
         }
 
         // 3. Fetch pending requests for each user
-        const userIds = filtered.map((u: FeedProfile) => u.id);
+        const userIds = filteredProfiles.map((u: FeedProfile) => u.id);
         if (userIds.length > 0 && user) {
             const { data: pendingData } = await supabase
                 .from('interests')
@@ -155,17 +189,81 @@ export default function CityFeedScreen() {
             });
             
             // Add pending request info to each user
-            const enrichedFeed = filtered.map((u: FeedProfile) => {
+            const enrichedProfiles = filteredProfiles.map((u: FeedProfile) => {
                 const pending = pendingMap.get(u.id);
                 return {
                     ...u,
                     pending_request: pending ? { id: pending.id, is_received: pending.isReceived } : null
                 } as FeedProfile & { pending_request?: { id: string; is_received: boolean } | null };
             });
-            
-            setFeed(enrichedFeed);
+
+            // Fetch public events for this city and interleave them into the feed.
+            let publicEvents: PublicEvent[] = [];
+            if (address?.city) {
+              const eventsQuery = await supabase
+                .from('club_events')
+                .select('id, club_id, created_by, title, description, event_date, location, is_public, image_url, club:clubs(id, name, image_url, city, detailed_interests)')
+                .eq('is_public', true)
+                .gt('event_date', new Date().toISOString())
+                .eq('club.city', address.city)
+                .order('event_date', { ascending: true })
+                .limit(12);
+
+              // If DB hasn't been migrated to include `is_public`, just skip event mixing for now.
+              if ((eventsQuery as any)?.error?.code === '42703') {
+                publicEvents = [];
+              } else {
+                publicEvents = ((eventsQuery as any).data || []) as any;
+              }
+
+              // Get my RSVP statuses for these events
+              if (publicEvents.length > 0) {
+                const { data: myRsvps } = await supabase
+                  .from('club_event_rsvps')
+                  .select('event_id, status')
+                  .eq('user_id', user.id)
+                  .in('event_id', publicEvents.map((e) => e.id));
+
+                const rsvpMap = new Map<string, any>((myRsvps || []).map((r: any) => [r.event_id, r.status]));
+                publicEvents = publicEvents.map((e) => {
+                  const clubInterests = (e as any)?.club?.detailed_interests || null;
+                  const score = calculateRawMatchScore(clubInterests);
+                  const common = getCommonInterestsFor(clubInterests);
+                  return {
+                    ...e,
+                    my_rsvp: rsvpMap.get(e.id) || null,
+                    match_score: score,
+                    common_interests: common,
+                  };
+                });
+              }
+            }
+
+            const items: FeedItem[] = [];
+            const ranked = [...publicEvents].sort((a, b) => (Number(b.match_score || 0) - Number(a.match_score || 0)));
+            const eventsQueue = ranked.filter((e) => Number(e.match_score || 0) > 0);
+            const coldQueue = ranked.filter((e) => Number(e.match_score || 0) === 0);
+            enrichedProfiles.forEach((p: FeedProfile, idx: number) => {
+              items.push({ kind: 'profile', id: p.id, profile: p });
+              // Mix an event every 3 profiles (simple first-pass algorithm)
+              if ((idx + 1) % 3 === 0 && eventsQueue.length > 0) {
+                const ev = eventsQueue.shift()!;
+                items.push({ kind: 'event', id: `event:${ev.id}`, event: ev });
+              }
+            });
+            // Add remaining events at end
+            while (eventsQueue.length > 0) {
+              const ev = eventsQueue.shift()!;
+              items.push({ kind: 'event', id: `event:${ev.id}`, event: ev });
+            }
+            while (coldQueue.length > 0) {
+              const ev = coldQueue.shift()!;
+              items.push({ kind: 'event', id: `event:${ev.id}`, event: ev });
+            }
+
+            setFeed(items);
         } else {
-            setFeed(filtered);
+            setFeed(filteredProfiles.map((p: FeedProfile) => ({ kind: 'profile' as const, id: p.id, profile: p })));
         }
       } else {
         setFeed([]);
@@ -304,6 +402,56 @@ export default function CityFeedScreen() {
       setModalVisible(true);
   };
 
+  const openProfileFromAttendee = (u: { id: string; username?: string; full_name?: string | null; avatar_url?: string | null; is_verified?: boolean }) => {
+    // Close the event modal first so the ProfileModal (also a Modal) reliably appears on top.
+    setEventDetailVisible(false);
+    setTimeout(() => {
+      setSelectedProfile({
+        id: u.id,
+        username: u.username || 'user',
+        full_name: (u.full_name || u.username || 'User') as any,
+        bio: '',
+        avatar_url: u.avatar_url || null,
+        detailed_interests: null,
+        relationship_goals: null,
+        is_verified: !!u.is_verified,
+      } as any);
+      setModalVisible(true);
+    }, 80);
+  };
+
+  const openProfileById = async (userId: string) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, username, full_name, bio, avatar_url, detailed_interests, relationship_goals, is_verified, city, state, social_links, status_text, status_image_url, status_created_at')
+      .eq('id', userId)
+      .maybeSingle();
+    if (data) {
+      setSelectedProfile(data as any);
+      setModalVisible(true);
+    }
+  };
+
+  const getCommonInterestsFor = (their: Record<string, string[]> | null | undefined): string[] => {
+    if (!myInterests || !their) return [];
+    const common: string[] = [];
+    Object.keys(myInterests).forEach((cat) => {
+      if (!their[cat]) return;
+      const myTags = myInterests[cat].map((t) => t.toLowerCase().trim());
+      const theirTags = their[cat].map((t) => t.toLowerCase().trim());
+      const matchingTags = theirTags.filter((t) => myTags.includes(t));
+      if (matchingTags.length > 0) {
+        matchingTags.slice(0, 2).forEach((tag) => {
+          const originalTag = their[cat].find((t) => t.toLowerCase().trim() === tag);
+          if (originalTag) common.push(`${cat}: ${originalTag}`);
+        });
+      } else {
+        common.push(cat);
+      }
+    });
+    return common.slice(0, 4);
+  };
+
   const calculateMatchPercentage = (userInterests: Record<string, string[]> | null) => {
     if (!myInterests || !userInterests) return 0;
     
@@ -330,22 +478,94 @@ export default function CityFeedScreen() {
       <FlatList
         data={feed}
         renderItem={({ item }) => (
-            <CityFeedCard 
-                item={item} 
-                width={width} 
-                listHeight={listHeight} 
-                tabBarHeight={tabBarHeight} 
-                router={router} 
-                sendInterest={sendInterest} 
-                handleSafety={handleSafety} 
-                openProfile={openProfile}
-                percentage={calculateMatchPercentage(item.detailed_interests)}
-                getCommonInterests={getCommonInterests}
-                handleAcceptRequest={handleAcceptRequest}
-                handleDeclineRequest={handleDeclineRequest}
-            />
+            item.kind === 'profile' ? (
+              <CityFeedCard 
+                  item={item.profile} 
+                  width={width} 
+                  listHeight={listHeight} 
+                  tabBarHeight={tabBarHeight} 
+                  router={router} 
+                  sendInterest={sendInterest} 
+                  handleSafety={handleSafety} 
+                  openProfile={openProfile}
+                  percentage={calculateMatchPercentage(item.profile.detailed_interests)}
+                  getCommonInterests={getCommonInterests}
+                  handleAcceptRequest={handleAcceptRequest}
+                  handleDeclineRequest={handleDeclineRequest}
+              />
+            ) : (
+              <CityEventCard
+                event={item.event}
+                width={width}
+                listHeight={listHeight}
+                myIsVerified={myIsVerified}
+                onView={() => {
+                  setSelectedEvent(item.event);
+                  setEventDetailVisible(true);
+                  setEventAttendees(null);
+
+                  supabase
+                    .from('club_event_rsvps')
+                    .select('user_id, status')
+                    .eq('event_id', item.event.id)
+                    .then(async ({ data }) => {
+                      const rows = (data || []) as any[];
+                      const ids = [...new Set(rows.map((r) => r.user_id))];
+                      const hostId = item.event.created_by;
+                      const idsToFetch = ids.length > 0 ? ids : (hostId ? [hostId] : []);
+                      if (idsToFetch.length === 0) {
+                        setEventAttendees([]);
+                        return;
+                      }
+
+                      const { data: profs } = await supabase
+                        .from('profiles')
+                        .select('id, username, full_name, avatar_url, is_verified')
+                        .in('id', idsToFetch);
+                      const pmap = new Map((profs || []).map((p: any) => [p.id, p]));
+
+                      if (ids.length === 0 && hostId) {
+                        const host = pmap.get(hostId);
+                        if (host) {
+                          setEventAttendees([{ ...host, status: 'host' }]);
+                        } else {
+                          setEventAttendees([{ id: hostId, username: 'Host', full_name: null, avatar_url: null, status: 'host' } as any]);
+                        }
+                        return;
+                      }
+
+                      setEventAttendees(
+                        rows.map((r) => ({
+                          ...(pmap.get(r.user_id) || { id: r.user_id, username: 'Unknown', full_name: null, avatar_url: null }),
+                          status: r.status,
+                        })),
+                      );
+                    });
+                }}
+                onRSVP={async () => {
+                  if (!user?.id) return;
+                  if (!myIsVerified) {
+                    setVerifyModalVisible(true);
+                    return;
+                  }
+                  try {
+                    const { error } = await supabase
+                      .from('club_event_rsvps')
+                      .upsert(
+                        { event_id: item.event.id, user_id: user.id, status: 'going' },
+                        { onConflict: 'event_id,user_id' },
+                      );
+                    if (error) throw error;
+                    fetchFeed();
+                    Alert.alert('RSVP sent', 'Your RSVP was sent. Your profile was submitted to the club owners/admins.');
+                  } catch (e: any) {
+                    Alert.alert('Error', e?.message || 'Could not RSVP.');
+                  }
+                }}
+              />
+            )
         )}
-        keyExtractor={item => item.id}
+        keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchFeed} tintColor="white" />}
         contentContainerStyle={{ flexGrow: 1 }}
         showsVerticalScrollIndicator={false}
@@ -396,6 +616,193 @@ export default function CityFeedScreen() {
              }
          }}
       />
+
+      <Modal transparent animationType="fade" visible={eventDetailVisible} onRequestClose={() => setEventDetailVisible(false)}>
+        <TouchableOpacity activeOpacity={1} className="flex-1 bg-black/50 items-center justify-center px-4" onPress={() => setEventDetailVisible(false)}>
+          <TouchableOpacity activeOpacity={1} className="w-full max-w-[420px] bg-white rounded-3xl overflow-hidden max-h-[84%]">
+            <View className="p-5 border-b border-gray-100">
+              <Text className="text-ink font-bold text-xl">{selectedEvent?.title || 'Event'}</Text>
+              <Text className="text-gray-500 mt-1">{selectedEvent?.club?.name || 'Club'}</Text>
+            </View>
+            <View className="p-5">
+              {selectedEvent?.location ? (
+                <Text className="text-ink mb-2">📍 {selectedEvent.location}</Text>
+              ) : null}
+              <Text className="text-gray-500 mb-4">
+                {selectedEvent ? new Date(selectedEvent.event_date).toLocaleString() : ''}
+              </Text>
+
+              <Text className="text-ink font-bold mb-2">Attending / RSVPs</Text>
+              <View className="rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden" style={{ height: 340 }}>
+                {eventAttendees === null ? (
+                  <View className="px-4 py-4">
+                    <Text className="text-gray-400">Loading…</Text>
+                  </View>
+                ) : (
+                  <ScrollView showsVerticalScrollIndicator contentContainerStyle={{ paddingVertical: 6 }}>
+                    {eventAttendees.map((u) => (
+                      <TouchableOpacity
+                        key={u.id}
+                        className="px-4 py-3 border-b border-gray-100 flex-row items-center"
+                        onPress={() => openProfileFromAttendee(u)}
+                        activeOpacity={0.8}
+                      >
+                        <View className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 mr-3">
+                          {u.avatar_url ? <FeedImage path={u.avatar_url} containerHeight={40} containerWidth={40} /> : null}
+                        </View>
+                        <View className="flex-1">
+                          <Text className="text-ink font-semibold">
+                            {u.full_name || u.username}
+                          </Text>
+                          <Text className="text-gray-400 text-xs">{String(u.status).toUpperCase()}</Text>
+                        </View>
+                        {u.is_verified ? (
+                          <View className="ml-2">
+                            <IconSymbol name="checkmark.seal.fill" size={16} color="#3B82F6" />
+                          </View>
+                        ) : null}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+              </View>
+
+              <TouchableOpacity
+                className="mt-4 bg-gray-100 py-3 rounded-2xl items-center"
+                onPress={() => {
+                  setEventDetailVisible(false);
+                  router.push(`/clubs/${selectedEvent?.club_id}?tab=events&event=${selectedEvent?.id}`);
+                }}
+              >
+                <Text className="text-gray-700 font-bold">View Club</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal transparent animationType="fade" visible={verifyModalVisible} onRequestClose={() => setVerifyModalVisible(false)}>
+        <TouchableOpacity activeOpacity={1} className="flex-1 bg-black/50 items-center justify-center px-4" onPress={() => setVerifyModalVisible(false)}>
+          <TouchableOpacity activeOpacity={1} className="w-full max-w-[420px] bg-white rounded-3xl overflow-hidden">
+            <View className="p-5 border-b border-gray-100">
+              <Text className="text-ink font-bold text-xl">Get Verified</Text>
+              <Text className="text-gray-500 mt-1">Unlock RSVPs, club creation, and posting.</Text>
+            </View>
+            <View className="p-5">
+              <Text className="text-gray-700 mb-4">
+                Verification helps keep Proxyme safe. Get verified by inviting 3 friends using your friend code.
+              </Text>
+
+              <View className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4">
+                <Text className="text-gray-500 font-bold mb-2">Your Friend Code</Text>
+                <Text className="text-ink text-2xl font-bold tracking-widest">
+                  {myFriendCode || '—'}
+                </Text>
+                <Text className="text-gray-400 text-xs mt-2">
+                  Share this code with friends so they can enter it during onboarding.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                className="mt-4 bg-black py-4 rounded-2xl items-center"
+                onPress={() => {
+                  setVerifyModalVisible(false);
+                  router.push('/(settings)/get-verified');
+                }}
+              >
+                <Text className="text-white font-bold text-lg">View verification progress</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+    </View>
+  );
+}
+
+function CityEventCard({
+  event,
+  width,
+  listHeight,
+  myIsVerified,
+  onView,
+  onRSVP,
+}: {
+  event: PublicEvent;
+  width: number;
+  listHeight: number;
+  myIsVerified: boolean;
+  onView: () => void;
+  onRSVP: () => void;
+}) {
+  const d = new Date(event.event_date);
+  const getBackdropUrl = () => {
+    const candidate = event.image_url || event.club?.image_url || null;
+    if (!candidate) return null;
+    if (candidate.startsWith('http')) return candidate;
+    return supabase.storage.from('avatars').getPublicUrl(candidate).data.publicUrl;
+  };
+  const backdrop = getBackdropUrl();
+  return (
+    <View style={{ width, height: listHeight }} className="bg-ink">
+      {backdrop ? (
+        <Image
+          source={{ uri: backdrop }}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          resizeMode="cover"
+          blurRadius={4}
+        />
+      ) : null}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} className="bg-black/40" />
+
+      <View style={{ flex: 1, justifyContent: 'flex-end', paddingHorizontal: 20, paddingBottom: 32, paddingTop: 60 }}>
+        <Text className="text-white/70 font-bold text-xs mb-2">PUBLIC EVENT</Text>
+        <Text className="text-white text-2xl font-extrabold mb-1">{event.title}</Text>
+        <Text className="text-white/80 text-base mb-4">
+          {d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}{' '}
+          • {d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+        </Text>
+        {event.location ? <Text className="text-white/70 mb-3">📍 {event.location}</Text> : null}
+        {event.description ? <Text className="text-white/80 mb-4">{event.description}</Text> : null}
+
+        {event.common_interests && event.common_interests.length > 0 ? (
+          <View className="flex-row flex-wrap mb-4">
+            {event.common_interests.slice(0, 3).map((t) => (
+              <View key={t} className="bg-white/15 border border-white/15 rounded-full px-3 py-1 mr-2 mb-2">
+                <Text className="text-white text-xs font-semibold">{t}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        <View className="bg-white/10 rounded-2xl p-4 mb-4">
+          <Text className="text-white font-bold text-lg">{event.club?.name || 'Club'}</Text>
+          <Text className="text-white/60 text-sm mt-1">
+            RSVP submits your profile to the club owners/admins.
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={onRSVP}
+          className={`py-4 rounded-2xl items-center ${myIsVerified ? 'bg-white' : 'bg-white/20'}`}
+          activeOpacity={0.9}
+        >
+          <Text className={`${myIsVerified ? 'text-ink' : 'text-white'} font-bold text-lg`}>
+            {myIsVerified ? (event.my_rsvp ? 'RSVP’d (Going)' : 'RSVP (Going)') : 'Get verified to RSVP'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={onView}
+          className="mt-3 mb-6 items-center"
+          activeOpacity={0.85}
+          hitSlop={{ top: 16, bottom: 16, left: 24, right: 24 }}
+        >
+          <View className="px-6 py-3 rounded-full bg-white/15 border border-white/20">
+            <Text className="text-white font-bold">View event details</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
