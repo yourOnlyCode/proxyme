@@ -105,7 +105,7 @@ export default function TabLayout() {
   return (
     <StatusProvider>
         <View style={{ flex: 1 }}>
-          <OrbBackground opacity={0.34} />
+          <OrbBackground opacity={0.42} />
           <Tabs
             screenOptions={{
           tabBarActiveTintColor: '#2962FF', // Vibrant Blue
@@ -132,11 +132,11 @@ export default function TabLayout() {
           tabBarBackground: () => (
             <LinearGradient
               colors={[
-                '#FFFFFF',
-                '#F1F5F9',
-                '#E2E8F0',
-                '#F1F5F9',
-                '#FFFFFF',
+                'rgba(255,255,255,0.78)',
+                'rgba(241,245,249,0.78)',
+                'rgba(226,232,240,0.78)',
+                'rgba(241,245,249,0.78)',
+                'rgba(255,255,255,0.78)',
               ]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}

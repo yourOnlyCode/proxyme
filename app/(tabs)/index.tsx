@@ -723,7 +723,7 @@ export default function HomeScreen() {
   };
 
   return (
-    <View className="flex-1 bg-white" {...panResponder.panHandlers}>
+    <View className="flex-1 bg-transparent" {...panResponder.panHandlers}>
       {/* Fixed Sticky Header - Always Visible */}
       <View 
         style={{ 
@@ -735,7 +735,7 @@ export default function HomeScreen() {
             paddingTop: Platform.OS === 'ios' ? 50 : 20,
             paddingBottom: 8,
             paddingHorizontal: 16,
-            backgroundColor: '#F8FAFC', // Slate-50 background
+            backgroundColor: 'rgba(248, 250, 252, 0.78)', // translucent Slate-50 so orbs show through
             overflow: 'hidden',
             borderBottomWidth: 0,
             shadowColor: '#000',

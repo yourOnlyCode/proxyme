@@ -482,7 +482,7 @@ export default function CityFeedScreen() {
     calculateMatchPercentageShared(myInterests, userInterests);
 
   return (
-    <View className="flex-1 bg-ink" {...cityFeedPanResponder.panHandlers}>
+    <View className="flex-1 bg-transparent" {...cityFeedPanResponder.panHandlers}>
       <FlatList
         data={feed}
         renderItem={({ item }) => (
