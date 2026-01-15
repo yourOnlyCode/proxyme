@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../../lib/auth';
-import { REQUIRED_REFERRALS_FOR_VERIFICATION, checkVerificationStatus } from '../../lib/verification';
+import { REQUIRED_REFERRALS_FOR_SUPER_USER, REQUIRED_REFERRALS_FOR_VERIFICATION, checkVerificationStatus, isSuperUserByReferralCount } from '../../lib/verification';
 import { supabase } from '../../lib/supabase';
 
 export default function GetVerifiedScreen() {
@@ -13,6 +13,7 @@ export default function GetVerifiedScreen() {
   const [isVerified, setIsVerified] = useState(false);
   const [friendCode, setFriendCode] = useState<string | null>(null);
   const [referralCount, setReferralCount] = useState<number>(0);
+  const isSuperUser = isSuperUserByReferralCount(referralCount);
 
   useEffect(() => {
     if (user) {
@@ -63,7 +64,7 @@ export default function GetVerifiedScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text className="text-3xl font-extrabold mb-3 text-ink text-center">
-            {isVerified ? 'You’re Verified' : 'Get Verified'}
+            {isSuperUser ? 'You’re a Super User' : isVerified ? 'You’re Verified' : 'Get Verified'}
           </Text>
           <Text className="text-gray-500 mb-6 text-center text-base leading-6">
             Verification is earned by inviting friends — it helps Proxyme build real trust and reduce fake accounts.
@@ -75,23 +76,35 @@ export default function GetVerifiedScreen() {
               1) Share your friend code{'\n'}
               2) Your friends enter it during onboarding{'\n'}
               3) Each successful referral counts toward verification{'\n'}
-              4) Invite {REQUIRED_REFERRALS_FOR_VERIFICATION} friends to get the badge
+              4) Invite {REQUIRED_REFERRALS_FOR_VERIFICATION} friends to get verified{'\n'}
+              5) Invite {REQUIRED_REFERRALS_FOR_SUPER_USER} friends to unlock a purple check (Super User)
             </Text>
           </View>
 
           <View className="bg-white border border-gray-100 rounded-2xl p-5 mb-4 shadow-sm">
             <Text className="text-gray-500 font-bold mb-2">Your progress</Text>
             <Text className="text-ink text-2xl font-extrabold mb-1">
-              {Math.min(referralCount, REQUIRED_REFERRALS_FOR_VERIFICATION)}/{REQUIRED_REFERRALS_FOR_VERIFICATION}
+              {isVerified
+                ? `${Math.min(referralCount, REQUIRED_REFERRALS_FOR_SUPER_USER)}/${REQUIRED_REFERRALS_FOR_SUPER_USER}`
+                : `${Math.min(referralCount, REQUIRED_REFERRALS_FOR_VERIFICATION)}/${REQUIRED_REFERRALS_FOR_VERIFICATION}`}
             </Text>
             <Text className="text-gray-500 text-sm">
-              Referrals are counted when someone enters your code in onboarding.
+              {isVerified
+                ? 'You’re verified. Next goal: Super User (purple check).'
+                : 'Referrals are counted when someone enters your code in onboarding.'}
             </Text>
 
             <View className="h-2 bg-gray-100 rounded-full w-full overflow-hidden mt-4">
               <View
-                className="h-full bg-business rounded-full"
-                style={{ width: `${Math.min(1, referralCount / REQUIRED_REFERRALS_FOR_VERIFICATION) * 100}%` }}
+                className={`h-full rounded-full ${isVerified ? 'bg-purple-600' : 'bg-business'}`}
+                style={{
+                  width: `${
+                    Math.min(
+                      1,
+                      referralCount / (isVerified ? REQUIRED_REFERRALS_FOR_SUPER_USER : REQUIRED_REFERRALS_FOR_VERIFICATION),
+                    ) * 100
+                  }%`,
+                }}
               />
             </View>
           </View>

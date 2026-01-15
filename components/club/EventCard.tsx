@@ -10,7 +10,7 @@ interface EventCardProps {
     isAdmin: boolean;
     currentUserId: string | undefined;
     onEdit: (event: ClubEvent) => void;
-    onDelete: (eventId: string) => void;
+    onCancel: (eventId: string) => void;
     onRSVP: (eventId: string, status: 'going' | 'maybe' | 'cant') => void;
     onAddToCalendar: (event: ClubEvent) => void;
     onViewProfile: (userId: string) => void;
@@ -21,7 +21,7 @@ export default function EventCard({
     isAdmin,
     currentUserId,
     onEdit,
-    onDelete,
+    onCancel,
     onRSVP,
     onAddToCalendar,
     onViewProfile
@@ -204,12 +204,12 @@ export default function EventCard({
                             <TouchableOpacity
                                 onPress={() => {
                                     closeMenu();
-                                    onDelete(event.id);
+                                    onCancel(event.id);
                                 }}
                                 className="flex-row items-center py-3 px-4"
                             >
-                                <IconSymbol name="trash.fill" size={18} color="#DC2626" />
-                                <Text className="text-red-600 font-medium ml-3">Delete</Text>
+                                <IconSymbol name="xmark.circle.fill" size={18} color="#DC2626" />
+                                <Text className="text-red-600 font-medium ml-3">Cancel</Text>
                             </TouchableOpacity>
                         </Pressable>
                     </Pressable>

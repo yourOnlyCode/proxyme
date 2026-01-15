@@ -162,24 +162,46 @@ export default function HomeScreen() {
       })
       .subscribe();
 
-    // Subscribe to changes
-    const subscription = supabase
-      .channel('pending-requests-proxy')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'interests',
-        filter: `receiver_id=eq.${user.id}`
-      }, () => {
-        fetchPendingRequests();
-      })
+    // Subscribe to changes (incoming + outgoing) so buttons update when someone accepts/declines.
+    const incomingSub = supabase
+      .channel('pending-requests-proxy-incoming')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'interests',
+          filter: `receiver_id=eq.${user.id}`,
+        },
+        () => {
+          fetchPendingRequests();
+          if (isProxyActive && location) fetchProxyFeed();
+        },
+      )
+      .subscribe();
+
+    const outgoingSub = supabase
+      .channel('pending-requests-proxy-outgoing')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'interests',
+          filter: `sender_id=eq.${user.id}`,
+        },
+        () => {
+          if (isProxyActive && location) fetchProxyFeed();
+        },
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(profileSubscription);
-      supabase.removeChannel(subscription);
+      supabase.removeChannel(incomingSub);
+      supabase.removeChannel(outgoingSub);
     };
-  }, [user]);
+  }, [user, isProxyActive, location]);
 
   const fetchMyStatus = async () => {
       if (!user) return;
@@ -220,25 +242,33 @@ export default function HomeScreen() {
           console.warn(`Filtered ${data.length - filtered.length} users who were out of range.`);
       }
       
-      // Fetch pending requests for each user
+      // Fetch connection/interest state for each user (pending/accepted/declined)
       const userIds = filtered.map((u: FeedProfile) => u.id);
       if (userIds.length > 0 && user) {
-          const { data: pendingData } = await supabase
+          const { data: interestRows } = await supabase
               .from('interests')
               .select('id, sender_id, receiver_id, status')
-              .in('sender_id', [user.id, ...userIds])
-              .in('receiver_id', [user.id, ...userIds])
-              .in('status', ['pending']);
+              .in('status', ['pending', 'accepted', 'declined'])
+              .or(
+                `and(sender_id.eq.${user.id},receiver_id.in.(${userIds.join(',')})),and(receiver_id.eq.${user.id},sender_id.in.(${userIds.join(',')}))`,
+              );
           
-          // Create a map of user_id -> pending interest
+          // Map for pending incoming/outgoing + track if they previously declined my interest
           const pendingMap = new Map<string, { id: string; isReceived: boolean }>();
-          pendingData?.forEach((interest: any) => {
-              if (interest.sender_id === user.id) {
-                  // User sent request to this person
-                  pendingMap.set(interest.receiver_id, { id: interest.id, isReceived: false });
-              } else if (interest.receiver_id === user.id) {
-                  // User received request from this person
-                  pendingMap.set(interest.sender_id, { id: interest.id, isReceived: true });
+          const declinedByThem = new Set<string>();
+          const acceptedMap = new Map<string, string>(); // partnerId -> interestId (conversation)
+
+          (interestRows || []).forEach((interest: any) => {
+              const isOutgoing = interest.sender_id === user.id;
+              const partnerId = isOutgoing ? interest.receiver_id : interest.sender_id;
+              if (!partnerId) return;
+
+              if (interest.status === 'pending') {
+                pendingMap.set(partnerId, { id: interest.id, isReceived: !isOutgoing });
+              } else if (interest.status === 'declined' && isOutgoing) {
+                declinedByThem.add(partnerId);
+              } else if (interest.status === 'accepted') {
+                acceptedMap.set(partnerId, interest.id);
               }
           });
           
@@ -248,6 +278,11 @@ export default function HomeScreen() {
               return {
                   ...u,
                   pending_request: pending ? { id: pending.id, is_received: pending.isReceived } : null
+                  ,
+                  // Used for "Previously declined your interest" label + resend button styling.
+                  previously_declined: declinedByThem.has(u.id),
+                  // Ensure Message button can appear quickly even if RPC didn't compute connection_id yet.
+                  connection_id: (u as any).connection_id || acceptedMap.get(u.id) || null,
               } as FeedProfile & { pending_request?: { id: string; is_received: boolean } | null };
           });
           
@@ -287,13 +322,15 @@ export default function HomeScreen() {
   );
 
   const sendInterest = async (targetUserId: string) => {
+      // Legacy helper; ProfileActionButtons now drives this flow.
+      // Keep for safety and remove success toast (UI should update via button state).
       const { error } = await supabase
         .from('interests')
-        .insert({
+        .upsert({
             sender_id: user?.id,
             receiver_id: targetUserId,
             status: 'pending'
-        });
+        } as any, { onConflict: 'sender_id,receiver_id' });
       
       if (error) {
           if (error.code === '23505') {
@@ -302,7 +339,6 @@ export default function HomeScreen() {
               toast.show(error.message, 'error');
           }
       } else {
-          toast.show('Interest sent successfully', 'success');
           fetchProxyFeed(); // Refresh feed to update UI
       }
   };
@@ -510,6 +546,11 @@ export default function HomeScreen() {
                         <Text className="text-lg font-bold text-ink mr-1" numberOfLines={1}>{item.full_name || item.username}</Text>
                     </TouchableOpacity>
                     {item.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
+                    {(!(item as any).connection_id && (item as any).previously_declined) ? (
+                      <View className="ml-2 px-2 py-0.5 rounded-full bg-orange-50 border border-orange-200">
+                        <Text className="text-[10px] font-bold text-orange-700">Previously declined your interest</Text>
+                      </View>
+                    ) : null}
                 </View>
                 
                 {primaryGoal && (

@@ -7,6 +7,7 @@ import { supabase } from './supabase';
  * - When `referral_count >= REQUIRED_REFERRALS_FOR_VERIFICATION`, the user is considered verified
  */
 export const REQUIRED_REFERRALS_FOR_VERIFICATION = 3;
+export const REQUIRED_REFERRALS_FOR_SUPER_USER = 10;
 
 export async function checkVerificationStatus(userId: string) {
   try {
@@ -37,3 +38,6 @@ export async function checkVerificationStatus(userId: string) {
   }
 }
 
+export function isSuperUserByReferralCount(referralCount: number | null | undefined) {
+  return Number(referralCount || 0) >= REQUIRED_REFERRALS_FOR_SUPER_USER;
+}

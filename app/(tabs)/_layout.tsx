@@ -1,5 +1,6 @@
 import { StatusFloatingButton } from '@/components/StatusFloatingButton';
 import { StatusProvider } from '@/components/StatusProvider';
+import { OrbBackground } from '@/components/ui/OrbBackground';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/lib/auth';
 import { useProxyLocation } from '@/lib/location';
@@ -104,11 +105,13 @@ export default function TabLayout() {
   return (
     <StatusProvider>
         <View style={{ flex: 1 }}>
+          <OrbBackground opacity={0.34} />
           <Tabs
             screenOptions={{
           tabBarActiveTintColor: '#2962FF', // Vibrant Blue
           tabBarInactiveTintColor: '#9CA3AF', // Gray-400
           headerShown: false,
+          sceneContainerStyle: { backgroundColor: 'transparent' },
           tabBarStyle: {
               backgroundColor: 'transparent', // Transparent to show gradient backdrop
               borderTopWidth: 0, // Remove hard border completely

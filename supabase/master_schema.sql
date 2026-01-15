@@ -881,7 +881,13 @@ CREATE POLICY "Admins/Owners can update member status"
     ON public.club_members FOR UPDATE
     USING (
         (SELECT auth.uid()) = user_id OR -- Accept invite
-        EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_members.club_id AND user_id = (SELECT auth.uid()) AND role IN ('owner', 'admin'))
+        EXISTS (
+          SELECT 1
+          FROM public.club_members cm
+          WHERE cm.club_id = club_members.club_id
+            AND cm.user_id = (SELECT auth.uid())
+            AND cm.role IN ('owner', 'admin')
+        )
     );
 
 
@@ -929,6 +935,26 @@ BEGIN
   END IF;
 END $$;
 
+-- If the table already existed (older schema), ensure cancellation columns exist.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'is_cancelled'
+  ) THEN
+    ALTER TABLE public.club_events
+      ADD COLUMN is_cancelled BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'cancelled_at'
+  ) THEN
+    ALTER TABLE public.club_events
+      ADD COLUMN cancelled_at TIMESTAMPTZ;
+  END IF;
+END $$;
+
 ALTER TABLE public.club_events ENABLE ROW LEVEL SECURITY;
 
 drop policy if exists "Events viewable by club members" on public.club_events;
@@ -937,7 +963,15 @@ drop policy if exists "Admins/Owners can create events" on public.club_events;
 
 CREATE POLICY "Events viewable by club members"
     ON public.club_events FOR SELECT
-    USING (EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_events.club_id AND user_id = (SELECT auth.uid()) AND status = 'accepted'));
+    USING (
+      EXISTS (
+        SELECT 1
+        FROM public.club_members cm
+        WHERE cm.club_id = club_events.club_id
+          AND cm.user_id = (SELECT auth.uid())
+          AND cm.status = 'accepted'
+      )
+    );
 
 -- Public events are visible to all users (for City tab discovery)
 CREATE POLICY "Public events are viewable by everyone"
@@ -947,7 +981,14 @@ CREATE POLICY "Public events are viewable by everyone"
 CREATE POLICY "Admins/Owners can create events"
     ON public.club_events FOR INSERT
     WITH CHECK (
-        EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_events.club_id AND user_id = (SELECT auth.uid()) AND role IN ('owner', 'admin') AND status = 'accepted')
+        EXISTS (
+          SELECT 1
+          FROM public.club_members cm
+          WHERE cm.club_id = club_events.club_id
+            AND cm.user_id = (SELECT auth.uid())
+            AND cm.role IN ('owner', 'admin')
+            AND cm.status = 'accepted'
+        )
     );
 
 -- Event RSVPs
@@ -978,10 +1019,19 @@ CREATE POLICY "Verified users can RSVP"
     ON public.club_event_rsvps FOR INSERT
     WITH CHECK (
       user_id = auth.uid()
-      and exists (
-        select 1 from public.profiles p
-        where p.id = auth.uid()
-          and p.is_verified = true
+      and (
+        -- Verified users can RSVP...
+        exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid()
+            and p.is_verified = true
+        )
+        -- ...and event creators can always RSVP to their own event.
+        or exists (
+          select 1 from public.club_events e
+          where e.id = club_event_rsvps.event_id
+            and e.created_by = auth.uid()
+        )
       )
     );
 
@@ -990,10 +1040,17 @@ CREATE POLICY "Verified users can update their RSVP"
     USING (user_id = auth.uid())
     WITH CHECK (
       user_id = auth.uid()
-      and exists (
-        select 1 from public.profiles p
-        where p.id = auth.uid()
-          and p.is_verified = true
+      and (
+        exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid()
+            and p.is_verified = true
+        )
+        or exists (
+          select 1 from public.club_events e
+          where e.id = club_event_rsvps.event_id
+            and e.created_by = auth.uid()
+        )
       )
     );
 
@@ -1005,7 +1062,7 @@ CREATE POLICY "Users can remove their RSVP"
 CREATE OR REPLACE FUNCTION public.notify_event_rsvp_to_club_admins()
 RETURNS TRIGGER AS $$
 DECLARE
-  club_id uuid;
+  v_club_id uuid;
   event_title text;
   rsvp_username text;
   admin_record record;
@@ -1014,7 +1071,7 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT e.club_id, e.title INTO club_id, event_title
+  SELECT e.club_id, e.title INTO v_club_id, event_title
   FROM public.club_events e
   WHERE e.id = NEW.event_id;
 
@@ -1025,17 +1082,22 @@ BEGIN
   FOR admin_record IN
     SELECT cm.user_id
     FROM public.club_members cm
-    WHERE cm.club_id = club_id
+    WHERE cm.club_id = v_club_id
       AND cm.status = 'accepted'
       AND cm.role IN ('owner', 'admin')
   LOOP
+    -- Don't notify the RSVPer about their own RSVP (esp. for auto-RSVP on event creation).
+    IF admin_record.user_id = NEW.user_id THEN
+      CONTINUE;
+    END IF;
+
     INSERT INTO public.notifications (user_id, type, title, body, data)
     VALUES (
       admin_record.user_id,
       'event_rsvp',
       'New Event RSVP',
       COALESCE(rsvp_username, 'Someone') || ' RSVP''d "' || COALESCE(event_title, 'your event') || '". Their profile was submitted to your club.',
-      jsonb_build_object('club_id', club_id, 'event_id', NEW.event_id, 'rsvp_user_id', NEW.user_id, 'rsvp_status', NEW.status)
+      jsonb_build_object('club_id', v_club_id, 'event_id', NEW.event_id, 'rsvp_user_id', NEW.user_id, 'rsvp_status', NEW.status)
     );
   END LOOP;
 
@@ -1048,6 +1110,29 @@ CREATE TRIGGER trigger_notify_event_rsvp_to_admins
   AFTER INSERT ON public.club_event_rsvps
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_event_rsvp_to_club_admins();
+
+-- Auto-RSVP: when an event is created, mark the creator as "going" so it shows in Upcoming Events.
+CREATE OR REPLACE FUNCTION public.auto_rsvp_event_creator()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.created_by IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO public.club_event_rsvps (event_id, user_id, status)
+  VALUES (NEW.id, NEW.created_by, 'going')
+  ON CONFLICT (event_id, user_id)
+  DO UPDATE SET status = EXCLUDED.status, updated_at = NOW();
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_auto_rsvp_event_creator ON public.club_events;
+CREATE TRIGGER trigger_auto_rsvp_event_creator
+  AFTER INSERT ON public.club_events
+  FOR EACH ROW
+  EXECUTE FUNCTION public.auto_rsvp_event_creator();
 
 
 -- ==========================================
@@ -1204,7 +1289,7 @@ CREATE OR REPLACE FUNCTION public.notify_event_update_to_followers()
 RETURNS TRIGGER AS $$
 DECLARE
   event_title text;
-  club_id uuid;
+  v_club_id uuid;
   follower_id uuid;
 BEGIN
   IF to_regclass('public.notifications') IS NULL THEN
@@ -1231,7 +1316,7 @@ BEGIN
   END IF;
 
   event_title := COALESCE(NEW.title, 'an event');
-  club_id := NEW.club_id;
+  v_club_id := NEW.club_id;
 
   FOR follower_id IN
     (
@@ -1249,7 +1334,7 @@ BEGIN
       'event_update',
       'Event updated',
       '"' || event_title || '" was updated.',
-      jsonb_build_object('event_id', NEW.id, 'club_id', club_id)
+      jsonb_build_object('event_id', NEW.id, 'club_id', v_club_id)
     );
   END LOOP;
 
@@ -1263,13 +1348,62 @@ CREATE TRIGGER trigger_notify_event_update_to_followers
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_event_update_to_followers();
 
+-- Notify followers when an event is cancelled.
+CREATE OR REPLACE FUNCTION public.notify_event_cancelled_to_followers()
+RETURNS TRIGGER AS $$
+DECLARE
+  event_title text;
+  v_club_id uuid;
+  follower_id uuid;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.is_cancelled IS DISTINCT FROM true OR (OLD.is_cancelled IS NOT DISTINCT FROM true) THEN
+    RETURN NEW;
+  END IF;
+
+  event_title := COALESCE(NEW.title, 'an event');
+  v_club_id := NEW.club_id;
+
+  FOR follower_id IN
+    (
+      SELECT DISTINCT x.user_id
+      FROM (
+        SELECT r.user_id FROM public.club_event_rsvps r WHERE r.event_id = NEW.id
+        UNION
+        SELECT i.user_id FROM public.event_interests i WHERE i.event_id = NEW.id AND i.status = 'interested'
+      ) x
+    )
+  LOOP
+    INSERT INTO public.notifications (user_id, type, title, body, data)
+    VALUES (
+      follower_id,
+      'event_cancelled',
+      'Event cancelled',
+      '"' || event_title || '" was cancelled.',
+      jsonb_build_object('event_id', NEW.id, 'club_id', v_club_id)
+    );
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_event_cancelled_to_followers ON public.club_events;
+CREATE TRIGGER trigger_notify_event_cancelled_to_followers
+  AFTER UPDATE ON public.club_events
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_event_cancelled_to_followers();
+
 
 -- Notify followers when someone comments on an event.
 CREATE OR REPLACE FUNCTION public.notify_event_comment_to_followers()
 RETURNS TRIGGER AS $$
 DECLARE
   event_title text;
-  club_id uuid;
+  v_club_id uuid;
   commenter_username text;
   follower_id uuid;
 BEGIN
@@ -1277,7 +1411,7 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT e.title, e.club_id INTO event_title, club_id
+  SELECT e.title, e.club_id INTO event_title, v_club_id
   FROM public.club_events e
   WHERE e.id = NEW.event_id;
 
@@ -1302,7 +1436,7 @@ BEGIN
       'event_comment',
       'New event comment',
       COALESCE(commenter_username, 'Someone') || ' commented on "' || COALESCE(event_title, 'an event') || '".',
-      jsonb_build_object('event_id', NEW.event_id, 'club_id', club_id)
+      jsonb_build_object('event_id', NEW.event_id, 'club_id', v_club_id)
     );
   END LOOP;
 
@@ -1501,12 +1635,26 @@ drop policy if exists "Members can create topics" on public.club_forum_topics;
 
 CREATE POLICY "Members can view topics"
     ON public.club_forum_topics FOR SELECT
-    USING (EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_forum_topics.club_id AND user_id = (SELECT auth.uid()) AND status = 'accepted'));
+    USING (
+      EXISTS (
+        SELECT 1
+        FROM public.club_members cm
+        WHERE cm.club_id = club_forum_topics.club_id
+          AND cm.user_id = (SELECT auth.uid())
+          AND cm.status = 'accepted'
+      )
+    );
 
 CREATE POLICY "Members can create topics"
     ON public.club_forum_topics FOR INSERT
     WITH CHECK (
-      EXISTS (SELECT 1 FROM public.club_members WHERE club_id = club_forum_topics.club_id AND user_id = (SELECT auth.uid()) AND status = 'accepted')
+      EXISTS (
+        SELECT 1
+        FROM public.club_members cm
+        WHERE cm.club_id = club_forum_topics.club_id
+          AND cm.user_id = (SELECT auth.uid())
+          AND cm.status = 'accepted'
+      )
       and exists (
         select 1
         from public.profiles p

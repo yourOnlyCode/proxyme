@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, PanResponde
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
+import { calculateMatchPercentage as calculateMatchPercentageShared, getCommonInterests as getCommonInterestsShared } from '../../lib/match';
 import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
@@ -221,20 +222,29 @@ export default function CityFeedScreen() {
             // Fetch public events for this city and interleave them into the feed.
             let publicEvents: PublicEvent[] = [];
             if (address?.city) {
-              const eventsQuery = await supabase
+              let q = supabase
                 .from('club_events')
-                .select('id, club_id, created_by, title, description, event_date, location, is_public, image_url, club:clubs(id, name, image_url, city, detailed_interests)')
+                .select('id, club_id, created_by, title, description, event_date, location, is_public, image_url, is_cancelled, club:clubs(id, name, image_url, city, detailed_interests)')
                 .eq('is_public', true)
+                .eq('is_cancelled', false as any)
                 .gt('event_date', new Date().toISOString())
                 .eq('club.city', address.city)
                 .order('event_date', { ascending: true })
                 .limit(12);
 
+              // Don't show creators their own public events in City feed.
+              if (user?.id) {
+                q = (q as any).neq('created_by', user.id);
+              }
+
+              const eventsQuery = await q;
+
               // If DB hasn't been migrated to include `is_public`, just skip event mixing for now.
               if ((eventsQuery as any)?.error?.code === '42703') {
                 publicEvents = [];
               } else {
-                publicEvents = ((eventsQuery as any).data || []) as any;
+                const raw = (((eventsQuery as any).data || []) as any[]) || [];
+                publicEvents = (user?.id ? raw.filter((e) => e?.created_by !== user.id) : raw) as any;
               }
 
               // Get my RSVP statuses for these events
@@ -334,35 +344,8 @@ export default function CityFeedScreen() {
       return score;
   };
 
-  // Find common interests between my interests and user's interests
-  const getCommonInterests = (userInterests: Record<string, string[]> | null): string[] => {
-      if (!myInterests || !userInterests) return [];
-      const common: string[] = [];
-      
-      Object.keys(myInterests).forEach(cat => {
-          if (userInterests[cat]) {
-              // Check for matching sub-interests
-              const myTags = myInterests[cat].map((t: string) => t.toLowerCase().trim());
-              const userTags = userInterests[cat].map((t: string) => t.toLowerCase().trim());
-              const matchingTags = userTags.filter(tag => myTags.includes(tag));
-              
-              if (matchingTags.length > 0) {
-                  // Add category and matching tags
-                  matchingTags.forEach(tag => {
-                      const originalTag = userInterests[cat].find((t: string) => t.toLowerCase().trim() === tag);
-                      if (originalTag) {
-                          common.push(`${cat}: ${originalTag}`);
-                      }
-                  });
-              } else {
-                  // Just category match
-                  common.push(cat);
-              }
-          }
-      });
-      
-      return common;
-  };
+  const getCommonInterests = (userInterests: Record<string, string[]> | null): string[] =>
+    getCommonInterestsShared(myInterests, userInterests);
 
   // Fetch feed when:
   // 1. Component mounts (opening tab)
@@ -495,26 +478,8 @@ export default function CityFeedScreen() {
     return common.slice(0, 4);
   };
 
-  const calculateMatchPercentage = (userInterests: Record<string, string[]> | null) => {
-    if (!myInterests || !userInterests) return 0;
-    
-    // Count the actual number of matching interests/tags
-    const commonInterests = getCommonInterests(userInterests);
-    const matchCount = commonInterests.length;
-    
-    // Map match count to percentage
-    if (matchCount >= 4) {
-      return 98; // 4+ things in common: 98%+ match
-    } else if (matchCount === 3) {
-      return 95; // 3 things in common: 95% match
-    } else if (matchCount === 2) {
-      return 80; // 2 things in common: 80% match
-    } else if (matchCount === 1) {
-      return 60; // 1 thing in common: 60% match
-    } else {
-      return 0; // No matches: 0% match
-    }
-  };
+  const calculateMatchPercentage = (userInterests: Record<string, string[]> | null) =>
+    calculateMatchPercentageShared(myInterests, userInterests);
 
   return (
     <View className="flex-1 bg-ink" {...cityFeedPanResponder.panHandlers}>

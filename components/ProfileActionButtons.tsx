@@ -47,12 +47,18 @@ export function ProfileActionButtons({
 
     const connectionType = myGoals && myGoals.length > 0 ? myGoals[0] : null;
 
-    const { error } = await supabase.from('interests').insert({
-      sender_id: user.id,
-      receiver_id: profile.id,
-      status: 'pending',
-      connection_type: connectionType,
-    });
+    // Upsert so a previously-declined interest can be re-sent without unique constraint issues.
+    const { error } = await supabase
+      .from('interests')
+      .upsert(
+        {
+          sender_id: user.id,
+          receiver_id: profile.id,
+          status: 'pending',
+          connection_type: connectionType,
+        } as any,
+        { onConflict: 'sender_id,receiver_id' },
+      );
 
     setLoading(false);
     if (error) {
@@ -62,7 +68,6 @@ export function ProfileActionButtons({
         Alert.alert('Error', error.message);
       }
     } else {
-      Alert.alert('Sent!', 'Interest sent successfully.');
       onStateChange?.();
     }
   };
@@ -77,7 +82,6 @@ export function ProfileActionButtons({
     if (error) {
       Alert.alert('Error', error.message);
     } else {
-      Alert.alert('Canceled', 'Interest request canceled.');
       onStateChange?.();
     }
   };
@@ -95,7 +99,6 @@ export function ProfileActionButtons({
     if (error) {
       Alert.alert('Error', error.message);
     } else {
-      Alert.alert('Accepted!', 'You are now connected.');
       onStateChange?.();
     }
   };
@@ -104,13 +107,13 @@ export function ProfileActionButtons({
     if (!connectionState.interestId) return;
     setLoading(true);
 
-    const { error } = await supabase.from('interests').delete().eq('id', connectionState.interestId);
+    // Mark declined instead of deleting so we can show "previously declined" and allow re-send.
+    const { error } = await supabase.from('interests').update({ status: 'declined' }).eq('id', connectionState.interestId);
 
     setLoading(false);
     if (error) {
       Alert.alert('Error', error.message);
     } else {
-      Alert.alert('Declined', 'Interest request declined.');
       onStateChange?.();
     }
   };
@@ -137,8 +140,8 @@ export function ProfileActionButtons({
 
       case 'interest_sent':
         return (
-          <View className="w-full bg-gray-100 border border-gray-200 py-2 rounded-xl items-center">
-            <Text className="text-gray-500 font-bold text-xs">Interest Sent</Text>
+          <View className="w-full bg-green-50 border border-green-200 py-2 rounded-xl items-center">
+            <Text className="text-green-700 font-bold text-xs">Interest sent</Text>
           </View>
         );
 
@@ -160,6 +163,17 @@ export function ProfileActionButtons({
               <Text className="text-gray-700 font-bold text-xs">Decline</Text>
             </TouchableOpacity>
           </View>
+        );
+
+      case 'interest_declined':
+        return (
+          <TouchableOpacity
+            className="w-full py-2 rounded-xl items-center border border-orange-200 bg-orange-50"
+            onPress={sendInterest}
+            disabled={loading}
+          >
+            <Text className="text-orange-700 font-bold text-xs">{loading ? 'Sending...' : 'Send Interest'}</Text>
+          </TouchableOpacity>
         );
 
       case 'not_connected':
@@ -193,16 +207,9 @@ export function ProfileActionButtons({
     case 'interest_sent':
       return (
         <View className="space-y-3">
-          <View className="py-4 rounded-2xl items-center bg-gray-100 border border-gray-200">
-            <Text className="text-gray-500 font-bold text-lg">Interest Sent</Text>
+          <View className="py-4 rounded-2xl items-center bg-green-50 border border-green-200">
+            <Text className="text-green-700 font-bold text-lg">Interest sent</Text>
           </View>
-          <TouchableOpacity
-            className="py-3 rounded-xl items-center border border-gray-300"
-            onPress={cancelInterest}
-            disabled={loading}
-          >
-            <Text className="text-gray-700 font-semibold">Cancel Request</Text>
-          </TouchableOpacity>
         </View>
       );
 
@@ -231,6 +238,17 @@ export function ProfileActionButtons({
             </TouchableOpacity>
           </View>
         </View>
+      );
+
+    case 'interest_declined':
+      return (
+        <TouchableOpacity
+          className="py-4 rounded-2xl items-center shadow-md active:opacity-90 bg-orange-50 border border-orange-200"
+          onPress={sendInterest}
+          disabled={loading}
+        >
+          <Text className="text-orange-700 font-bold text-lg">{loading ? 'Sending...' : 'Send Interest'}</Text>
+        </TouchableOpacity>
       );
 
     case 'not_connected':

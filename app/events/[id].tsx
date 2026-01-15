@@ -79,15 +79,23 @@ export default function EventDetailScreen() {
   const [myInterest, setMyInterest] = useState<'interested' | 'not_interested' | null>(null);
 
   const [draft, setDraft] = useState('');
-  const canComment = useMemo(() => myRsvp !== null || myInterest === 'interested', [myRsvp, myInterest]);
 
   // Profile modal state (tap commenters)
   const [profileVisible, setProfileVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
-  const [attendanceByUser, setAttendanceByUser] = useState<Record<string, 'attending' | 'interested'>>({});
+  const [attendanceByUser, setAttendanceByUser] = useState<Record<string, 'going' | 'not_going' | 'interested'>>({});
   const listRef = useRef<FlatList<CommentRow>>(null);
 
   const isOrganizer = useMemo(() => !!(user?.id && event?.created_by && user.id === event.created_by), [user?.id, event?.created_by]);
+
+  // Allow discussion participation if:
+  // - user is the event organizer (created_by)
+  // - user RSVP'd
+  // - user marked Interested
+  const canComment = useMemo(
+    () => isOrganizer || myRsvp !== null || myInterest === 'interested',
+    [isOrganizer, myRsvp, myInterest],
+  );
 
   const openProfileById = useCallback(async (userId: string) => {
     try {
@@ -184,7 +192,7 @@ export default function EventDetailScreen() {
         );
         if (commenterIds.length > 0) {
           const [{ data: rsvps }, { data: interests, error: interestsErr }] = await Promise.all([
-            supabase.from('club_event_rsvps').select('user_id').eq('event_id', eventId).in('user_id', commenterIds),
+            supabase.from('club_event_rsvps').select('user_id, status').eq('event_id', eventId).in('user_id', commenterIds),
             supabase
               .from('event_interests')
               .select('user_id, status')
@@ -193,9 +201,12 @@ export default function EventDetailScreen() {
               .eq('status', 'interested'),
           ]);
 
-          const map: Record<string, 'attending' | 'interested'> = {};
+          const map: Record<string, 'going' | 'not_going' | 'interested'> = {};
           for (const r of (rsvps || []) as any[]) {
-            if (r?.user_id) map[r.user_id] = 'attending';
+            if (!r?.user_id) continue;
+            if (r.status === 'going') map[r.user_id] = 'going';
+            else if (r.status === 'cant') map[r.user_id] = 'not_going';
+            else if (r.status === 'maybe') map[r.user_id] = 'going'; // treat maybe as going for display
           }
 
           if (!(interestsErr && (interestsErr as any).code === '42P01')) {
@@ -275,21 +286,41 @@ export default function EventDetailScreen() {
   const onRSVP = async () => {
     if (!user?.id || !eventId) return;
     if (!myIsVerified) {
-      Alert.alert('Verification required', 'You need to be verified to attend events.', [
+      Alert.alert('Verification required', 'You need to be verified to RSVP to events.', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Get Verified', onPress: () => router.push('/(settings)/get-verified') },
       ]);
       return;
     }
-    try {
-      const { error } = await supabase
-        .from('club_event_rsvps')
-        .upsert({ event_id: eventId, user_id: user.id, status: 'going' }, { onConflict: 'event_id,user_id' });
-      if (error) throw error;
-      setMyRsvp('going');
-    } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Could not RSVP.');
-    }
+
+    const setRsvp = async (status: 'going' | 'cant') => {
+      try {
+        const { error } = await supabase
+          .from('club_event_rsvps')
+          .upsert({ event_id: eventId, user_id: user.id, status }, { onConflict: 'event_id,user_id' });
+        if (error) throw error;
+        setMyRsvp(status);
+        // Ensure the discussion badge reflects immediately for the current user.
+        setAttendanceByUser((prev) => ({
+          ...prev,
+          [user.id]: status === 'going' ? 'going' : 'not_going',
+        }));
+      } catch (e: any) {
+        Alert.alert('Error', e?.message || 'Could not RSVP.');
+      }
+    };
+
+    // If no RSVP yet, ask. If already set, allow changing.
+    Alert.alert(
+      myRsvp ? 'Update RSVP' : 'RSVP',
+      'Are you going?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Not going', style: 'destructive', onPress: () => setRsvp('cant') },
+        { text: 'Going', onPress: () => setRsvp('going') },
+      ],
+      { cancelable: true },
+    );
   };
 
   const onSend = async () => {
@@ -343,7 +374,8 @@ export default function EventDetailScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 52}
       >
-        <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>
+        {/* Make KAV padding area match the page background so no "gray sheet" appears while keyboard animates */}
+        <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top, backgroundColor: '#FFFFFF' }}>
           <ProfileModal
             visible={profileVisible}
             profile={selectedProfile}
@@ -417,11 +449,23 @@ export default function EventDetailScreen() {
                       {/* RSVP button behavior like City tab: shows verified-gated label */}
                       <TouchableOpacity
                         onPress={onRSVP}
-                        className={`py-4 rounded-2xl items-center ${myIsVerified ? 'bg-white border border-gray-200' : 'bg-gray-100 border border-gray-200'}`}
+                        className={`py-4 rounded-2xl items-center ${
+                          !myIsVerified
+                            ? 'bg-gray-100 border border-gray-200'
+                            : myRsvp === 'going'
+                            ? 'bg-green-50 border border-green-200'
+                            : myRsvp === 'cant'
+                            ? 'bg-red-50 border border-red-200'
+                            : 'bg-white border border-gray-200'
+                        }`}
                         activeOpacity={0.9}
                       >
-                        <Text className={`${myIsVerified ? 'text-ink' : 'text-gray-700'} font-bold text-lg`}>
-                          {myIsVerified ? (myRsvp ? 'RSVP’d (Going)' : 'RSVP (Going)') : 'Get verified to attend'}
+                        <Text
+                          className={`font-bold text-lg ${
+                            !myIsVerified ? 'text-gray-700' : myRsvp === 'going' ? 'text-green-700' : myRsvp === 'cant' ? 'text-red-700' : 'text-ink'
+                          }`}
+                        >
+                          {!myIsVerified ? 'Verify to RSVP' : myRsvp === 'going' ? 'Going' : myRsvp === 'cant' ? 'Not going' : 'RSVP'}
                         </Text>
                       </TouchableOpacity>
 
@@ -523,11 +567,19 @@ export default function EventDetailScreen() {
                         {attendance ? (
                           <View
                             className={`ml-2 px-2 py-0.5 rounded-full ${
-                              attendance === 'attending' ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200'
+                              attendance === 'going'
+                                ? 'bg-green-50 border border-green-200'
+                                : attendance === 'not_going'
+                                ? 'bg-red-50 border border-red-200'
+                                : 'bg-blue-50 border border-blue-200'
                             }`}
                           >
-                            <Text className={`text-[10px] font-bold ${attendance === 'attending' ? 'text-green-700' : 'text-blue-700'}`}>
-                              {attendance === 'attending' ? 'ATTENDING' : 'INTERESTED'}
+                            <Text
+                              className={`text-[10px] font-bold ${
+                                attendance === 'going' ? 'text-green-700' : attendance === 'not_going' ? 'text-red-700' : 'text-blue-700'
+                              }`}
+                            >
+                              {attendance === 'going' ? 'GOING' : attendance === 'not_going' ? 'NOT GOING' : 'INTERESTED'}
                             </Text>
                           </View>
                         ) : null}

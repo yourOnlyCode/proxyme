@@ -7,6 +7,7 @@ export type ConnectionState =
   | 'not_connected'      // No connection, no interests
   | 'interest_sent'       // User has sent interest, waiting for response
   | 'interest_incoming'   // User has received interest, can accept/decline
+  | 'interest_declined'   // They previously declined my interest
   | 'already_connected'; // Users are connected (have connection_id)
 
 export type ConnectionStateData = {
@@ -56,6 +57,8 @@ export function useConnectionState(profile: ProfileData | null): ConnectionState
           .select('id, status')
           .eq('sender_id', user.id)
           .eq('receiver_id', profile.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
           .maybeSingle(),
         
         // Interest they sent to me
@@ -64,11 +67,15 @@ export function useConnectionState(profile: ProfileData | null): ConnectionState
           .select('id, status')
           .eq('sender_id', profile.id)
           .eq('receiver_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
           .maybeSingle(),
       ]);
 
-      const sent = sentInterest.data;
-      const received = receivedInterest.data;
+      // `maybeSingle()` can still error if there are multiple historical rows.
+      // Since we order+limit, that should be rare, but keep this defensive.
+      const sent = sentInterest.error ? null : sentInterest.data;
+      const received = receivedInterest.error ? null : receivedInterest.data;
 
       // If both interests exist and are pending, auto-connect them
       if (sent && received && sent.status === 'pending' && received.status === 'pending') {
@@ -145,6 +152,13 @@ export function useConnectionState(profile: ProfileData | null): ConnectionState
             interestId: null,
             isReceived: false,
           });
+        } else if (sent.status === 'declined') {
+          setStateData({
+            state: 'interest_declined',
+            connectionId: null,
+            interestId: sent.id,
+            isReceived: false,
+          });
         }
       } else {
         // No connection, no interests
@@ -158,7 +172,9 @@ export function useConnectionState(profile: ProfileData | null): ConnectionState
     };
 
     determineState();
-  }, [profile?.id, user?.id, profile?.connection_id]);
+    // Re-check whenever the profile object changes (proxy/city feeds rehydrate with new objects),
+    // so the button can update after a remote accept/decline without requiring navigation.
+  }, [profile, user?.id]);
 
   return stateData;
 }

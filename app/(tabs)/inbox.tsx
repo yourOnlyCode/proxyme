@@ -87,7 +87,7 @@ type UpcomingEvent = {
   event_date: string;
   location: string | null;
   club?: { id: string; name: string; image_url: string | null } | null;
-  kind: 'rsvp' | 'interested';
+  kind: 'rsvp' | 'interested' | 'hosting';
   rsvp_status?: 'going' | 'maybe' | 'cant' | null;
 };
 
@@ -236,40 +236,91 @@ export default function InboxScreen() {
             ? []
             : (((interestsResult as any)?.data || []) as Array<{ event_id: string; status: 'interested' }>);
 
-        const ids = Array.from(new Set<string>([...rsvps.map((r) => r.event_id), ...interests.map((i) => i.event_id)].filter(Boolean)));
+        const nowIso = new Date().toISOString();
+
+        // Host-created future events should always appear here too (even if RSVP row is missing).
+        const { data: hostingEvents } = await supabase
+          .from('club_events')
+          .select('id, club_id, title, event_date, location, club:clubs(id, name, image_url), is_cancelled')
+          .eq('created_by', user.id)
+          .eq('is_cancelled', false as any)
+          .gt('event_date', nowIso)
+          .order('event_date', { ascending: true });
+
+        const ids = Array.from(
+          new Set<string>(
+            [
+              ...rsvps.map((r) => r.event_id),
+              ...interests.map((i) => i.event_id),
+              ...(((hostingEvents as any[]) || []).map((e: any) => e.id) as string[]),
+            ].filter(Boolean),
+          ),
+        );
+
         if (ids.length === 0) {
           setUpcomingEvents([]);
         } else {
-          const nowIso = new Date().toISOString();
           const { data: eventsData } = await supabase
             .from('club_events')
-            .select('id, club_id, title, event_date, location, club:clubs(id, name, image_url)')
+            .select('id, club_id, title, event_date, location, created_by, club:clubs(id, name, image_url), is_cancelled')
             .in('id', ids)
+            .eq('is_cancelled', false as any)
             .gt('event_date', nowIso)
             .order('event_date', { ascending: true });
 
           const rsvpMap = new Map(rsvps.map((r) => [r.event_id, r.status]));
           const interestedSet = new Set(interests.map((i) => i.event_id));
+          const hostingSet = new Set((((hostingEvents as any[]) || []).map((e: any) => e.id) as string[]));
 
-          const upcoming: UpcomingEvent[] = ((eventsData as any[]) || []).map((e: any) => ({
-            id: e.id,
-            club_id: e.club_id,
-            title: e.title,
-            event_date: e.event_date,
-            location: e.location,
-            club: e.club || null,
-            kind: rsvpMap.has(e.id) ? 'rsvp' : 'interested',
-            rsvp_status: rsvpMap.get(e.id) || null,
-          }));
+          // Treat hosting events as "going" for display purposes if RSVP row hasn't been created yet.
+          for (const hid of hostingSet) {
+            if (!rsvpMap.has(hid)) rsvpMap.set(hid, 'going');
+          }
 
-          // Put RSVP'd first, then Interested
+          const upcoming: UpcomingEvent[] = ((eventsData as any[]) || [])
+            .map((e: any) => {
+              const isHosting = e.created_by === user.id || hostingSet.has(e.id);
+              const hasRsvp = rsvpMap.has(e.id);
+              const isInterested = interestedSet.has(e.id);
+              const kind: UpcomingEvent['kind'] = isHosting ? 'hosting' : hasRsvp ? 'rsvp' : 'interested';
+              return {
+                id: e.id,
+                club_id: e.club_id,
+                title: e.title,
+                event_date: e.event_date,
+                location: e.location,
+                club: e.club || null,
+                kind,
+                rsvp_status: rsvpMap.get(e.id) || null,
+              };
+            })
+            // If event_interests table isn't installed, keep RSVP + Hosting only.
+            .filter((e) => e.kind !== 'interested' || interestedSet.size > 0);
+
+          // Order: Hosting first, then RSVP'd, then Interested
+          const kindRank: Record<UpcomingEvent['kind'], number> = { hosting: 0, rsvp: 1, interested: 2 };
           upcoming.sort((a, b) => {
-            if (a.kind !== b.kind) return a.kind === 'rsvp' ? -1 : 1;
+            if (a.kind !== b.kind) return kindRank[a.kind] - kindRank[b.kind];
             return new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
           });
 
           setUpcomingEvents(upcoming);
           setUiCache('inbox.upcoming', upcoming);
+
+          // Best-effort backfill RSVP rows for hosted events (covers DBs that haven't applied the trigger yet).
+          const missingHosted = upcoming
+            .filter((e) => e.kind === 'hosting')
+            .filter((e) => !rsvps.find((r) => r.event_id === e.id))
+            .map((e) => e.id);
+
+          if (missingHosted.length > 0) {
+            void supabase
+              .from('club_event_rsvps')
+              .upsert(
+                missingHosted.map((eventId) => ({ event_id: eventId, user_id: user.id, status: 'going' })),
+                { onConflict: 'event_id,user_id' },
+              );
+          }
         }
       } catch {
         // Don't block inbox if events fetch fails
@@ -756,7 +807,7 @@ export default function InboxScreen() {
   };
 
   return (
-    <View className="flex-1 bg-gray-50">
+    <View className="flex-1 bg-transparent">
       <ProfileModal
         visible={modalVisible}
         profile={selectedProfile}
@@ -859,9 +910,17 @@ export default function InboxScreen() {
                         <Text className="text-ink font-bold flex-1 pr-2" numberOfLines={1}>
                           {ev.title}
                         </Text>
-                        <View className={`px-2 py-1 rounded-full ${ev.kind === 'rsvp' ? 'bg-green-100' : 'bg-blue-100'}`}>
-                          <Text className={`text-xs font-bold ${ev.kind === 'rsvp' ? 'text-green-700' : 'text-blue-700'}`}>
-                            {ev.kind === 'rsvp' ? 'RSVP’D' : 'INTERESTED'}
+                          <View
+                            className={`px-2 py-1 rounded-full ${
+                              ev.kind === 'hosting' ? 'bg-purple-100' : ev.kind === 'rsvp' ? 'bg-green-100' : 'bg-blue-100'
+                            }`}
+                          >
+                          <Text
+                            className={`text-xs font-bold ${
+                              ev.kind === 'hosting' ? 'text-purple-700' : ev.kind === 'rsvp' ? 'text-green-700' : 'text-blue-700'
+                            }`}
+                          >
+                            {ev.kind === 'hosting' ? 'HOSTING' : ev.kind === 'rsvp' ? 'RSVP’D' : 'INTERESTED'}
                           </Text>
                         </View>
                       </View>

@@ -209,11 +209,11 @@ export default function ProfileScreen() {
   const [hoverPhotoIdx, setHoverPhotoIdx] = useState<number | null>(null);
 
   // Hooks must run on every render (no early returns before this point).
-  if (!profile && loading) return <View className="flex-1 bg-slate-50" />;
-  if (!profile) return <View className="flex-1 bg-slate-50" />;
+  if (!profile && loading) return <View className="flex-1 bg-transparent" />;
+  if (!profile) return <View className="flex-1 bg-transparent" />;
 
   return (
-    <View className="flex-1 bg-slate-50" {...settingsSwipeResponder.panHandlers}>
+    <View className="flex-1 bg-transparent" {...settingsSwipeResponder.panHandlers}>
         <ScrollView 
             refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchProfile} />}
             contentContainerStyle={{ paddingBottom: 140 }}
@@ -326,7 +326,11 @@ export default function ProfileScreen() {
                     <View className="flex-row items-center justify-center flex-wrap">
                         <Text className="text-3xl font-extrabold text-slate-900 mr-2 text-center">{profile?.full_name || 'No Name'}</Text>
                         {profile?.is_verified && (
-                            <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" />
+                            <IconSymbol
+                              name="checkmark.seal.fill"
+                              size={24}
+                              color={(profile.referral_count || 0) >= 10 ? '#7C3AED' : '#3B82F6'}
+                            />
                         )}
                     </View>
                     <View className="flex-row items-center justify-center mt-1 flex-wrap">
@@ -429,16 +433,29 @@ export default function ProfileScreen() {
                         </View>
                         {profile.referral_count !== undefined && profile.referral_count !== null && (
                             <View className="flex-row items-center mt-1">
-                                <View className="bg-blue-100 px-2 py-1 rounded-full">
-                                    <Text className="text-blue-700 font-bold text-xs">
-                                        {profile.referral_count} / 3 referrals
+                                {profile.referral_count >= 3 ? (
+                                  <>
+                                    <View className="bg-purple-100 px-2 py-1 rounded-full">
+                                      <Text className="text-purple-700 font-bold text-xs">
+                                        {Math.min(profile.referral_count, 10)} / 10 super user
+                                      </Text>
+                                    </View>
+                                    <Text className="text-slate-600 text-xs ml-2">
+                                      {profile.referral_count >= 10 ? '✓ Purple check unlocked' : `${10 - profile.referral_count} more to level up!`}
                                     </Text>
-                                </View>
-                                <Text className="text-slate-600 text-xs ml-2">
-                                    {profile.referral_count >= 3 
-                                        ? '✓ Verified!' 
-                                        : `${3 - profile.referral_count} more for verification`}
-                                </Text>
+                                  </>
+                                ) : (
+                                  <>
+                                    <View className="bg-blue-100 px-2 py-1 rounded-full">
+                                      <Text className="text-blue-700 font-bold text-xs">
+                                        {profile.referral_count} / 3 referrals
+                                      </Text>
+                                    </View>
+                                    <Text className="text-slate-600 text-xs ml-2">
+                                      {`${3 - profile.referral_count} more for verification`}
+                                    </Text>
+                                  </>
+                                )}
                             </View>
                         )}
                     </GlassCard>

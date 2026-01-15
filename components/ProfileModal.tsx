@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Dimensions, Image, Linking, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { calculateMatchPercentage as calculateMatchPercentageShared } from '../lib/match';
 
 const { width, height } = Dimensions.get('window');
 
@@ -180,15 +181,7 @@ export function ProfileModal({
         });
     }
 
-    const calculateMatchPercentage = () => {
-        if (!myInterests) return 0;
-        const myCatCount = Object.keys(myInterests).length;
-        if (myCatCount === 0) return 0;
-        const maxScore = myCatCount * 16;
-        return Math.round((sharedScore / maxScore) * 100);
-    };
-
-    const matchPercentage = calculateMatchPercentage();
+    const matchPercentage = calculateMatchPercentageShared(myInterests, mergedProfile.detailed_interests);
 
     // Prepare Photos
     const galleryPhotos = fetchedPhotos || mergedProfile.photos || [];
@@ -285,6 +278,11 @@ export function ProfileModal({
                         <View className="flex-row items-center mb-4 flex-wrap">
                             <Text className="text-gray-500 font-medium text-lg mr-3">@{mergedProfile.username}</Text>
                             <SocialIcons links={mergedProfile.social_links} />
+                            {!isTrulyConnected && connectionState.state === 'interest_declined' && (
+                              <View className="ml-3 mt-2 px-2 py-1 rounded-full bg-orange-50 border border-orange-200">
+                                <Text className="text-[11px] font-bold text-orange-700">Previously declined your interest</Text>
+                              </View>
+                            )}
                         </View>
 
                         {/* Connection Stats */}

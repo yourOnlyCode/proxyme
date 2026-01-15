@@ -284,6 +284,9 @@ export default function ClubDetailScreen() {
       setLoading(false);
   };
 
+  // Track current club event IDs so realtime RSVP changes can refresh only when relevant.
+  const clubEventIdsRef = useRef<Set<string>>(new Set());
+
   const subscribeToRSVPs = () => {
       // Clean up existing subscription if any
       if (rsvpSubscriptionRef.current) {
@@ -296,10 +299,13 @@ export default function ClubDetailScreen() {
             event: '*',
             schema: 'public',
             table: 'club_event_rsvps',
-            filter: `club_id=eq.${id}`
-        }, () => {
-            // Refresh events to update RSVP counts
-            fetchEvents();
+            // NOTE: club_event_rsvps does not have club_id; filter client-side by event_id instead.
+        }, (payload) => {
+            const evtId = (payload as any)?.new?.event_id || (payload as any)?.old?.event_id;
+            if (evtId && clubEventIdsRef.current.has(evtId)) {
+                // Refresh events to update RSVP counts
+                fetchEvents();
+            }
         })
         .subscribe();
 
@@ -832,11 +838,12 @@ export default function ClubDetailScreen() {
 
   const fetchEvents = async () => {
       try {
-          // `is_public` is a newer column; fall back if DB hasn't been migrated yet.
+          // `is_public` / `is_cancelled` are newer columns; fall back if DB hasn't been migrated yet.
           const primary = await supabase
             .from('club_events')
-            .select('id, club_id, title, description, event_date, location, created_by, created_at, is_public, image_url')
+            .select('id, club_id, title, description, event_date, location, created_by, created_at, is_public, image_url, is_cancelled')
             .eq('club_id', id)
+            .eq('is_cancelled', false as any)
             .order('event_date', { ascending: true });
 
           let eventsData: any[] | null = primary.data as any[] | null;
@@ -898,21 +905,49 @@ export default function ClubDetailScreen() {
                   const attendees = goingIds.map(uid => attendeeMap.get(uid)).filter(Boolean);
                   const creatorProfile = profilesMap.get(event.created_by) || { id: event.created_by, username: 'Unknown', full_name: null, avatar_url: null, is_verified: false };
 
+                  // Host should always be marked as Going (and show in Upcoming Events)
+                  const hostIsMe = !!(user?.id && event.created_by === user.id);
+                  const hostHasRsvpRow = !!eventRsvps.find((r) => r.user_id === event.created_by);
+                  const effectiveCounts = { ...rsvpData };
+                  if (hostIsMe && !hostHasRsvpRow) {
+                      effectiveCounts.going += 1;
+                  }
+
                   return {
                       ...event,
                       creator: creatorProfile,
                       attendees: attendees.length > 0 ? attendees : [creatorProfile],
                       attendees_count: attendees.length,
                       rsvp_counts: {
-                          going: rsvpData.going,
-                          maybe: rsvpData.maybe,
-                          cant: rsvpData.cant
+                          going: effectiveCounts.going,
+                          maybe: effectiveCounts.maybe,
+                          cant: effectiveCounts.cant
                       },
-                      user_rsvp: rsvpData.userRsvp
+                      user_rsvp: hostIsMe ? 'going' : rsvpData.userRsvp
                   };
               });
               
               setEvents(formattedEvents);
+              clubEventIdsRef.current = new Set(formattedEvents.map((e: any) => e.id));
+
+              // Best-effort backfill: ensure event creator has an RSVP row for existing events
+              // (covers events created before the DB trigger was applied).
+              const hostEventsMissingRsvp = (eventsData || [])
+                .filter((e) => user?.id && e.created_by === user.id)
+                .filter((e) => {
+                  const eventRsvps = (rsvps || []).filter((r) => r.event_id === e.id);
+                  return !eventRsvps.find((r) => r.user_id === e.created_by);
+                })
+                .map((e) => e.id);
+
+              if (user?.id && hostEventsMissingRsvp.length > 0) {
+                  void supabase
+                    .from('club_event_rsvps')
+                    .upsert(
+                      hostEventsMissingRsvp.map((eid) => ({ event_id: eid, user_id: user.id, status: 'going' })),
+                      { onConflict: 'event_id,user_id' },
+                    );
+              }
               
               // Schedule notifications for upcoming events the user hasn't been notified about
               formattedEvents.forEach((event: ClubEvent) => {
@@ -1115,6 +1150,19 @@ export default function ClubDetailScreen() {
   const updateRSVP = async (eventId: string, status: 'going' | 'maybe' | 'cant') => {
       if (!user) return;
 
+      const isHost = !!events.find((e: any) => e.id === eventId && e.created_by === user.id);
+      if (isHost) {
+          // Host is always Going; don't allow changing to Maybe/Can't.
+          if (status !== 'going') {
+              Alert.alert('You’re the host', 'Hosts are automatically marked as Going.');
+          }
+          // Ensure UI reflects Going
+          setEvents((prevEvents) =>
+              prevEvents.map((event: any) => (event.id === eventId ? { ...event, user_rsvp: 'going' } : event)),
+          );
+          return;
+      }
+
       // Optimistically update the UI immediately
       setEvents(prevEvents => {
           return prevEvents.map(event => {
@@ -1165,32 +1213,42 @@ export default function ClubDetailScreen() {
       }
   };
 
-  const deleteEvent = async (eventId: string) => {
+  const cancelEvent = async (eventId: string) => {
       Alert.alert(
-          'Delete Event',
-          'Are you sure you want to delete this event? This action cannot be undone.',
+          'Cancel Event',
+          'This will mark the event as cancelled and hide it from upcoming lists. You can’t undo this yet.',
           [
-              { text: 'Cancel', style: 'cancel' },
+              { text: 'Nevermind', style: 'cancel' },
               {
-                  text: 'Delete',
+                  text: 'Cancel Event',
                   style: 'destructive',
                   onPress: async () => {
                       try {
-                          const { error } = await supabase
+                          // `is_cancelled` is newer; fall back to delete if DB hasn't been migrated yet.
+                          const primary = await supabase
                               .from('club_events')
-                              .delete()
+                              .update({ is_cancelled: true, cancelled_at: new Date().toISOString() } as any)
                               .eq('id', eventId)
                               .eq('club_id', id);
 
-                          if (error) throw error;
+                          if ((primary as any)?.error?.code === '42703') {
+                              const fallback = await supabase
+                                  .from('club_events')
+                                  .delete()
+                                  .eq('id', eventId)
+                                  .eq('club_id', id);
+                              if (fallback.error) throw fallback.error;
+                          } else if (primary.error) {
+                              throw primary.error;
+                          }
 
                           // Refresh events list
                           await fetchEvents();
                           setEventMenuVisible(false);
                           setSelectedEventId(null);
-                          Alert.alert('Success', 'Event deleted successfully');
+                          Alert.alert('Cancelled', 'Event cancelled.');
                       } catch (error: any) {
-                          Alert.alert('Error', error.message || 'Failed to delete event');
+                          Alert.alert('Error', error.message || 'Failed to cancel event');
                       }
                   }
               }
@@ -1758,7 +1816,7 @@ export default function ClubDetailScreen() {
                                     isAdmin={isAdmin}
                                     currentUserId={user?.id}
                                     onEdit={openEditEvent}
-                                    onDelete={deleteEvent}
+                                    onCancel={cancelEvent}
                                     onRSVP={updateRSVP}
                                     onAddToCalendar={addToCalendar}
                                     onViewProfile={viewUserProfile}
@@ -1788,7 +1846,7 @@ export default function ClubDetailScreen() {
                                             isAdmin={isAdmin}
                                             currentUserId={user?.id}
                                             onEdit={openEditEvent}
-                                            onDelete={deleteEvent}
+                                            onCancel={cancelEvent}
                                             onRSVP={updateRSVP}
                                             onAddToCalendar={addToCalendar}
                                             onViewProfile={viewUserProfile}
@@ -2545,15 +2603,15 @@ export default function ClubDetailScreen() {
                 <TouchableOpacity
                   onPress={() => {
                     if (selectedEventId) {
-                      deleteEvent(selectedEventId);
+                      cancelEvent(selectedEventId);
                       setEventMenuVisible(false);
                       setSelectedEventId(null);
                     }
                   }}
                   className="flex-row items-center py-3 px-4"
                 >
-                  <IconSymbol name="trash.fill" size={20} color="#DC2626" />
-                  <Text className="text-red-600 font-semibold ml-3">Delete Event</Text>
+                  <IconSymbol name="xmark.circle.fill" size={20} color="#DC2626" />
+                  <Text className="text-red-600 font-semibold ml-3">Cancel Event</Text>
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>

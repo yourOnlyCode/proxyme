@@ -376,7 +376,7 @@ export default function ClubsScreen() {
   );
 
   return (
-    <View className="flex-1 bg-slate-50 px-4" style={{ paddingTop: insets.top + 12 }}>
+    <View className="flex-1 bg-transparent px-4" style={{ paddingTop: insets.top + 12 }}>
         <View className="flex-row justify-between items-center mb-4">
             <View className="w-10" />
             <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular' }}>Social Clubs</Text>

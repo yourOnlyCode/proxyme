@@ -11,7 +11,7 @@ interface ClubEventsTabProps {
     user: any;
     onSetEventModalVisible: (visible: boolean) => void;
     onOpenEditEvent: (event: ClubEvent) => void;
-    onDeleteEvent: (eventId: string) => void;
+    onCancelEvent: (eventId: string) => void;
     onUpdateRSVP: (eventId: string, status: 'going' | 'maybe' | 'cant') => void;
     onAddToCalendar: (event: ClubEvent) => void;
     onViewUserProfile: (userId: string) => void;
@@ -23,7 +23,7 @@ export default function ClubEventsTab({
     user,
     onSetEventModalVisible,
     onOpenEditEvent,
-    onDeleteEvent,
+    onCancelEvent,
     onUpdateRSVP,
     onAddToCalendar,
     onViewUserProfile
@@ -52,7 +52,7 @@ export default function ClubEventsTab({
                         isAdmin={isAdmin}
                         currentUserId={user?.id}
                         onEdit={onOpenEditEvent}
-                        onDelete={onDeleteEvent}
+                        onCancel={onCancelEvent}
                         onRSVP={onUpdateRSVP}
                         onAddToCalendar={onAddToCalendar}
                         onViewProfile={onViewUserProfile}
