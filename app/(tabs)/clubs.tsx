@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { supabase } from '../../lib/supabase';
+import { getUiCache, loadUiCache, setUiCache } from '../../lib/uiCache';
 
 type Club = {
   id: string;
@@ -26,9 +27,10 @@ export default function ClubsScreen() {
   const { address } = useProxyLocation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [myClubs, setMyClubs] = useState<Club[]>([]);
-  const [cityClubs, setCityClubs] = useState<Club[]>([]); // Discovery
-  const [loading, setLoading] = useState(true);
+  const [myClubs, setMyClubs] = useState<Club[]>(() => getUiCache<Club[]>('clubs.my') ?? []);
+  const [cityClubs, setCityClubs] = useState<Club[]>(() => getUiCache<Club[]>('clubs.city') ?? []); // Discovery
+  const [loading, setLoading] = useState(myClubs.length === 0 && cityClubs.length === 0); // initial-only loader
+  const [refreshing, setRefreshing] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [tab, setTab] = useState<'my' | 'discover'>('my');
 
@@ -45,9 +47,34 @@ export default function ClubsScreen() {
     }
   }, [user, address?.city, tab]);
 
+  // If we mounted with empty memory-cache (e.g., app cold start), try local storage hydrate.
+  useEffect(() => {
+    if (myClubs.length === 0) {
+      loadUiCache<Club[]>('clubs.my').then((cached) => {
+        if (cached && cached.length > 0) {
+          setMyClubs(cached);
+          setLoading(false);
+        }
+      });
+    }
+    if (cityClubs.length === 0) {
+      loadUiCache<Club[]>('clubs.city').then((cached) => {
+        if (cached && cached.length > 0) {
+          setCityClubs(cached);
+          setLoading(false);
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fetchClubs = async () => {
     if (!user) return;
-    setLoading(true);
+    if ((tab === 'my' && myClubs.length > 0) || (tab === 'discover' && cityClubs.length > 0)) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
 
     try {
         if (tab === 'my') {
@@ -93,6 +120,7 @@ export default function ClubsScreen() {
                 is_member: true
             }));
             setMyClubs(clubs);
+            setUiCache('clubs.my', clubs);
         } else {
             // Discover clubs in city
             if (!address?.city) {
@@ -139,11 +167,13 @@ export default function ClubsScreen() {
             const clubs = (data || []).filter((c: any) => !myClubIds.has(c.id));
             
             setCityClubs(clubs);
+            setUiCache('clubs.city', clubs);
         }
     } catch (e) {
         console.error(e);
     } finally {
         setLoading(false);
+        setRefreshing(false);
     }
   };
 
@@ -380,7 +410,7 @@ export default function ClubsScreen() {
             data={tab === 'my' ? myClubs : cityClubs}
             renderItem={renderClubItem}
             keyExtractor={item => item.id}
-            refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchClubs} />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchClubs} />}
             ListEmptyComponent={
                 <View className="items-center mt-20 opacity-50">
                     <IconSymbol name="person.3.fill" size={48} color="#CBD5E0" />

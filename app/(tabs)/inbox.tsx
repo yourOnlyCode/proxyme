@@ -1,11 +1,12 @@
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, Image, Modal, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
+import { getUiCache, loadUiCache, setUiCache } from '../../lib/uiCache';
 
 type Interest = {
   id: string;
@@ -50,6 +51,7 @@ type Notification = {
     | 'event_rsvp'
     | 'event_rsvp_update'
     | 'event_update'
+    | 'event_organizer_update'
     | 'event_comment'
     | 'event_reminder'
     | 'event_cancelled';
@@ -92,14 +94,42 @@ type UpcomingEvent = {
 export default function InboxScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const [items, setItems] = useState<InboxItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<InboxItem[]>(() => getUiCache<InboxItem[]>('inbox.items') ?? []);
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>(() => getUiCache<UpcomingEvent[]>('inbox.upcoming') ?? []);
+  const [loading, setLoading] = useState(items.length === 0); // initial-only loader
+  const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
   const [selectedInterestId, setSelectedInterestId] = useState<string | null>(null);
   const [upcomingVisible, setUpcomingVisible] = useState(false);
-  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const router = useRouter();
+
+  // Avoid stale closures inside subscriptions/focus effects.
+  const hasItemsRef = useRef(items.length > 0);
+  useEffect(() => {
+    hasItemsRef.current = items.length > 0;
+  }, [items.length]);
+
+  // If we mounted with empty memory-cache (e.g., app cold start), try fast local storage hydrate
+  // so we still don't show a blank screen.
+  useEffect(() => {
+    if (items.length === 0) {
+      loadUiCache<InboxItem[]>('inbox.items').then((cached) => {
+        if (cached && cached.length > 0) {
+          setItems(cached);
+          setLoading(false);
+        }
+      });
+    }
+    if (upcomingEvents.length === 0) {
+      loadUiCache<UpcomingEvent[]>('inbox.upcoming').then((cached) => {
+        if (cached && cached.length > 0) {
+          setUpcomingEvents(cached);
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -114,7 +144,7 @@ export default function InboxScreen() {
           table: 'messages',
           filter: `receiver_id=eq.${user.id}`
         }, () => {
-          fetchData();
+          fetchData({ silent: true });
         })
         .on('postgres_changes', {
           event: '*',
@@ -122,7 +152,7 @@ export default function InboxScreen() {
           table: 'messages',
           filter: `sender_id=eq.${user.id}`
         }, () => {
-          fetchData();
+          fetchData({ silent: true });
         })
         .on('postgres_changes', {
           event: 'INSERT',
@@ -130,7 +160,7 @@ export default function InboxScreen() {
           table: 'notifications',
           filter: `user_id=eq.${user.id}`
         }, () => {
-          fetchData();
+          fetchData({ silent: true });
         })
         .subscribe();
 
@@ -144,14 +174,21 @@ export default function InboxScreen() {
   useFocusEffect(
     useCallback(() => {
       if (user) {
-        fetchData();
+        fetchData({ silent: true });
       }
     }, [user])
   );
 
-  const fetchData = async () => {
+  const fetchData = async (opts?: { silent?: boolean }) => {
     if (!user) return;
-    setLoading(true);
+    const silent = !!opts?.silent;
+    if (silent) {
+      // keep the list visible; just refresh in background
+    } else if (hasItemsRef.current) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
 
     try {
       // Fetch pending requests + optimized conversations + notifications in parallel
@@ -232,6 +269,7 @@ export default function InboxScreen() {
           });
 
           setUpcomingEvents(upcoming);
+          setUiCache('inbox.upcoming', upcoming);
         }
       } catch {
         // Don't block inbox if events fetch fails
@@ -317,10 +355,12 @@ export default function InboxScreen() {
       ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
       setItems(inboxItems);
+      setUiCache('inbox.items', inboxItems);
     } catch (error) {
       console.error('Error fetching inbox:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -510,6 +550,8 @@ export default function InboxScreen() {
             return { name: 'sparkles' as const, color: '#2563EB' };
           case 'event_update':
             return { name: 'calendar.badge.clock' as const, color: '#10B981' };
+          case 'event_organizer_update':
+            return { name: 'megaphone.fill' as const, color: '#2563EB' };
           case 'event_comment':
             return { name: 'bubble.left.and.bubble.right.fill' as const, color: '#3B82F6' };
           case 'event_rsvp':
@@ -604,6 +646,7 @@ export default function InboxScreen() {
         // Navigate based on notification type
         if (
           (notif.type === 'event_update' ||
+            notif.type === 'event_organizer_update' ||
             notif.type === 'event_comment' ||
             notif.type === 'event_rsvp' ||
             notif.type === 'event_rsvp_update' ||
@@ -758,7 +801,7 @@ export default function InboxScreen() {
         </View>
       </TouchableOpacity>
 
-      {loading ? (
+      {loading && items.length === 0 ? (
         <View className="flex-1 items-center justify-center">
           <Text className="text-gray-400 mt-4">Loading inbox...</Text>
         </View>
@@ -766,7 +809,7 @@ export default function InboxScreen() {
         <FlatList
           data={items}
           keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchData()} />}
           renderItem={renderItem}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
           ListEmptyComponent={

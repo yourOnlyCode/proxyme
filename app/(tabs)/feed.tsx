@@ -1,7 +1,7 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, FlatList, Image, Modal, PanResponder, RefreshControl, ScrollView, Text, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
@@ -17,6 +17,20 @@ type StatusItem = {
     created_at: string;
     expires_at: string;
 };
+
+// Fast URL resolver + cache (avoids a blank frame on mount and speeds up next/prev taps).
+const publicUrlCache = new Map<string, string>();
+function resolvePublicAvatarUrl(path: string | null): string | null {
+    if (!path) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    const cleaned = path.includes('public/avatars/') ? path.split('public/avatars/')[1] : path;
+    const cached = publicUrlCache.get(cleaned);
+    if (cached) return cached;
+    const { data } = supabase.storage.from('avatars').getPublicUrl(cleaned);
+    const url = data?.publicUrl ?? null;
+    if (url) publicUrlCache.set(cleaned, url);
+    return url;
+}
 
 type FeedProfile = ProfileData & {
   dist_meters: number;
@@ -152,7 +166,13 @@ export default function CityFeedScreen() {
       });
 
       if (error) {
-        console.error('Error fetching city feed:', error);
+        console.error('Error fetching city feed:', {
+          message: (error as any)?.message,
+          details: (error as any)?.details,
+          hint: (error as any)?.hint,
+          code: (error as any)?.code,
+          raw: error,
+        });
         setFeed([]);
       } else if (data) {
         // 1. Filter: Only show users with active statuses
@@ -944,6 +964,23 @@ function CityFeedCard({
     const currentStatus = isShowingProfilePrompt ? null : statuses[activeIndex];
     const lastImageStatus = statuses.filter(s => s.type === 'image').pop();
 
+    // Prefetch the next image(s) so tapping "next" feels instant.
+    useEffect(() => {
+        const prefetchAt = (idx: number) => {
+            const st = statuses[idx];
+            if (!st || st.type !== 'image' || !st.content) return;
+            const url = resolvePublicAvatarUrl(st.content);
+            if (url) {
+                // best-effort; ignore failures
+                void Image.prefetch(url);
+            }
+        };
+
+        // Preload next 2 images (if any)
+        prefetchAt(activeIndex + 1);
+        prefetchAt(activeIndex + 2);
+    }, [activeIndex, statuses]);
+
     // Animate progress bar for current status
     useEffect(() => {
         if (isPaused || isShowingProfilePrompt || activeIndex >= statuses.length || !progressAnimsRef.current[activeIndex]) {
@@ -1368,18 +1405,8 @@ const getTheme = (goal?: string) => {
 };
 
 function FeedImage({ path, containerHeight, containerWidth }: { path: string | null, containerHeight?: number, containerWidth?: number }) {
-    const [url, setUrl] = useState<string | null>(null);
+    const url = useMemo(() => resolvePublicAvatarUrl(path), [path]);
     const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
-  
-    useEffect(() => {
-      if (!path) return;
-      if (path.startsWith('http')) {
-          setUrl(path);
-          return;
-      }
-      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
-      setUrl(data.publicUrl);
-    }, [path]);
 
     // Get image dimensions when URL loads (only for main feed images, not avatars)
     useEffect(() => {

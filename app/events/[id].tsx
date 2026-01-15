@@ -34,6 +34,13 @@ type CommentRow = {
   } | null;
 };
 
+type OrganizerUpdateRow = {
+  event_id: string;
+  created_by: string;
+  content: string;
+  updated_at: string;
+};
+
 function Avatar({ path, size = 40 }: { path: string | null; size?: number }) {
   const [url, setUrl] = useState<string | null>(null);
 
@@ -64,6 +71,8 @@ export default function EventDetailScreen() {
   const [loading, setLoading] = useState(true); // initial load only
   const [event, setEvent] = useState<EventRow | null>(null);
   const [comments, setComments] = useState<CommentRow[]>([]);
+  const [organizerUpdate, setOrganizerUpdate] = useState<OrganizerUpdateRow | null>(null);
+  const [organizerDraft, setOrganizerDraft] = useState('');
 
   const [myIsVerified, setMyIsVerified] = useState(false);
   const [myRsvp, setMyRsvp] = useState<'going' | 'maybe' | 'cant' | null>(null);
@@ -77,6 +86,8 @@ export default function EventDetailScreen() {
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
   const [attendanceByUser, setAttendanceByUser] = useState<Record<string, 'attending' | 'interested'>>({});
   const listRef = useRef<FlatList<CommentRow>>(null);
+
+  const isOrganizer = useMemo(() => !!(user?.id && event?.created_by && user.id === event.created_by), [user?.id, event?.created_by]);
 
   const openProfileById = useCallback(async (userId: string) => {
     try {
@@ -147,6 +158,24 @@ export default function EventDetailScreen() {
         .order('created_at', { ascending: true });
 
       setComments(((comm as any[]) || []) as any);
+
+      // Organizer update (best-effort; table may not exist yet on older DBs)
+      try {
+        const { data: upd, error: updErr } = await supabase
+          .from('event_updates')
+          .select('event_id, created_by, content, updated_at')
+          .eq('event_id', eventId)
+          .maybeSingle();
+        if (updErr && (updErr as any).code === '42P01') {
+          setOrganizerUpdate(null);
+          setOrganizerDraft('');
+        } else {
+          setOrganizerUpdate((upd as any) || null);
+          setOrganizerDraft(((upd as any)?.content as string) || '');
+        }
+      } catch {
+        // ignore
+      }
 
       // Attendance state for commenters (Attending / Interested)
       try {
@@ -288,6 +317,25 @@ export default function EventDetailScreen() {
     }
   };
 
+  const onSaveOrganizerUpdate = async () => {
+    if (!user?.id || !eventId || !isOrganizer) return;
+    const content = organizerDraft.trim();
+    if (!content) {
+      Alert.alert('Update required', 'Write a short organizer update first.');
+      return;
+    }
+    try {
+      Keyboard.dismiss();
+      const { error } = await supabase
+        .from('event_updates')
+        .upsert({ event_id: eventId, created_by: user.id, content }, { onConflict: 'event_id' });
+      if (error) throw error;
+      fetchAll({ silent: true });
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not post organizer update.');
+    }
+  };
+
   return (
     <KeyboardDismissWrapper>
       <KeyboardAvoidingView
@@ -397,6 +445,53 @@ export default function EventDetailScreen() {
                       </View>
                     </View>
                   </View>
+
+                  {/* Organizer update (highlighted) */}
+                  {organizerUpdate?.content ? (
+                    <View className="bg-blue-50 border border-blue-200 rounded-3xl px-5 py-4 mb-4 shadow-sm">
+                      <View className="flex-row items-center mb-2">
+                        <View className="w-9 h-9 rounded-full bg-blue-600 items-center justify-center mr-3">
+                          <IconSymbol name="megaphone.fill" size={16} color="#fff" />
+                        </View>
+                        <View className="flex-1">
+                          <Text className="text-ink font-bold text-base">Organizer update</Text>
+                          <Text className="text-gray-600 text-xs">
+                            {organizerUpdate.updated_at ? new Date(organizerUpdate.updated_at).toLocaleString() : ''}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text className="text-gray-800 leading-6">{organizerUpdate.content}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Organizer editor (only event creator) */}
+                  {isOrganizer ? (
+                    <View className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden mb-4">
+                      <View className="p-5 border-b border-gray-100">
+                        <Text className="text-ink font-bold text-lg">Organizer update</Text>
+                        <Text className="text-gray-500 text-xs mt-1">
+                          Only you (the event organizer) can post this highlighted note. Followers will be notified.
+                        </Text>
+                      </View>
+                      <View className="p-5">
+                        <TextInput
+                          value={organizerDraft}
+                          onChangeText={setOrganizerDraft}
+                          placeholder="Add a short update (parking info, schedule change, bring a friend...)"
+                          className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-ink"
+                          style={{ minHeight: 90, textAlignVertical: 'top' }}
+                          multiline
+                        />
+                        <TouchableOpacity
+                          onPress={onSaveOrganizerUpdate}
+                          className="mt-3 py-3 rounded-2xl items-center bg-blue-600"
+                          activeOpacity={0.9}
+                        >
+                          <Text className="text-white font-bold">{organizerUpdate ? 'Update note' : 'Post note'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
 
                   <View className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
                     <View className="p-5 border-b border-gray-100">

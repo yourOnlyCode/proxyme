@@ -1188,6 +1188,7 @@ BEGIN
           'message',
           'event_rsvp',
           'event_update',
+          'event_organizer_update',
           'event_reminder',
           'event_cancelled',
           'event_rsvp_update',
@@ -1314,6 +1315,163 @@ CREATE TRIGGER trigger_notify_event_comment_to_followers
   AFTER INSERT ON public.event_comments
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_event_comment_to_followers();
+
+
+-- ==========================================
+-- 5c. Organizer Updates (highlighted note on event page)
+-- ==========================================
+
+-- A single highlighted organizer note per event (overwrites over time).
+CREATE TABLE IF NOT EXISTS public.event_updates (
+  event_id UUID PRIMARY KEY REFERENCES public.club_events(id) ON DELETE CASCADE,
+  created_by UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.event_updates ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view organizer updates" ON public.event_updates;
+DROP POLICY IF EXISTS "Organizer can create update" ON public.event_updates;
+DROP POLICY IF EXISTS "Organizer can update update" ON public.event_updates;
+DROP POLICY IF EXISTS "Organizer can delete update" ON public.event_updates;
+
+-- View organizer update if:
+-- - The event is public, OR
+-- - The viewer is an accepted club member (for non-public / club-only events).
+CREATE POLICY "Users can view organizer updates"
+  ON public.event_updates FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.club_events e
+      WHERE e.id = event_updates.event_id
+        AND (
+          e.is_public = true
+          OR EXISTS (
+            SELECT 1
+            FROM public.club_members cm
+            WHERE cm.club_id = e.club_id
+              AND cm.user_id = auth.uid()
+              AND cm.status = 'accepted'
+          )
+        )
+    )
+  );
+
+-- Only the event creator may create/update/delete the organizer update.
+CREATE POLICY "Organizer can create update"
+  ON public.event_updates FOR INSERT
+  WITH CHECK (
+    created_by = auth.uid()
+    AND EXISTS (
+      SELECT 1
+      FROM public.club_events e
+      WHERE e.id = event_updates.event_id
+        AND e.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "Organizer can update update"
+  ON public.event_updates FOR UPDATE
+  USING (
+    created_by = auth.uid()
+    AND EXISTS (
+      SELECT 1
+      FROM public.club_events e
+      WHERE e.id = event_updates.event_id
+        AND e.created_by = auth.uid()
+    )
+  )
+  WITH CHECK (
+    created_by = auth.uid()
+    AND EXISTS (
+      SELECT 1
+      FROM public.club_events e
+      WHERE e.id = event_updates.event_id
+        AND e.created_by = auth.uid()
+    )
+  );
+
+CREATE POLICY "Organizer can delete update"
+  ON public.event_updates FOR DELETE
+  USING (
+    created_by = auth.uid()
+    AND EXISTS (
+      SELECT 1
+      FROM public.club_events e
+      WHERE e.id = event_updates.event_id
+        AND e.created_by = auth.uid()
+    )
+  );
+
+CREATE OR REPLACE FUNCTION public.set_event_updates_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_set_event_updates_updated_at ON public.event_updates;
+CREATE TRIGGER trigger_set_event_updates_updated_at
+  BEFORE UPDATE ON public.event_updates
+  FOR EACH ROW
+  EXECUTE FUNCTION public.set_event_updates_updated_at();
+
+-- Notify all RSVP'd (going/maybe) + Interested users when organizer posts/edits an update.
+CREATE OR REPLACE FUNCTION public.notify_event_organizer_update_to_followers()
+RETURNS TRIGGER AS $$
+DECLARE
+  event_title text;
+  club_id uuid;
+  follower_id uuid;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT e.title, e.club_id INTO event_title, club_id
+  FROM public.club_events e
+  WHERE e.id = NEW.event_id;
+
+  FOR follower_id IN
+    (
+      SELECT DISTINCT x.user_id
+      FROM (
+        SELECT r.user_id
+        FROM public.club_event_rsvps r
+        WHERE r.event_id = NEW.event_id
+          AND r.status IN ('going', 'maybe')
+        UNION
+        SELECT i.user_id
+        FROM public.event_interests i
+        WHERE i.event_id = NEW.event_id
+          AND i.status = 'interested'
+      ) x
+      WHERE x.user_id <> NEW.created_by
+    )
+  LOOP
+    INSERT INTO public.notifications (user_id, type, title, body, data)
+    VALUES (
+      follower_id,
+      'event_organizer_update',
+      'Organizer update',
+      'New update for "' || COALESCE(event_title, 'an event') || '".',
+      jsonb_build_object('event_id', NEW.event_id, 'club_id', club_id)
+    );
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_event_organizer_update_to_followers ON public.event_updates;
+CREATE TRIGGER trigger_notify_event_organizer_update_to_followers
+  AFTER INSERT OR UPDATE ON public.event_updates
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_event_organizer_update_to_followers();
 
 
 -- ==========================================
@@ -1645,13 +1803,13 @@ begin
             1 + 
             (
               select count(*) * 5
-              from jsonb_array_elements_text(p.detailed_interests -> key) val1
-              join jsonb_array_elements_text(my_details -> key) val2 on lower(trim(val1)) = lower(trim(val2))
+              from jsonb_array_elements_text(coalesce(p.detailed_interests -> key, '[]'::jsonb)) val1
+              join jsonb_array_elements_text(coalesce(my_details -> key, '[]'::jsonb)) val2 on lower(trim(val1)) = lower(trim(val2))
             )
           else 0
         end
       ), 0)::int
-      from jsonb_object_keys(p.detailed_interests) as key
+      from jsonb_object_keys(coalesce(p.detailed_interests, '{}'::jsonb)) as key
     ) as shared_interests_count,
     p.city,
     p.state,
