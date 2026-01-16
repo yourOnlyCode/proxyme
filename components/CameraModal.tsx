@@ -1,8 +1,9 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, Image, Modal, PanResponder, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Easing, Image, KeyboardAvoidingView, Modal, PanResponder, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { State, TapGestureHandler } from 'react-native-gesture-handler';
 
 const getScreenDimensions = () => {
@@ -13,13 +14,13 @@ const getScreenDimensions = () => {
 export function CameraModal({ 
     visible, 
     onClose, 
-    onPhotoTaken,
+    onSendStatus,
     slideFromRight = false,
     source = 'status' // 'proxy' | 'status'
 }: { 
     visible: boolean; 
     onClose: () => void; 
-    onPhotoTaken: (uri: string) => void;
+    onSendStatus: (uri: string, caption: string) => Promise<void>;
     slideFromRight?: boolean;
     source?: 'proxy' | 'status';
 }) {
@@ -31,6 +32,8 @@ export function CameraModal({
     const [permission, requestPermission] = useCameraPermissions();
     const cameraRef = useRef<CameraView>(null);
     const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+    const [caption, setCaption] = useState('');
+    const [sending, setSending] = useState(false);
     const slideAnim = useRef(new Animated.Value(0)).current;
     const swipeAnim = useRef(new Animated.Value(0)).current;
     const isClosing = useRef(false);
@@ -76,6 +79,7 @@ export function CameraModal({
         if (visible) {
             swipeAnim.setValue(0);
             isClosing.current = false;
+            setCaption('');
         }
     }, [visible, slideFromRight, SCREEN_WIDTH]);
 
@@ -201,6 +205,21 @@ export function CameraModal({
                         <Text className="text-white text-lg font-bold mb-4 text-center">
                             Camera permission is required
                         </Text>
+                        <TouchableOpacity
+                            onPress={async () => {
+                                const result = await ImagePicker.launchImageLibraryAsync({
+                                    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                    allowsEditing: false,
+                                    quality: 0.9,
+                                });
+                                if (!result.canceled) {
+                                    setCapturedPhoto(result.assets[0].uri);
+                                }
+                            }}
+                            className="bg-white/20 px-6 py-3 rounded-full mb-3"
+                        >
+                            <Text className="text-white font-bold">Select from Device</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity 
                             onPress={requestPermission}
                             className="bg-white px-6 py-3 rounded-full"
@@ -223,6 +242,21 @@ export function CameraModal({
                     <Text className="text-white text-lg font-bold mb-4 text-center">
                         Camera permission is required
                     </Text>
+                    <TouchableOpacity
+                        onPress={async () => {
+                            const result = await ImagePicker.launchImageLibraryAsync({
+                                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                allowsEditing: false,
+                                quality: 0.9,
+                            });
+                            if (!result.canceled) {
+                                setCapturedPhoto(result.assets[0].uri);
+                            }
+                        }}
+                        className="bg-white/20 px-6 py-3 rounded-full mb-3"
+                    >
+                        <Text className="text-white font-bold">Select from Device</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity 
                         onPress={requestPermission}
                         className="bg-white px-6 py-3 rounded-full"
@@ -303,6 +337,7 @@ export function CameraModal({
                         finalUri = manipulated.uri;
                     }
                     setCapturedPhoto(finalUri);
+                    setCaption('');
                 }
             } catch (error) {
                 console.error('Error taking picture:', error);
@@ -310,11 +345,19 @@ export function CameraModal({
         }
     };
 
-    const handleUsePhoto = () => {
-        if (capturedPhoto) {
-            onPhotoTaken(capturedPhoto);
+    const handleSendStatus = async () => {
+        if (!capturedPhoto || sending) return;
+        setSending(true);
+        try {
+            await onSendStatus(capturedPhoto, caption.trim());
             setCapturedPhoto(null);
+            setCaption('');
             onClose();
+        } catch (error) {
+            // Provider handles toast; keep modal open so user can retry.
+            console.error('Failed to send status:', error);
+        } finally {
+            setSending(false);
         }
     };
 
@@ -330,12 +373,66 @@ export function CameraModal({
                         className="flex-1 bg-black"
                         style={{ transform: [{ translateX: slideAnim }] }}
                     >
+                        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                            <Image 
+                                source={{ uri: capturedPhoto }} 
+                                style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+                                resizeMode="contain"
+                            />
+                            <View className="absolute bottom-0 left-0 right-0 bg-black/70 p-6 pb-12">
+                                <TextInput
+                                    value={caption}
+                                    onChangeText={setCaption}
+                                    placeholder="Write a caption..."
+                                    placeholderTextColor="rgba(255,255,255,0.6)"
+                                    multiline
+                                    style={{ color: 'white' }}
+                                    className="bg-white/15 border border-white/15 rounded-2xl px-4 py-3 mb-4"
+                                />
+                                <View className="flex-row justify-center">
+                                    <TouchableOpacity 
+                                        onPress={handleRetake}
+                                        className="bg-white/20 px-6 py-3 rounded-full mr-6"
+                                    >
+                                        <Text className="text-white font-bold">Retake</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        onPress={handleSendStatus}
+                                        disabled={sending}
+                                        className="bg-white px-6 py-3 rounded-full"
+                                    >
+                                        {sending ? (
+                                            <ActivityIndicator color="#000" />
+                                        ) : (
+                                            <Text className="text-black font-bold">Send Status</Text>
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </KeyboardAvoidingView>
+                    </Animated.View>
+                </Modal>
+            );
+        }
+        return (
+            <Modal visible={visible} animationType="none" transparent>
+                <View className="flex-1 bg-black">
+                    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                         <Image 
                             source={{ uri: capturedPhoto }} 
-                            style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+                            style={{ width: Math.max(Number(SCREEN_WIDTH) || 0, 1), height: Math.max(Number(SCREEN_HEIGHT) || 0, 1) }}
                             resizeMode="contain"
                         />
-                        <View className="absolute bottom-0 left-0 right-0 bg-black/60 p-6 pb-12">
+                        <View className="absolute bottom-0 left-0 right-0 bg-black/70 p-6 pb-12">
+                            <TextInput
+                                value={caption}
+                                onChangeText={setCaption}
+                                placeholder="Write a caption..."
+                                placeholderTextColor="rgba(255,255,255,0.6)"
+                                multiline
+                                style={{ color: 'white' }}
+                                className="bg-white/15 border border-white/15 rounded-2xl px-4 py-3 mb-4"
+                            />
                             <View className="flex-row justify-center">
                                 <TouchableOpacity 
                                     onPress={handleRetake}
@@ -344,41 +441,19 @@ export function CameraModal({
                                     <Text className="text-white font-bold">Retake</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity 
-                                    onPress={handleUsePhoto}
+                                    onPress={handleSendStatus}
+                                    disabled={sending}
                                     className="bg-white px-6 py-3 rounded-full"
                                 >
-                                    <Text className="text-black font-bold">Use Photo</Text>
+                                    {sending ? (
+                                        <ActivityIndicator color="#000" />
+                                    ) : (
+                                        <Text className="text-black font-bold">Send Status</Text>
+                                    )}
                                 </TouchableOpacity>
                             </View>
                         </View>
-                    </Animated.View>
-                </Modal>
-            );
-        }
-        return (
-            <Modal visible={visible} animationType="none" transparent>
-                <View className="flex-1 bg-black">
-                    <Image 
-                        source={{ uri: capturedPhoto }} 
-                        style={{ width: Math.max(Number(SCREEN_WIDTH) || 0, 1), height: Math.max(Number(SCREEN_HEIGHT) || 0, 1) }}
-                        resizeMode="contain"
-                    />
-                    <View className="absolute bottom-0 left-0 right-0 bg-black/60 p-6 pb-12">
-                        <View className="flex-row justify-center">
-                            <TouchableOpacity 
-                                onPress={handleRetake}
-                                className="bg-white/20 px-6 py-3 rounded-full mr-6"
-                            >
-                                <Text className="text-white font-bold">Retake</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                onPress={handleUsePhoto}
-                                className="bg-white px-6 py-3 rounded-full"
-                            >
-                                <Text className="text-black font-bold">Use Photo</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
         );
@@ -419,30 +494,45 @@ export function CameraModal({
                     </TapGestureHandler>
 
                     {/* Bottom Controls - Reorganized */}
-                    <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
-                        {/* X Button - Left of capture */}
-                        <TouchableOpacity 
-                            onPress={onClose}
-                            className="bg-black/50 p-3 rounded-full mr-8"
-                        >
+                    <View className="absolute bottom-12 left-0 right-0 flex-row items-end justify-between px-6">
+                        {/* Close */}
+                        <TouchableOpacity onPress={onClose} className="bg-black/50 p-3 rounded-full">
                             <IconSymbol name="xmark" size={24} color="white" />
                         </TouchableOpacity>
-                        
-                        {/* Capture Button - Center */}
-                        <TouchableOpacity 
+
+                        {/* Capture */}
+                        <TouchableOpacity
                             onPress={takePicture}
                             className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 items-center justify-center"
                         >
                             <View className="w-16 h-16 rounded-full bg-white" />
                         </TouchableOpacity>
-                        
-                        {/* Front/Back Toggle - Right of capture */}
-                        <TouchableOpacity 
-                            onPress={toggleFacing}
-                            className="bg-black/50 p-3 rounded-full ml-8"
-                        >
-                            <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
-                        </TouchableOpacity>
+
+                        {/* Bottom-right actions */}
+                        <View className="items-end">
+                            {/* Upload square (device library) */}
+                            <TouchableOpacity
+                                onPress={async () => {
+                                    const result = await ImagePicker.launchImageLibraryAsync({
+                                        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                        allowsEditing: false,
+                                        quality: 0.9,
+                                    });
+                                    if (!result.canceled) {
+                                        setCapturedPhoto(result.assets[0].uri);
+                                        setCaption('');
+                                    }
+                                }}
+                                className="w-14 h-14 rounded-2xl bg-black/50 border border-white/15 items-center justify-center mb-3"
+                            >
+                                <IconSymbol name="photo" size={22} color="white" />
+                            </TouchableOpacity>
+
+                            {/* Camera flip */}
+                            <TouchableOpacity onPress={toggleFacing} className="bg-black/50 p-3 rounded-full">
+                                <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </Animated.View>
             </Modal>
@@ -483,30 +573,45 @@ export function CameraModal({
                 </TapGestureHandler>
 
                 {/* Bottom Controls - Reorganized */}
-                <View className="absolute bottom-12 left-0 right-0 flex-row justify-center items-center px-4">
-                    {/* X Button - Left of capture */}
-                    <TouchableOpacity 
-                        onPress={onClose}
-                        className="bg-black/50 p-3 rounded-full mr-8"
-                    >
+                <View className="absolute bottom-12 left-0 right-0 flex-row items-end justify-between px-6">
+                    {/* Close */}
+                    <TouchableOpacity onPress={onClose} className="bg-black/50 p-3 rounded-full">
                         <IconSymbol name="xmark" size={24} color="white" />
                     </TouchableOpacity>
-                    
-                    {/* Capture Button - Center */}
-                    <TouchableOpacity 
+
+                    {/* Capture */}
+                    <TouchableOpacity
                         onPress={takePicture}
                         className="w-20 h-20 rounded-full bg-white border-4 border-gray-300 items-center justify-center"
                     >
                         <View className="w-16 h-16 rounded-full bg-white" />
                     </TouchableOpacity>
-                    
-                    {/* Front/Back Toggle - Right of capture */}
-                    <TouchableOpacity 
-                        onPress={toggleFacing}
-                        className="bg-black/50 p-3 rounded-full ml-8"
-                    >
-                        <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
-                    </TouchableOpacity>
+
+                    {/* Bottom-right actions */}
+                    <View className="items-end">
+                        {/* Upload square (device library) */}
+                        <TouchableOpacity
+                            onPress={async () => {
+                                const result = await ImagePicker.launchImageLibraryAsync({
+                                    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                                    allowsEditing: false,
+                                    quality: 0.9,
+                                });
+                                if (!result.canceled) {
+                                    setCapturedPhoto(result.assets[0].uri);
+                                    setCaption('');
+                                }
+                            }}
+                            className="w-14 h-14 rounded-2xl bg-black/50 border border-white/15 items-center justify-center mb-3"
+                        >
+                            <IconSymbol name="photo" size={22} color="white" />
+                        </TouchableOpacity>
+
+                        {/* Camera flip */}
+                        <TouchableOpacity onPress={toggleFacing} className="bg-black/50 p-3 rounded-full">
+                            <IconSymbol name="arrow.triangle.2.circlepath" size={24} color="white" />
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </Animated.View>
         </Modal>

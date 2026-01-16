@@ -139,6 +139,15 @@ function InitialLayout() {
         <Stack.Screen name="connections/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="requests" options={{ headerShown: false }} />
         <Stack.Screen name="inbox" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="crossed-paths"
+          options={{
+            headerShown: false,
+            // Slide in from the left (avoid gestureDirection tweaks which caused native crashes on some Android builds)
+            animation: 'slide_from_left',
+          }}
+        />
+        <Stack.Screen name="messages" options={{ headerShown: false }} />
         <Stack.Screen name="events/[id]" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="dark" />

@@ -76,7 +76,13 @@ export default function CityFeedScreen() {
       tabBarHeight = 80; // Fallback
   }
 
+  // Initialize to window height immediately to avoid a "sliver" layout until first interaction/layout pass.
   const [listHeight, setListHeight] = useState(windowHeight - tabBarHeight);
+  useEffect(() => {
+    setListHeight(windowHeight - tabBarHeight);
+  }, [windowHeight, tabBarHeight]);
+  const feedListRef = useRef<FlatList<any> | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
   const { user } = useAuth();
   const { location, address } = useProxyLocation();
   const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -95,6 +101,15 @@ export default function CityFeedScreen() {
   const [eventAttendees, setEventAttendees] = useState<Array<{ id: string; username: string; full_name: string | null; avatar_url: string | null; is_verified?: boolean; status: string }> | null>(null);
 
   const router = useRouter();
+
+  // Re-snap to the current page when returning to this tab (prevents a "sliver" offset on revisit).
+  useFocusEffect(
+    useCallback(() => {
+      requestAnimationFrame(() => {
+        feedListRef.current?.scrollToOffset({ offset: pageIndex * listHeight, animated: false });
+      });
+    }, [pageIndex, listHeight]),
+  );
 
   // Track initial touch position for swipe detection
   const initialTouchX = useRef<number | null>(null);
@@ -484,6 +499,7 @@ export default function CityFeedScreen() {
   return (
     <View className="flex-1 bg-transparent" {...cityFeedPanResponder.panHandlers}>
       <FlatList
+        ref={feedListRef as any}
         data={feed}
         renderItem={({ item }) => (
             item.kind === 'profile' ? (
@@ -612,12 +628,26 @@ export default function CityFeedScreen() {
             )
         )}
         keyExtractor={(item) => item.id}
+        // Prevent iOS inset adjustment jitter on tab switch (can show "past the top" until first scroll)
+        contentInsetAdjustmentBehavior="never"
+        automaticallyAdjustContentInsets={false}
+        automaticallyAdjustsScrollIndicatorInsets={false}
+        bounces={false}
+        alwaysBounceVertical={false}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchFeed} tintColor="white" />}
         contentContainerStyle={{ flexGrow: 1 }}
         showsVerticalScrollIndicator={false}
         pagingEnabled
-        onLayout={(e) => setListHeight(e.nativeEvent.layout.height)}
+        // Avoid resetting listHeight from transient layout values on tab re-entry (causes paging jitter)
         decelerationRate="fast"
+        snapToInterval={listHeight}
+        snapToAlignment="start"
+        disableIntervalMomentum
+        onMomentumScrollEnd={(e) => {
+          const y = e.nativeEvent.contentOffset.y || 0;
+          const next = listHeight > 0 ? Math.round(y / listHeight) : 0;
+          setPageIndex(next);
+        }}
         ListEmptyComponent={
             loading ? (
                 <View style={{ height: listHeight }} className="items-center justify-center">
@@ -634,17 +664,17 @@ export default function CityFeedScreen() {
         }
         ListFooterComponent={
             feed.length > 0 ? (
-                <View style={{ height: listHeight, width: width }} className="bg-ink items-center justify-center px-8">
-                    <IconSymbol name="checkmark.circle.fill" size={80} color="#4ade80" />
-                    <Text className="text-white text-3xl font-extrabold mt-6 text-center">You're All Caught Up!</Text>
+                <View style={{ height: listHeight, width: width }} className="items-center justify-center px-8">
+                    <IconSymbol name="checkmark.circle.fill" size={50} color="#4ade80" />
+                    <Text className="text-ink text-xl font-extrabold mt-6 text-center">You're All Caught Up!</Text>
                     <Text className="text-gray-400 text-lg mt-4 text-center mb-8">
                         Start a conversation with your connections.
                     </Text>
                     <TouchableOpacity 
-                        onPress={() => router.push(`/connections/${user?.id}`)}
+                        onPress={() => router.push('/(tabs)/inbox')}
                         className="bg-white px-8 py-4 rounded-full shadow-lg"
                     >
-                        <Text className="text-ink font-bold text-lg uppercase tracking-wider">Go to Connections</Text>
+                        <Text className="text-ink font-bold text-md uppercase tracking-wider">Check on Your Circle!</Text>
                     </TouchableOpacity>
                 </View>
             ) : null
@@ -1124,31 +1154,6 @@ function CityFeedCard({
                             <View style={{ alignItems: 'center' }}>
                                 <View className="w-32 h-32 rounded-full overflow-hidden mb-4 border-4 border-white/50" style={{ position: 'relative' }}>
                                     <FeedImage path={item.avatar_url} containerHeight={128} containerWidth={128} />
-                                    {/* Verified badge on avatar */}
-                                    {item.is_verified && (
-                                        <View
-                                            style={{
-                                                position: 'absolute',
-                                                bottom: 0,
-                                                right: 0,
-                                                backgroundColor: '#3B82F6',
-                                                borderRadius: 14,
-                                                width: 28,
-                                                height: 28,
-                                                justifyContent: 'center',
-                                                alignItems: 'center',
-                                                shadowColor: '#000',
-                                                shadowOffset: { width: 0, height: 2 },
-                                                shadowOpacity: 0.3,
-                                                shadowRadius: 4,
-                                                elevation: 5,
-                                                borderWidth: 2.5,
-                                                borderColor: '#fff',
-                                            }}
-                                        >
-                                            <IconSymbol name="checkmark.seal.fill" size={16} color="#fff" />
-                                        </View>
-                                    )}
                                 </View>
                                 <Text className="text-white text-3xl font-bold mb-2 text-center shadow-lg">
                                     View {item.full_name}'s Profile
@@ -1205,31 +1210,6 @@ function CityFeedCard({
                     {/* Small Avatar next to name */}
                     <View className="w-8 h-8 rounded-full overflow-hidden mr-2 border border-white/50" style={{ position: 'relative' }}>
                         <FeedImage path={item.avatar_url} containerHeight={32} containerWidth={32} />
-                        {/* Verified badge on small avatar */}
-                        {item.is_verified && (
-                            <View
-                                style={{
-                                    position: 'absolute',
-                                    bottom: -2,
-                                    right: -2,
-                                    backgroundColor: '#3B82F6',
-                                    borderRadius: 7,
-                                    width: 14,
-                                    height: 14,
-                                    justifyContent: 'center',
-                                    alignItems: 'center',
-                                    shadowColor: '#000',
-                                    shadowOffset: { width: 0, height: 1 },
-                                    shadowOpacity: 0.3,
-                                    shadowRadius: 2,
-                                    elevation: 4,
-                                    borderWidth: 1.5,
-                                    borderColor: '#fff',
-                                }}
-                            >
-                                <IconSymbol name="checkmark.seal.fill" size={8} color="#fff" />
-                            </View>
-                        )}
                     </View>
                     <View>
                         <View className="flex-row items-center">

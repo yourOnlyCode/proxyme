@@ -12,13 +12,14 @@ import {
   Modal,
   Platform,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   UIManager,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/profile/Avatar';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
@@ -60,6 +61,7 @@ export default function EditProfileScreen() {
   const [relationshipGoals, setRelationshipGoals] = useState<string[]>([]);
   const [socials, setSocials] = useState<SocialLinks>({});
   const [isVerified, setIsVerified] = useState(false);
+  const [saveCrossedPaths, setSaveCrossedPaths] = useState(true);
 
   // Modal State
   const [showSocialModal, setShowSocialModal] = useState(false);
@@ -80,7 +82,7 @@ export default function EditProfileScreen() {
 
       const { data, error, status } = await supabase
         .from('profiles')
-        .select(`username, full_name, bio, avatar_url, relationship_goals, social_links, is_verified`)
+        .select(`username, full_name, bio, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths`)
         .eq('id', user.id)
         .single();
 
@@ -96,6 +98,7 @@ export default function EditProfileScreen() {
         setRelationshipGoals(data.relationship_goals || []);
         setSocials(data.social_links || {});
         setIsVerified(data.is_verified || false);
+        setSaveCrossedPaths(data.save_crossed_paths ?? true);
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -126,6 +129,7 @@ export default function EditProfileScreen() {
         avatar_url: cleanAvatarPath,
         relationship_goals: relationshipGoals,
         social_links: socials,
+        save_crossed_paths: saveCrossedPaths,
         updated_at: new Date(),
       };
 
@@ -248,10 +252,10 @@ export default function EditProfileScreen() {
 
   return (
     <KeyboardDismissWrapper>
-      <View className="flex-1 bg-white">
+      <SafeAreaView className="flex-1 bg-white" edges={['top']}>
         <View className="flex-1">
           {/* Custom Header */}
-          <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: insets.top + 12, paddingBottom: 12 }}>
+          <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: 12, paddingBottom: 12 }}>
             <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
               <IconSymbol name="chevron.left" size={28} color="#1A1A1A" />
             </TouchableOpacity>
@@ -259,7 +263,12 @@ export default function EditProfileScreen() {
             <View className="w-10" />
           </View>
 
-          <ScrollView className="flex-1 px-4 pt-4">
+          <ScrollView
+            className="flex-1 px-4 pt-4"
+            contentInsetAdjustmentBehavior="never"
+            automaticallyAdjustContentInsets={false}
+            automaticallyAdjustsScrollIndicatorInsets={false}
+          >
             {/* Verification Banner */}
             <TouchableOpacity
               onPress={() => router.push('/(settings)/get-verified')}
@@ -400,6 +409,30 @@ export default function EditProfileScreen() {
 
             {user && <ProfileGallery userId={user.id} onSetAvatar={handleSetCover} />}
 
+            <View className="mt-8 bg-gray-50 p-4 rounded-xl border border-gray-200">
+              <Text className="text-gray-500 mb-2 ml-1 font-bold">Privacy</Text>
+              <View className="bg-white border border-gray-200 rounded-xl px-4 py-4 flex-row items-center justify-between">
+                <View className="flex-row items-center flex-1 pr-3">
+                  <View className="w-10 h-10 rounded-full items-center justify-center mr-3 bg-gray-50">
+                    <IconSymbol name="clock.arrow.circlepath" size={18} color="#111827" />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-ink font-bold">Crossed Paths history</Text>
+                    <Text className="text-gray-500 text-xs mt-1" numberOfLines={2}>
+                      Save people you crossed paths with for up to 7 days.
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={saveCrossedPaths}
+                  onValueChange={(v) => setSaveCrossedPaths(v)}
+                />
+              </View>
+              <Text className="text-gray-400 text-[11px] mt-3 ml-1 leading-4">
+                Turning this off stops new history from being saved. Existing history may still appear until it expires.
+              </Text>
+            </View>
+
             <View className="h-8" />
 
             <TouchableOpacity onPress={updateProfile} disabled={saving} className="bg-black py-4 rounded-xl items-center shadow-lg mb-4">
@@ -499,7 +532,7 @@ export default function EditProfileScreen() {
             </KeyboardAvoidingView>
           </Modal>
         </View>
-      </View>
+      </SafeAreaView>
     </KeyboardDismissWrapper>
   );
 }

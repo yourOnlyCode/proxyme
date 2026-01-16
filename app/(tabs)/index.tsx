@@ -2,6 +2,7 @@ import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
+import { formatAddressLabel, recordCrossedPaths } from '@/lib/crossedPaths';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -26,7 +27,7 @@ const MICRO_RANGE = 92; // 300 feet
 export default function HomeScreen() {
   const { signOut, user } = useAuth();
   const { isProxyActive, toggleProxy, location, address } = useProxyLocation();
-  const { openModal, openCamera, activeStatuses, deleteStatus } = useStatus();
+  const { openModal, activeStatuses, deleteStatus } = useStatus();
   const currentStatus = activeStatuses && activeStatuses.length > 0 ? activeStatuses[0] : null;
   // StatusItem has: id, content, type, caption, created_at, expires_at
   const currentStatusImage = currentStatus && currentStatus.type === 'image' ? currentStatus.content : null;
@@ -70,6 +71,7 @@ export default function HomeScreen() {
   const [friendCode, setFriendCode] = useState<string | null>(null);
   const [userCity, setUserCity] = useState<string | null>(null);
   const [referralCount, setReferralCount] = useState<number>(0);
+  const [saveCrossedPaths, setSaveCrossedPaths] = useState(true);
   const [showFriendCodeToast, setShowFriendCodeToast] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
@@ -90,7 +92,7 @@ export default function HomeScreen() {
     // Fetch detailed interests & goals
     const { data } = await supabase
       .from('profiles')
-      .select('detailed_interests, relationship_goals, friend_code, city, referral_count')
+      .select('detailed_interests, relationship_goals, friend_code, city, referral_count, save_crossed_paths')
       .eq('id', user.id)
       .single();
     
@@ -100,6 +102,7 @@ export default function HomeScreen() {
       setFriendCode(data.friend_code);
       setUserCity(data.city);
       setReferralCount(data.referral_count || 0);
+      setSaveCrossedPaths(data.save_crossed_paths ?? true);
       // Show friend code toast if user has a friend code and hasn't opted out
       if (data.friend_code) {
         const shouldNotShow = await checkDontShowAgain();
@@ -240,6 +243,28 @@ export default function HomeScreen() {
       const filtered = (data || []).filter((u: FeedProfile) => (u.dist_meters || 0) <= MICRO_RANGE);
       if (filtered.length !== (data || []).length) {
           console.warn(`Filtered ${data.length - filtered.length} users who were out of range.`);
+      }
+
+      // Best-effort: record Crossed Paths for this address/day so the user can find people later.
+      try {
+        const addressLabel = formatAddressLabel(address);
+        if (saveCrossedPaths) {
+          await recordCrossedPaths({
+            viewerId: user.id,
+            addressLabel,
+            address,
+            location: location ? { lat: location.coords.latitude, long: location.coords.longitude } : null,
+            profiles: filtered.map((u: any) => ({
+              id: u.id,
+              username: u.username ?? null,
+              full_name: u.full_name ?? null,
+              avatar_url: u.avatar_url ?? null,
+              is_verified: (u as any).is_verified ?? null,
+            })),
+          });
+        }
+      } catch {
+        // ignore
       }
       
       // Fetch connection/interest state for each user (pending/accepted/declined)
@@ -447,7 +472,7 @@ export default function HomeScreen() {
   // Track initial touch position for swipe detection
   const initialTouchX = useRef<number | null>(null);
 
-  // Swipe gesture handler (swipe right for camera only)
+  // Swipe gesture handler (swipe right for Crossed Paths)
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -473,13 +498,13 @@ export default function HomeScreen() {
         const edgeZone = Math.min(140, screenWidth * 0.25); // easier to trigger (bigger edge zone)
         const isFromLeftEdge = startX < edgeZone;
         
-        // Swipe right from left edge (dx > 0) to open camera
+        // Swipe right from left edge (dx > 0) to open Crossed Paths
         const shouldOpen =
           isFromLeftEdge &&
           (gestureState.dx > 70 || (gestureState.vx > 0.65 && gestureState.dx > 30)); // allow quick flicks
 
         if (shouldOpen) {
-          openCamera(true, 'proxy'); // Pass true to indicate it's from swipe, and 'proxy' as source
+          router.push('/crossed-paths');
         }
         
         // Reset initial touch position
@@ -708,18 +733,8 @@ export default function HomeScreen() {
   };
 
   const getDisplayText = (addr: any) => {
-      if (!addr) return 'this location';
-      
-      const isStreetNumber = addr.streetNumber && addr.name === addr.streetNumber;
-      const isStreetName = addr.street && addr.name === addr.street;
-      const isFullAddress = addr.street && addr.streetNumber && addr.name === `${addr.streetNumber} ${addr.street}`;
-      
-      if (addr.name && !isStreetNumber && !isStreetName && !isFullAddress) {
-          const isNumeric = /^\d+$/.test(addr.name);
-          if (!isNumeric) return addr.name;
-      }
-
-      return "your address";
+      const label = formatAddressLabel(addr as any);
+      return label || 'this area';
   };
 
   return (
@@ -766,13 +781,13 @@ export default function HomeScreen() {
           />
 
           <View className="flex-row items-center" style={{ position: 'relative', minHeight: 40, zIndex: 1 }}>
-            {/* Camera Icon (Left) - Fixed width */}
+            {/* History Icon (Left) - Fixed width */}
             <TouchableOpacity 
-              onPress={() => openCamera(true, 'proxy')}
+              onPress={() => router.push('/crossed-paths')}
               className="w-10 h-10 items-center justify-center"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-                <IconSymbol name="camera.fill" size={24} color="#2D3748" />
+                <IconSymbol name="clock.arrow.circlepath" size={24} color="#2D3748" />
             </TouchableOpacity>
             
             {/* Proxme Title (Center) - Absolutely positioned for perfect centering */}
@@ -849,6 +864,12 @@ export default function HomeScreen() {
       <Animated.FlatList
           data={isProxyActive ? feed : []}
           keyExtractor={(item) => item.id}
+          // Prevent iOS inset adjustment jitter on tab switch (can show "past the top" until first scroll)
+          contentInsetAdjustmentBehavior="never"
+          automaticallyAdjustContentInsets={false}
+          automaticallyAdjustsScrollIndicatorInsets={false}
+          bounces={false}
+          alwaysBounceVertical={false}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true }

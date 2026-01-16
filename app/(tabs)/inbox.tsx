@@ -1,8 +1,11 @@
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
+import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { getUserConnectionsList } from '@/lib/connections';
+import { BlurView } from 'expo-blur';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, Image, Modal, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, Dimensions, Easing, FlatList, Image, Modal, Platform, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
@@ -91,9 +94,31 @@ type UpcomingEvent = {
   rsvp_status?: 'going' | 'maybe' | 'cant' | null;
 };
 
+type StoryProfile = {
+  id: string;
+  username: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+  is_verified: boolean | null;
+};
+
+type StoryUser = {
+  profile: StoryProfile;
+  statuses: Array<{
+    id: string;
+    content: string | null;
+    type: 'text' | 'image';
+    caption?: string;
+    created_at: string;
+    expires_at: string;
+  }>;
+  latestCreatedAt: string;
+};
+
 export default function InboxScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const { activeStatuses, currentProfile, openMyStatusViewer, openStatusViewer, seenStatusIds } = useStatus();
   const [items, setItems] = useState<InboxItem[]>(() => getUiCache<InboxItem[]>('inbox.items') ?? []);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>(() => getUiCache<UpcomingEvent[]>('inbox.upcoming') ?? []);
   const [loading, setLoading] = useState(items.length === 0); // initial-only loader
@@ -102,7 +127,17 @@ export default function InboxScreen() {
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
   const [selectedInterestId, setSelectedInterestId] = useState<string | null>(null);
   const [upcomingVisible, setUpcomingVisible] = useState(false);
+  const [composeVisible, setComposeVisible] = useState(false);
+  const [composeLoading, setComposeLoading] = useState(false);
+  const [composeConnections, setComposeConnections] = useState<Array<{ conversationId: string; partner: { id: string; username: string; full_name: string | null; avatar_url: string | null } }>>([]);
+  const [storyUsers, setStoryUsers] = useState<StoryUser[]>([]);
+  const [storiesLoading, setStoriesLoading] = useState(false);
   const router = useRouter();
+
+  const composeSheetAnim = useRef(new Animated.Value(0)).current; // 0 closed, 1 open
+  const composeClosingRef = useRef(false);
+  const screenH = Dimensions.get('window').height || 800;
+  const composeSheetHeight = Math.min(560, Math.max(420, Math.floor(screenH * 0.72)));
 
   // Avoid stale closures inside subscriptions/focus effects.
   const hasItemsRef = useRef(items.length > 0);
@@ -179,6 +214,163 @@ export default function InboxScreen() {
     }, [user])
   );
 
+  const seenSet = useMemo(() => new Set(seenStatusIds), [seenStatusIds]);
+
+  const fetchStories = async () => {
+    if (!user) return;
+    setStoriesLoading(true);
+    try {
+      const connections = await getUserConnectionsList({ targetUserId: user.id });
+      const ids = connections.map((c) => c.id).filter(Boolean);
+      if (ids.length === 0) {
+        setStoryUsers([]);
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const { data: statusRows, error: statusErr } = await supabase
+        .from('statuses')
+        .select('id, user_id, content, type, caption, created_at, expires_at')
+        .in('user_id', ids)
+        .gt('expires_at', nowIso)
+        .order('created_at', { ascending: true });
+      if (statusErr) throw statusErr;
+
+      const byUser = new Map<string, StoryUser['statuses']>();
+      for (const row of (statusRows as any[]) || []) {
+        const uid = row.user_id as string;
+        const arr = byUser.get(uid) || [];
+        arr.push({
+          id: row.id,
+          content: row.content,
+          type: row.type,
+          caption: row.caption,
+          created_at: row.created_at,
+          expires_at: row.expires_at,
+        });
+        byUser.set(uid, arr);
+      }
+
+      const usersWithStatuses: StoryUser[] = (connections as any[])
+        .map((c: any) => {
+          const statuses = byUser.get(c.id) || [];
+          const latestCreatedAt = statuses.length ? statuses[statuses.length - 1].created_at : '';
+          return {
+            profile: {
+              id: c.id,
+              username: c.username,
+              full_name: c.full_name,
+              avatar_url: c.avatar_url,
+              is_verified: c.is_verified,
+            },
+            statuses,
+            latestCreatedAt,
+          };
+        })
+        .filter((u: StoryUser) => u.statuses.length > 0)
+        .sort((a: StoryUser, b: StoryUser) => new Date(b.latestCreatedAt).getTime() - new Date(a.latestCreatedAt).getTime());
+
+      setStoryUsers(usersWithStatuses);
+    } catch {
+      // keep inbox usable even if stories fail
+    } finally {
+      setStoriesLoading(false);
+    }
+  };
+
+  const fetchComposeConnections = async () => {
+    if (!user) return;
+    setComposeLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('interests')
+        .select(
+          `
+          id,
+          sender_id,
+          receiver_id,
+          sender:sender_id ( id, username, full_name, avatar_url ),
+          receiver:receiver_id ( id, username, full_name, avatar_url )
+        `,
+        )
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+        .eq('status', 'accepted');
+
+      if (error) throw error;
+
+      const rows = (data as any[]) || [];
+      const mapped = rows
+        .map((r) => {
+          const partner = r.sender_id === user.id ? r.receiver : r.sender;
+          if (!partner?.id) return null;
+          return {
+            conversationId: r.id as string,
+            partner: {
+              id: partner.id as string,
+              username: partner.username as string,
+              full_name: (partner.full_name as string | null) ?? null,
+              avatar_url: (partner.avatar_url as string | null) ?? null,
+            },
+          };
+        })
+        .filter(Boolean) as Array<{ conversationId: string; partner: { id: string; username: string; full_name: string | null; avatar_url: string | null } }>;
+
+      // Stable sort: full_name > username
+      mapped.sort((a, b) => {
+        const an = (a.partner.full_name || a.partner.username || '').toLowerCase();
+        const bn = (b.partner.full_name || b.partner.username || '').toLowerCase();
+        return an.localeCompare(bn);
+      });
+
+      setComposeConnections(mapped);
+    } catch {
+      setComposeConnections([]);
+    } finally {
+      setComposeLoading(false);
+    }
+  };
+
+  const messageItems = useMemo(() => items.filter((i) => i.type === 'message' && i.conversation) as InboxItem[], [items]);
+  const unreadMessageItems = useMemo(() => {
+    const unread = messageItems
+      .filter((i) => Number(i.conversation?.unread_count || 0) > 0)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return unread;
+  }, [messageItems]);
+
+  const openCompose = () => {
+    composeClosingRef.current = false;
+    setComposeVisible(true);
+    void fetchComposeConnections();
+  };
+
+  const closeCompose = () => {
+    if (composeClosingRef.current) return;
+    composeClosingRef.current = true;
+    Animated.timing(composeSheetAnim, {
+      toValue: 0,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setComposeVisible(false);
+      composeClosingRef.current = false;
+    });
+  };
+
+  useEffect(() => {
+    if (composeVisible) {
+      composeSheetAnim.setValue(0);
+      Animated.timing(composeSheetAnim, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composeVisible]);
+
   const fetchData = async (opts?: { silent?: boolean }) => {
     if (!user) return;
     const silent = !!opts?.silent;
@@ -209,6 +401,8 @@ export default function InboxScreen() {
           .from('notifications')
           .select('id, type, title, body, data, read, created_at')
           .eq('user_id', user.id)
+          // Only show unread notifications in Circle (tapping should clear it)
+          .or('read.is.null,read.eq.false')
           .order('created_at', { ascending: false })
           .limit(50), // Limit to recent 50 notifications
         supabase
@@ -407,6 +601,9 @@ export default function InboxScreen() {
 
       setItems(inboxItems);
       setUiCache('inbox.items', inboxItems);
+
+      // Best-effort refresh for story carousel; never block inbox rendering
+      void fetchStories();
     } catch (error) {
       console.error('Error fetching inbox:', error);
     } finally {
@@ -576,7 +773,12 @@ export default function InboxScreen() {
               {preview}
             </Text>
           </View>
-          <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
+          <View className="items-end">
+            <View className="bg-gray-100 border border-gray-200 rounded-full w-8 h-8 items-center justify-center mb-2">
+              <IconSymbol name="bubble.left.and.bubble.right" size={16} color="#64748B" />
+            </View>
+            <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
+          </View>
         </TouchableOpacity>
       );
     }
@@ -827,9 +1029,157 @@ export default function InboxScreen() {
           className="text-xl text-ink"
           style={{ fontFamily: 'LibertinusSans-Regular' }}
         >
-          Inbox
+          Your Circle
         </Text>
-        <View className="w-10" />
+        <TouchableOpacity
+          onPress={() => {
+            openCompose();
+          }}
+          activeOpacity={0.85}
+        >
+          <BlurView
+            intensity={18}
+            tint="light"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              overflow: 'hidden',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.70)',
+              backgroundColor: 'rgba(255,255,255,0.30)',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <IconSymbol name="square.and.pencil" size={18} color="#475569" />
+          </BlurView>
+        </TouchableOpacity>
+      </View>
+
+      {/* Stories carousel (Instagram-style) */}
+      <View
+        className="mb-2"
+        style={{
+          backgroundColor: 'rgba(241,245,249,0.80)',
+          borderTopWidth: 1,
+          borderBottomWidth: 1,
+          borderColor: 'rgba(148,163,184,0.12)',
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.10,
+          shadowRadius: 18,
+          elevation: 6,
+        }}
+      >
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 14, paddingRight: 22, paddingVertical: 10 }}
+        >
+          {/* Me (always first) */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              if (activeStatuses.length > 0) openMyStatusViewer(0);
+              else router.push('/(tabs)/explore');
+            }}
+            style={{ marginRight: 12, alignItems: 'center', width: 76 }}
+          >
+            <StoryAvatar path={currentProfile?.avatar_url || null} hasStory={activeStatuses.length > 0} />
+            <Text className="text-[11px] text-gray-700 mt-1" numberOfLines={1}>
+              You
+            </Text>
+          </TouchableOpacity>
+
+          {/* Divider between "You" and everyone else */}
+          <View
+            style={{
+              width: 1,
+              height: 54,
+              backgroundColor: 'rgba(148,163,184,0.25)',
+              marginRight: 14,
+              alignSelf: 'center',
+            }}
+          />
+
+          {/* Connections (unviewed first, then viewed/greyed) */}
+          {(storyUsers || [])
+            .map((u) => {
+              const firstUnviewedIndex = u.statuses.findIndex((s) => !seenSet.has(s.id));
+              const hasUnviewed = firstUnviewedIndex !== -1;
+              return { ...u, hasUnviewed, firstUnviewedIndex };
+            })
+            .sort((a, b) => {
+              if (a.hasUnviewed !== b.hasUnviewed) return a.hasUnviewed ? -1 : 1;
+              return new Date(b.latestCreatedAt).getTime() - new Date(a.latestCreatedAt).getTime();
+            })
+            .map((u) => {
+              const displayName = u.profile.full_name || u.profile.username || 'Connection';
+              const startIndex = u.hasUnviewed ? u.firstUnviewedIndex : 0;
+              return (
+                <TouchableOpacity
+                  key={u.profile.id}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    openStatusViewer({
+                      statuses: u.statuses as any,
+                      profile: {
+                        avatar_url: u.profile.avatar_url,
+                        full_name: u.profile.full_name || u.profile.username || 'User',
+                        username: u.profile.username || 'user',
+                        city: null,
+                        is_verified: !!u.profile.is_verified,
+                      },
+                      startIndex: Math.max(0, startIndex),
+                      allowDelete: false,
+                    });
+                  }}
+                  style={{ marginRight: 12, alignItems: 'center', width: 76 }}
+                >
+                  <StoryAvatar path={u.profile.avatar_url} hasStory={u.hasUnviewed} dimmed={!u.hasUnviewed} />
+                  <Text className={`text-[11px] mt-1 ${u.hasUnviewed ? 'text-gray-700' : 'text-gray-400'}`} numberOfLines={1}>
+                    {displayName}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+
+          {/* Discover placeholder when there are no active stories from connections */}
+          {!storiesLoading && (storyUsers || []).length === 0 && (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push('/(tabs)/feed')}
+              style={{ marginRight: 12, alignItems: 'center', width: 76 }}
+            >
+              <View
+                style={{
+                  width: 68,
+                  height: 68,
+                  borderRadius: 34,
+                  borderWidth: 2,
+                  borderColor: 'rgba(148,163,184,0.35)',
+                  backgroundColor: 'rgba(255,255,255,0.55)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <IconSymbol name="plus" size={22} color="#64748B" />
+              </View>
+              <Text className="text-[11px] text-gray-700 mt-1" numberOfLines={1}>
+                Discover
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {storiesLoading && (
+            <View style={{ width: 76, alignItems: 'center', justifyContent: 'center' }}>
+              <View className="w-16 h-16 rounded-full bg-gray-100 border border-gray-200" />
+              <Text className="text-[11px] text-gray-400 mt-2">Loading</Text>
+            </View>
+          )}
+        </ScrollView>
       </View>
 
       {/* Upcoming Events always at the top */}
@@ -852,13 +1202,138 @@ export default function InboxScreen() {
         </View>
       </TouchableOpacity>
 
+      {/* Messages (directly below Upcoming Events) */}
+      <View className="mx-4 mb-3">
+        {unreadMessageItems.length === 0 ? (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push('/messages')}
+            className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+          >
+            <View className="flex-1">
+              <Text className="text-ink font-bold text-base">Messages</Text>
+              <Text className="text-gray-500 text-xs" numberOfLines={1}>
+                No new messages
+              </Text>
+            </View>
+            <View className="bg-gray-100 border border-gray-200 rounded-full w-9 h-9 items-center justify-center">
+              <IconSymbol name="bubble.left.and.bubble.right" size={16} color="#64748B" />
+            </View>
+          </TouchableOpacity>
+        ) : unreadMessageItems.length === 1 ? (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push(`/chat/${unreadMessageItems[0]!.conversation!.id}`)}
+            className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+          >
+            <View className="mr-3">
+              <View style={{ shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 14, elevation: 4 }}>
+                <Avatar path={unreadMessageItems[0]!.conversation!.partner.avatar_url} />
+              </View>
+            </View>
+            <View className="flex-1 pr-2">
+              <Text className="text-ink font-bold text-base" numberOfLines={1}>
+                {unreadMessageItems[0]!.conversation!.partner.username}
+              </Text>
+              <Text className="text-gray-500 text-xs" numberOfLines={1}>
+                {unreadMessageItems[0]!.conversation!.last_message?.content || 'New message'}
+              </Text>
+            </View>
+            <View className="bg-gray-100 border border-gray-200 rounded-full w-9 h-9 items-center justify-center">
+              <IconSymbol name="bubble.left.and.bubble.right" size={16} color="#64748B" />
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity activeOpacity={0.85} onPress={() => router.push('/messages')} style={{ height: 94 }}>
+            {[0, 1, 2].map((idx) => {
+              const it = unreadMessageItems[idx];
+              if (!it?.conversation) return null;
+              const isFront = idx === 0;
+              const offset = idx * 6;
+              const opacity = isFront ? 1 : idx === 1 ? 0.72 : 0.52;
+              return (
+                <View
+                  key={it.id}
+                  style={{
+                    position: 'absolute',
+                    top: offset,
+                    left: offset,
+                    right: 0,
+                    opacity,
+                  }}
+                  className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+                >
+                  <View className="mr-3">
+                    <View style={{ shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.12, shadowRadius: 14, elevation: 4 }}>
+                      <Avatar path={it.conversation.partner.avatar_url} />
+                    </View>
+                  </View>
+                  <View className="flex-1 pr-2">
+                    <Text className="text-ink font-bold text-base" numberOfLines={1}>
+                      {it.conversation.partner.username}
+                    </Text>
+                    {isFront ? (
+                      <Text className="text-gray-500 text-xs" numberOfLines={1}>
+                        {it.conversation.last_message?.content || 'New message'}
+                      </Text>
+                    ) : (
+                      <Text className="text-gray-400 text-xs" numberOfLines={1}>
+                        New message
+                      </Text>
+                    )}
+                  </View>
+                  {isFront ? (
+                    <View className="bg-gray-100 border border-gray-200 rounded-full w-9 h-9 items-center justify-center">
+                      <IconSymbol name="bubble.left.and.bubble.right" size={16} color="#64748B" />
+                    </View>
+                  ) : (
+                    <View className="w-9 h-9" />
+                  )}
+                </View>
+              );
+            })}
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Glass divider + notifications icon */}
+      <View className="mx-4 mb-3 flex-row items-center">
+        <View
+          style={{
+            flex: 1,
+            height: 1,
+            backgroundColor: 'rgba(148,163,184,0.20)',
+          }}
+        />
+        <View style={{ width: 10 }} />
+        <BlurView
+          intensity={18}
+          tint="light"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            overflow: 'hidden',
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.70)',
+            backgroundColor: 'rgba(255,255,255,0.30)',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <IconSymbol name="bell" size={16} color="#64748B" />
+        </BlurView>
+      </View>
+
+
+
       {loading && items.length === 0 ? (
         <View className="flex-1 items-center justify-center">
           <Text className="text-gray-400 mt-4">Loading inbox...</Text>
         </View>
       ) : (
         <FlatList
-          data={items}
+          data={items.filter((i) => i.type !== 'message')}
           keyExtractor={(item) => item.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchData()} />}
           renderItem={renderItem}
@@ -871,6 +1346,7 @@ export default function InboxScreen() {
           }
         />
       )}
+
 
       <Modal transparent animationType="fade" visible={upcomingVisible} onRequestClose={() => setUpcomingVisible(false)}>
         <TouchableOpacity
@@ -937,6 +1413,90 @@ export default function InboxScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Compose Message Sheet (slides up) */}
+      <Modal transparent animationType="none" visible={composeVisible} onRequestClose={closeCompose}>
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={closeCompose}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' }}
+          />
+
+          <Animated.View
+            style={{
+              transform: [
+                {
+                  translateY: composeSheetAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [composeSheetHeight, 0],
+                  }),
+                },
+              ],
+            }}
+          >
+            <View
+              style={{
+                height: composeSheetHeight,
+                backgroundColor: '#FFFFFF',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                overflow: 'hidden',
+                paddingBottom: Platform.OS === 'ios' ? 28 : 16,
+              }}
+            >
+              <View className="items-center pt-3 pb-2">
+                <View className="w-12 h-1.5 bg-gray-300 rounded-full" />
+              </View>
+
+              <View className="px-5 pb-4 border-b border-gray-100 flex-row items-center">
+                <Text className="text-ink font-bold text-xl flex-1">Messages</Text>
+                <TouchableOpacity onPress={closeCompose} className="p-2">
+                  <IconSymbol name="xmark" size={18} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+
+              {composeLoading ? (
+                <View className="p-6 items-center">
+                  <Text className="text-gray-500">Loading connections…</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={composeConnections}
+                  keyExtractor={(c) => c.conversationId}
+                  numColumns={3}
+                  contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+                  columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 16 }}
+                  renderItem={({ item: c }) => (
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={{ width: '30%', alignItems: 'center' }}
+                      onPress={() => {
+                        closeCompose();
+                        router.push(`/chat/${c.conversationId}`);
+                      }}
+                    >
+                      <AvatarImage path={c.partner.avatar_url} size={64} />
+                      <Text className="text-[11px] text-gray-700 mt-2" numberOfLines={1}>
+                        {c.partner.full_name || c.partner.username || 'User'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  ListEmptyComponent={
+                    <View className="items-center py-10">
+                      <IconSymbol name="person.2" size={36} color="#9CA3AF" />
+                      <Text className="text-gray-500 mt-4 font-semibold">No connections yet</Text>
+                      <Text className="text-gray-400 mt-1 text-xs text-center">
+                        Connect with people to start messaging.
+                      </Text>
+                    </View>
+                  }
+                />
+              )}
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -959,6 +1519,90 @@ function Avatar({ path }: { path: string | null }) {
           <Text className="text-gray-400 font-bold">?</Text>
         </View>
       )}
+    </View>
+  );
+}
+
+function AvatarImage({ path, size }: { path: string | null; size: number }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!path) {
+      setUrl(null);
+      return;
+    }
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    setUrl(data.publicUrl);
+  }, [path]);
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        overflow: 'hidden',
+        backgroundColor: '#E5E7EB',
+        borderWidth: 1,
+        borderColor: 'rgba(148,163,184,0.18)',
+      }}
+    >
+      {url ? (
+        <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+      ) : (
+        <View className="w-full h-full items-center justify-center">
+          <IconSymbol name="person.fill" size={18} color="#9CA3AF" />
+        </View>
+      )}
+    </View>
+  );
+}
+
+function StoryAvatar({ path, hasStory, dimmed = false }: { path: string | null; hasStory: boolean; dimmed?: boolean }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!path) return;
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    setUrl(data.publicUrl);
+  }, [path]);
+
+  return (
+    <View
+      style={{
+        width: 68,
+        height: 68,
+        borderRadius: 34,
+        padding: hasStory ? 3 : 0,
+        backgroundColor: hasStory ? 'rgba(59,130,246,0.9)' : 'transparent',
+        shadowColor: hasStory ? '#3B82F6' : 'transparent',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: hasStory ? 0.25 : 0,
+        shadowRadius: 14,
+        elevation: hasStory ? 8 : 0,
+      }}
+    >
+      <View
+        className="w-full h-full bg-gray-300 rounded-full overflow-hidden"
+        style={{
+          // Subtle shadow on the avatar itself (carousel polish)
+          shadowColor: '#0F172A',
+          shadowOffset: { width: 0, height: 12 },
+          shadowOpacity: 0.22,
+          shadowRadius: 18,
+          elevation: 7,
+        }}
+      >
+        {url ? (
+          <Image source={{ uri: url }} className="w-full h-full" resizeMode="cover" style={{ opacity: dimmed ? 0.45 : 1 }} />
+        ) : (
+          <View className="w-full h-full items-center justify-center bg-gray-200">
+            <Text className="text-gray-400 font-bold" style={{ opacity: dimmed ? 0.55 : 1 }}>
+              ?
+            </Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 }

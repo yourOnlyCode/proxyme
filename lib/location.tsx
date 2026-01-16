@@ -78,10 +78,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
             const addr = reverse[0];
             setAddress(addr);
             
+            // Persist only broad location fields; keep street-level details local (avoid storing exact address strings).
             if (addr.city) updateData.city = addr.city;
             if (addr.region) updateData.state = addr.region;
-            if (addr.street) updateData.street = addr.street;
-            if (addr.streetNumber) updateData.street_number = addr.streetNumber;
         }
     } catch (e) {
         console.log("Error reverse geocoding:", e);

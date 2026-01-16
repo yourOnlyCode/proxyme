@@ -82,6 +82,9 @@ begin
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'social_links') then
         alter table public.profiles add column social_links jsonb;
     end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'save_crossed_paths') then
+        alter table public.profiles add column save_crossed_paths boolean not null default true;
+    end if;
 end $$;
 
 -- RLS for profiles

@@ -1,34 +1,46 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, Image, StyleSheet } from 'react-native';
+import { ActivityIndicator, View, Text, TextInput, TouchableOpacity, Modal, Image, StyleSheet } from 'react-native';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 
 export function CameraModal({ 
     visible, 
     onClose, 
-    onPhotoTaken,
+    onSendStatus,
 }: { 
     visible: boolean; 
     onClose: () => void; 
-    onPhotoTaken: (uri: string) => void;
+    onSendStatus: (uri: string, caption: string) => Promise<void>;
     slideFromRight?: boolean;
     source?: 'proxy' | 'status';
 }) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [preview, setPreview] = useState<string | null>(null);
+    const [caption, setCaption] = useState('');
+    const [sending, setSending] = useState(false);
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
             const url = URL.createObjectURL(file);
             setPreview(url);
+            setCaption('');
         }
     };
 
-    const handleConfirm = () => {
-        if (preview) {
-            onPhotoTaken(preview);
+    const handleSend = async () => {
+        if (!preview || sending) return;
+        setSending(true);
+        try {
+            await onSendStatus(preview, caption.trim());
             setPreview(null);
+            setCaption('');
             onClose();
+        } catch (e) {
+            // Provider handles toast; keep modal open for retry.
+            // eslint-disable-next-line no-console
+            console.error(e);
+        } finally {
+            setSending(false);
         }
     };
 
@@ -54,13 +66,33 @@ export function CameraModal({
                     
                     {preview ? (
                         <View style={styles.previewContainer}>
-                            <Image source={{ uri: preview }} style={styles.previewImage} resizeMode="cover" />
+                            <View style={{ position: 'relative', width: '100%' }}>
+                                <Image source={{ uri: preview }} style={styles.previewImage} resizeMode="cover" />
+                                {/* Bottom-right upload square */}
+                                <TouchableOpacity
+                                    onPress={() => fileInputRef.current?.click()}
+                                    style={styles.uploadSquare}
+                                >
+                                    <IconSymbol name="photo" size={18} color="white" />
+                                </TouchableOpacity>
+                            </View>
+                            <TextInput
+                                value={caption}
+                                onChangeText={setCaption}
+                                placeholder="Write a caption..."
+                                placeholderTextColor="#9CA3AF"
+                                style={styles.captionInput}
+                            />
                             <View style={styles.actions}>
                                 <TouchableOpacity onPress={handleRetake} style={styles.buttonSecondary}>
                                     <Text style={styles.buttonTextSecondary}>Change</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity onPress={handleConfirm} style={styles.buttonPrimary}>
-                                    <Text style={styles.buttonTextPrimary}>Use Photo</Text>
+                                <TouchableOpacity onPress={handleSend} disabled={sending} style={styles.buttonPrimary}>
+                                    {sending ? (
+                                        <ActivityIndicator color="white" />
+                                    ) : (
+                                        <Text style={styles.buttonTextPrimary}>Send Status</Text>
+                                    )}
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -154,6 +186,29 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: 12,
         width: '100%',
+    },
+    captionInput: {
+        width: '100%',
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        backgroundColor: '#F9FAFB',
+        marginBottom: 12,
+    },
+    uploadSquare: {
+        position: 'absolute',
+        right: 12,
+        bottom: 12,
+        width: 48,
+        height: 48,
+        borderRadius: 14,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.18)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     buttonPrimary: {
         flex: 1,

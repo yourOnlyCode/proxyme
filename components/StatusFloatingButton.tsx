@@ -7,7 +7,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Animated,
     Image,
     KeyboardAvoidingView,
     Modal,
@@ -20,13 +19,9 @@ import {
 } from 'react-native';
 
 export function StatusFloatingButton() {
-  const { openModal, activeStatuses } = useStatus();
+  const { openCamera, activeStatuses } = useStatus();
   const { user } = useAuth();
   const [relationshipGoal, setRelationshipGoal] = useState<string | null>(null);
-  
-  // Radiating animation for the button
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const pulseScale = useRef(new Animated.Value(1)).current;
 
   // Latest status for preview
   const latestStatus = activeStatuses.length > 0 ? activeStatuses[activeStatuses.length - 1] : null;
@@ -57,63 +52,12 @@ export function StatusFloatingButton() {
     }
   };
 
-  // Start radiating animation
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(pulseAnim, {
-            toValue: 1.15,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseScale, {
-            toValue: 1.1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseScale, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ]),
-      ])
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, []);
-
   return (
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'box-none' }}>
       {/* Main FAB */}
       <View className="absolute bottom-24 right-4 items-center justify-center" style={{ zIndex: 50 }}>
-          {/* Radiating ring animation */}
-          <Animated.View
-              style={{
-                  position: 'absolute',
-                  width: 56,
-                  height: 56,
-                  borderRadius: 28,
-                  borderWidth: 2,
-                  borderColor: getButtonColor(),
-                  opacity: pulseAnim.interpolate({
-                      inputRange: [1, 1.15],
-                      outputRange: [0.3, 0],
-                  }),
-                  transform: [{ scale: pulseAnim }],
-              }}
-          />
-          
           <TouchableOpacity 
-            onPress={openModal}
+            onPress={() => openCamera(false, 'status')}
             activeOpacity={0.9}
             className="w-14 h-14 rounded-full items-center justify-center shadow-lg"
             style={{ 
@@ -123,7 +67,6 @@ export function StatusFloatingButton() {
                 shadowOpacity: 0.3, 
                 shadowRadius: 4.65, 
                 elevation: 8,
-                transform: [{ scale: pulseScale }],
             }}
           >
               {latestStatus?.type === 'image' && latestStatus.content ? (
@@ -137,6 +80,25 @@ export function StatusFloatingButton() {
                       color="white" 
                   />
               )}
+
+              {/* Plus badge (so "add status" is still obvious even when previewing latest photo) */}
+              {latestStatus?.type === 'image' && latestStatus.content ? (
+                <View
+                  className="absolute items-center justify-center"
+                  style={{
+                    right: -2,
+                    bottom: -2,
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    backgroundColor: 'rgba(255,255,255,0.95)',
+                    borderWidth: 2,
+                    borderColor: getButtonColor(),
+                  }}
+                >
+                  <IconSymbol name="plus" size={12} color={getButtonColor()} />
+                </View>
+              ) : null}
               
               {/* Active indicator dot */}
               {activeStatuses.length > 0 && (

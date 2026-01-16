@@ -32,6 +32,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const LAST_STATUS_TAB_KEY = 'last_status_tab';
+const SEEN_STATUS_IDS_KEY = 'seen_status_ids_v1';
+
+const getSeenStatusKey = (userId: string) => `${SEEN_STATUS_IDS_KEY}:${userId}`;
 
 export type StatusItem = {
     id: string;
@@ -47,6 +50,15 @@ type StatusContextType = {
     openCamera: (fromSwipe?: boolean, source?: 'proxy' | 'status') => void;
     closeModal: () => void;
     activeStatuses: StatusItem[];
+    seenStatusIds: string[];
+    currentProfile: { avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null;
+    openMyStatusViewer: (startIndex?: number) => void;
+    openStatusViewer: (params: {
+      statuses: StatusItem[];
+      profile: { avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean };
+      startIndex?: number;
+      allowDelete?: boolean;
+    }) => void;
     fetchStatus: () => void;
     deleteStatus: (id: string) => Promise<void>;
 };
@@ -64,8 +76,13 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [cameraSource, setCameraSource] = useState<'proxy' | 'status'>('status');
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewStartIndex, setPreviewStartIndex] = useState(0);
+  const [previewStatuses, setPreviewStatuses] = useState<StatusItem[]>([]);
+  const [previewProfile, setPreviewProfile] = useState<{ avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null>(null);
+  const [previewAllowDelete, setPreviewAllowDelete] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [userProfile, setUserProfile] = useState<{ avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null>(null);
+  const [seenStatusIds, setSeenStatusIds] = useState<string[]>([]);
+  const persistSeenTimer = useRef<NodeJS.Timeout | null>(null);
   const [relationshipGoal, setRelationshipGoal] = useState<string | null>(null);
   // Tab order: My Status (0), My Clubs (1) - Penpal hidden for beta
   const tabs = ['status', 'clubs'] as const;
@@ -205,6 +222,34 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       }
   }, [user]);
 
+  // Load seen status ids from storage (per-device)
+  useEffect(() => {
+      if (!user) return;
+      AsyncStorage.getItem(getSeenStatusKey(user.id)).then((raw) => {
+          if (!raw) return;
+          try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                  setSeenStatusIds(parsed.filter((x) => typeof x === 'string'));
+              }
+          } catch {
+              // ignore
+          }
+      });
+  }, [user?.id]);
+
+  // Persist seen ids (debounced)
+  useEffect(() => {
+      if (!user) return;
+      if (persistSeenTimer.current) clearTimeout(persistSeenTimer.current);
+      persistSeenTimer.current = setTimeout(() => {
+          AsyncStorage.setItem(getSeenStatusKey(user.id), JSON.stringify(seenStatusIds)).catch(() => {});
+      }, 250);
+      return () => {
+          if (persistSeenTimer.current) clearTimeout(persistSeenTimer.current);
+      };
+  }, [seenStatusIds, user?.id]);
+
   const fetchUserProfile = async () => {
       if (!user) return;
       const { data } = await supabase
@@ -296,6 +341,11 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           // If we want to keep profile.status_text in sync, we'd need a trigger or manual update.
           // For now, we assume the new feed reads from 'statuses' table.
       }
+  };
+
+  const markStatusSeen = (statusId: string) => {
+      if (!statusId) return;
+      setSeenStatusIds((prev) => (prev.includes(statusId) ? prev : [...prev, statusId]));
   };
 
   // Load last used tab
@@ -430,6 +480,40 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       setModalVisible(false);
   };
 
+  const closeViewer = () => {
+      setPreviewModalVisible(false);
+  };
+
+  const openMyStatusViewer = (startIndex: number = 0) => {
+      if (!userProfile) return;
+      const sorted = [...activeStatuses].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      if (sorted.length === 0) {
+          toast.show('No active status yet.', 'info');
+          return;
+      }
+      setPreviewStatuses(sorted);
+      setPreviewProfile(userProfile);
+      setPreviewAllowDelete(true);
+      setPreviewStartIndex(Math.max(0, Math.min(startIndex, sorted.length - 1)));
+      setPreviewModalVisible(true);
+  };
+
+  const openStatusViewer = (params: {
+      statuses: StatusItem[];
+      profile: { avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean };
+      startIndex?: number;
+      allowDelete?: boolean;
+  }) => {
+      const sorted = [...(params.statuses || [])].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      if (sorted.length === 0) return;
+      setPreviewStatuses(sorted);
+      setPreviewProfile(params.profile);
+      setPreviewAllowDelete(!!params.allowDelete);
+      const idx = params.startIndex ?? 0;
+      setPreviewStartIndex(Math.max(0, Math.min(idx, sorted.length - 1)));
+      setPreviewModalVisible(true);
+  };
+
   const pickImage = async () => {
       try {
           const result = await ImagePicker.launchImageLibraryAsync({
@@ -442,6 +526,92 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           }
       } catch (error) {
           toast.show('Failed to pick image', 'error');
+      }
+  };
+
+  const requireVerifiedForImageStatus = async () => {
+      if (!user) throw new Error('You must be signed in.');
+      const { data: me, error: meErr } = await supabase
+          .from('profiles')
+          .select('is_verified')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (meErr) throw meErr;
+      if (!me?.is_verified) {
+          throw new Error('You must be verified to post a status image.');
+      }
+  };
+
+  const uploadStatusImage = async (uri: string): Promise<string> => {
+      if (!user) throw new Error('You must be signed in.');
+      if (uri.startsWith('http') && !uri.startsWith('blob:')) {
+          throw new Error('Unsupported image source.');
+      }
+
+      const path = `status/${user.id}/${Date.now()}.jpeg`;
+
+      // Web (blob:) can be uploaded directly.
+      if (uri.startsWith('blob:')) {
+          const res = await fetch(uri);
+          if (!res.ok) throw new Error('Failed to read selected image.');
+          const arraybuffer = await res.arrayBuffer();
+          const { error: uploadError } = await supabase.storage
+              .from('avatars')
+              .upload(path, arraybuffer, { contentType: `image/jpeg` });
+          if (uploadError) throw uploadError;
+          return path;
+      }
+
+      // Native: compress/resize, then upload.
+      const uploadImage = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: 1080 } }],
+          { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+      const uploadBase64 = uploadImage.base64 || '';
+      if (!uploadBase64) throw new Error('Failed to prepare image for upload.');
+
+      // Convert upload base64 to ArrayBuffer
+      // eslint-disable-next-line no-undef
+      const binaryString = atob(uploadBase64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+      }
+      const arraybuffer = bytes.buffer;
+
+      const { error: uploadError } = await supabase.storage
+          .from('avatars')
+          .upload(path, arraybuffer, { contentType: `image/jpeg` });
+      if (uploadError) throw uploadError;
+      return path;
+  };
+
+  const sendStatusFromCamera = async (uri: string, caption: string) => {
+      if (!user) throw new Error('You must be signed in.');
+      setUpdating(true);
+      try {
+          toast.show('Posting status...', 'info');
+          await requireVerifiedForImageStatus();
+          const contentPath = await uploadStatusImage(uri);
+
+          const { error } = await supabase.from('statuses').insert({
+              user_id: user.id,
+              content: contentPath,
+              type: 'image',
+              caption: caption?.trim() ? caption.trim() : null,
+              created_at: new Date().toISOString(),
+              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          });
+          if (error) throw error;
+
+          toast.show('Status posted!', 'success');
+          fetchStatus();
+      } catch (error: any) {
+          toast.show(error.message || 'Failed to post status', 'error');
+          throw error;
+      } finally {
+          setUpdating(false);
       }
   };
 
@@ -472,51 +642,8 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           if (draftImage) {
               type = 'image';
 
-              // Trust-based system:
-              // Image statuses are only allowed for verified users.
-              const { data: me, error: meErr } = await supabase
-                  .from('profiles')
-                  .select('is_verified')
-                  .eq('id', user.id)
-                  .maybeSingle();
-
-              if (meErr) throw meErr;
-              if (!me?.is_verified) {
-                  throw new Error('You must be verified to post a status image.');
-              }
-
-              if (draftImage.startsWith('http')) {
-                  // For now, only allow local uploads; remote URLs are easy to spoof.
-                  throw new Error('Unsupported image source.');
-              }
-
-              // Prepare upload image (compressed for speed).
-              const uploadImage = await ImageManipulator.manipulateAsync(
-                  draftImage,
-                  [{ resize: { width: 1080 } }],
-                  { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-              );
-              const uploadBase64 = uploadImage.base64 || '';
-              if (!uploadBase64) {
-                  throw new Error('Failed to prepare image for upload.');
-              }
-
-              // Convert upload base64 to ArrayBuffer
-              const binaryString = atob(uploadBase64);
-              const bytes = new Uint8Array(binaryString.length);
-              for (let i = 0; i < binaryString.length; i++) {
-                  bytes[i] = binaryString.charCodeAt(i);
-              }
-              const arraybuffer = bytes.buffer;
-
-              const path = `status/${user.id}/${Date.now()}.jpeg`;
-
-              const { error: uploadError } = await supabase.storage
-                  .from('avatars')
-                  .upload(path, arraybuffer, { contentType: `image/jpeg` });
-
-              if (uploadError) throw uploadError;
-              content = path;
+              await requireVerifiedForImageStatus();
+              content = await uploadStatusImage(draftImage);
           } else if (draftText.trim()) {
               type = 'text';
               content = draftText;
@@ -1025,7 +1152,20 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <StatusContext.Provider value={{ openModal, openCamera, closeModal, activeStatuses, fetchStatus, deleteStatus }}>
+    <StatusContext.Provider
+      value={{
+        openModal,
+        openCamera,
+        closeModal,
+        activeStatuses,
+        seenStatusIds,
+        currentProfile: userProfile,
+        openMyStatusViewer,
+        openStatusViewer,
+        fetchStatus,
+        deleteStatus,
+      }}
+    >
       {children}
       
       {/* Status Modal */}
@@ -1220,7 +1360,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           setCameraModalVisible(false);
           setCameraFromSwipe(false);
         }}
-        onPhotoTaken={handleCameraPhoto}
+        onSendStatus={sendStatusFromCamera}
         slideFromRight={cameraFromSwipe}
         source={cameraSource}
       />
@@ -1228,11 +1368,13 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       {/* Status Preview Modal - Shows how others see your status */}
       <StatusPreviewModal
         visible={previewModalVisible}
-        statuses={activeStatuses}
-        profile={userProfile}
+        statuses={previewStatuses}
+        profile={previewProfile}
         startIndex={previewStartIndex}
-        onClose={() => setPreviewModalVisible(false)}
-        onDelete={deleteStatus}
+        onClose={closeViewer}
+        allowDelete={previewAllowDelete}
+        onDelete={previewAllowDelete ? deleteStatus : undefined}
+        onViewed={(statusId) => markStatusSeen(statusId)}
       />
     </StatusContext.Provider>
   );
@@ -1268,18 +1410,23 @@ function StatusPreviewModal({
     profile, 
     startIndex = 0,
     onClose, 
-    onDelete 
+    allowDelete = false,
+    onDelete,
+    onViewed,
 }: { 
     visible: boolean; 
     statuses: StatusItem[]; 
     profile: { avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null;
     startIndex?: number;
     onClose: () => void;
-    onDelete: (id: string) => Promise<void>;
+    allowDelete?: boolean;
+    onDelete?: (id: string) => Promise<void>;
+    onViewed?: (id: string) => void;
 }) {
     const { width, height } = useWindowDimensions();
     const insets = useSafeAreaInsets();
     const [activeIndex, setActiveIndex] = useState(startIndex);
+    const swipeStartYRef = useRef<number | null>(null);
     
     // Reset index when statuses change
     useEffect(() => {
@@ -1307,15 +1454,54 @@ function StatusPreviewModal({
         city: null,
         is_verified: false
     };
-    
+ 
+    // Derive current status *before* any early returns so hooks never change order.
+    const currentStatus = statuses[activeIndex];
+    const currentStatusId = currentStatus?.id ?? null;
+
+    // Mark current status as viewed (for story carousel hiding)
+    useEffect(() => {
+        if (!visible) return;
+        if (!currentStatusId) return;
+        onViewed?.(currentStatusId);
+    }, [visible, currentStatusId, onViewed]);
+
+    // Swipe down to close (Instagram-style)
+    const swipeDownResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => false,
+            onStartShouldSetPanResponderCapture: () => false,
+            onMoveShouldSetPanResponder: (_evt, gestureState) => {
+                const isVertical = Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+                const isDown = gestureState.dy > 10;
+                return visible && isVertical && isDown;
+            },
+            onMoveShouldSetPanResponderCapture: (_evt, gestureState) => {
+                const isVertical = Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+                const isDown = gestureState.dy > 10;
+                return visible && isVertical && isDown;
+            },
+            onPanResponderGrant: (evt) => {
+                swipeStartYRef.current = evt.nativeEvent.pageY;
+            },
+            onPanResponderRelease: (_evt, gestureState) => {
+                swipeStartYRef.current = null;
+                const shouldClose = gestureState.dy > 90 || (gestureState.vy > 0.85 && gestureState.dy > 40);
+                if (shouldClose) onClose();
+            },
+            onPanResponderTerminate: () => {
+                swipeStartYRef.current = null;
+            },
+        })
+    ).current;
+
     // Always render Modal, but control visibility
     if (statuses.length === 0) {
         return null;
     }
     
-    const currentStatus = statuses[activeIndex];
-    if (!currentStatus && statuses.length > 0) {
-        // If current status is invalid but we have statuses, reset to first
+    if (!currentStatus) {
+        // If current status is invalid but we have statuses, don't render.
         return null;
     }
     
@@ -1355,7 +1541,7 @@ function StatusPreviewModal({
             statusBarTranslucent
             onRequestClose={onClose}
         >
-            <View className="flex-1 bg-black">
+            <View className="flex-1 bg-black" {...swipeDownResponder.panHandlers}>
                 {/* Status Progress Bars */}
                 <View
                     className="absolute left-2 right-2 flex-row gap-1 z-50 h-1"
@@ -1436,22 +1622,24 @@ function StatusPreviewModal({
                         </Text>
                     ) : null}
                     <View className="flex-row items-center justify-between">
-                        <Text className="text-gray-300 text-xs italic">Tap left/right to navigate</Text>
-                        <TouchableOpacity
-                            onPress={async () => {
-                                const deletingIndex = activeIndex;
-                                await onDelete(currentStatus.id);
-                                // Adjust index after deletion
-                                if (statuses.length === 1) {
-                                    onClose();
-                                } else if (deletingIndex >= statuses.length - 1 && deletingIndex > 0) {
-                                    setActiveIndex(deletingIndex - 1);
-                                }
-                            }}
-                            className="bg-red-500/80 px-4 py-2 rounded-full"
-                        >
-                            <Text className="text-white text-xs font-bold">Delete</Text>
-                        </TouchableOpacity>
+                        <Text className="text-gray-300 text-xs italic">Tap left/right • Swipe down to close</Text>
+                        {allowDelete && onDelete && (
+                            <TouchableOpacity
+                                onPress={async () => {
+                                    const deletingIndex = activeIndex;
+                                    await onDelete(currentStatus.id);
+                                    // Adjust index after deletion
+                                    if (statuses.length === 1) {
+                                        onClose();
+                                    } else if (deletingIndex >= statuses.length - 1 && deletingIndex > 0) {
+                                        setActiveIndex(deletingIndex - 1);
+                                    }
+                                }}
+                                className="bg-black/30 border border-white/10 p-3 rounded-full"
+                            >
+                                <IconSymbol name="trash" size={18} color="white" />
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </View>
 

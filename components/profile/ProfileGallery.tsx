@@ -1,8 +1,8 @@
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Text, TouchableOpacity, View, LayoutAnimation } from 'react-native';
-import { IconSymbol } from '@/components/ui/icon-symbol';
+import { ActivityIndicator, Alert, LayoutAnimation, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
 type Photo = {

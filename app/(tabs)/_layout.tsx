@@ -15,6 +15,7 @@ export default function TabLayout() {
   const { user } = useAuth();
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
   // Fetch pending requests count
   useEffect(() => {
@@ -102,6 +103,39 @@ export default function TabLayout() {
     };
   }, [user]);
 
+  // Fetch unread notifications count (so tapping a notification clears the Circle badge)
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchUnreadNotifications = async () => {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .or('read.is.null,read.eq.false');
+
+      setUnreadNotificationsCount(count || 0);
+    };
+
+    fetchUnreadNotifications();
+
+    const subscription = supabase
+      .channel('unread-notifications')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
+      }, () => {
+        fetchUnreadNotifications();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, [user]);
+
   return (
     <StatusProvider>
         <View style={{ flex: 1 }}>
@@ -111,7 +145,7 @@ export default function TabLayout() {
           tabBarActiveTintColor: '#2962FF', // Vibrant Blue
           tabBarInactiveTintColor: '#9CA3AF', // Gray-400
           headerShown: false,
-          sceneContainerStyle: { backgroundColor: 'transparent' },
+          sceneStyle: { backgroundColor: 'transparent' },
           tabBarStyle: {
               backgroundColor: 'transparent', // Transparent to show gradient backdrop
               borderTopWidth: 0, // Remove hard border completely
@@ -130,21 +164,22 @@ export default function TabLayout() {
               fontSize: 10,
           },
           tabBarBackground: () => (
-            <LinearGradient
-              colors={[
-                'rgba(255,255,255,0.78)',
-                'rgba(241,245,249,0.78)',
-                'rgba(226,232,240,0.78)',
-                'rgba(241,245,249,0.78)',
-                'rgba(255,255,255,0.78)',
-              ]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              locations={[0, 0.3, 0.5, 0.7, 1]}
-              style={{
-                flex: 1,
-              }}
-            />
+            <View style={{ flex: 1 }}>
+              <LinearGradient
+                colors={[
+                  'rgba(255,255,255,0.78)',
+                  'rgba(241,245,249,0.78)',
+                  'rgba(226,232,240,0.78)',
+                  'rgba(241,245,249,0.78)',
+                  'rgba(255,255,255,0.78)',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                locations={[0, 0.3, 0.5, 0.7, 1]}
+                style={{ flex: 1 }}
+              />
+
+            </View>
           ),
         }}
         >
@@ -165,14 +200,32 @@ export default function TabLayout() {
         <Tabs.Screen
           name="inbox"
           options={{
-            title: 'Inbox',
+            title: 'Circle',
             tabBarIcon: ({ color }) => (
-              <View>
-                <IconSymbol size={28} name="tray.fill" color={color} />
-                {(pendingRequestsCount > 0 || unreadMessagesCount > 0) && (
-                  <View className="absolute -top-1 -right-1 bg-red-500 rounded-full min-w-[18px] h-[18px] items-center justify-center px-1 border-2 border-white">
-                    <Text className="text-white text-[9px] font-bold">
-                      {pendingRequestsCount + unreadMessagesCount > 9 ? '9+' : String(pendingRequestsCount + unreadMessagesCount)}
+              <View style={{ width: 64, height: 40, alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                <IconSymbol size={34} name="circle" color={color} />
+                {(pendingRequestsCount > 0 || unreadMessagesCount > 0 || unreadNotificationsCount > 0) && (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      right: 8,
+                      minWidth: 18,
+                      height: 18,
+                      paddingHorizontal: 4,
+                      borderRadius: 999,
+                      backgroundColor: '#EF4444',
+                      borderWidth: 2,
+                      borderColor: '#FFFFFF',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ color: 'white', fontSize: 9, fontWeight: '800' }}>
+                      {pendingRequestsCount + unreadMessagesCount + unreadNotificationsCount > 9
+                        ? '9+'
+                        : String(pendingRequestsCount + unreadMessagesCount + unreadNotificationsCount)}
                     </Text>
                   </View>
                 )}

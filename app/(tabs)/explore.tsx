@@ -1,3 +1,4 @@
+import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
@@ -52,6 +53,7 @@ type ProfileData = {
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const toast = useToast();
+  const { activeStatuses, openMyStatusViewer } = useStatus();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -245,19 +247,46 @@ export default function ProfileScreen() {
             <View className="px-5 -mt-16">
                 {/* Profile Photo Circle with Apple Glass Morphism - Centered horizontally */}
                 <View className="items-center mb-4">
-                  <View
+                  <Pressable
+                    onPress={() => {
+                      if (activeStatuses.length > 0) openMyStatusViewer(0);
+                    }}
                     style={{
                       width: 144,
                       height: 144,
                       borderRadius: 72,
-                      overflow: 'hidden',
-                      shadowColor: '#000',
-                      shadowOffset: { width: 0, height: 8 },
-                      shadowOpacity: 0.25,
-                      shadowRadius: 24,
-                      elevation: 20,
                     }}
                   >
+                    <View
+                      style={{
+                        width: 144,
+                        height: 144,
+                        borderRadius: 72,
+                        overflow: 'hidden',
+                        shadowColor: activeStatuses.length > 0 ? '#3B82F6' : '#000',
+                        shadowOffset: { width: 0, height: 8 },
+                        shadowOpacity: activeStatuses.length > 0 ? 0.35 : 0.25,
+                        shadowRadius: activeStatuses.length > 0 ? 28 : 24,
+                        elevation: activeStatuses.length > 0 ? 24 : 20,
+                      }}
+                    >
+                    {/* Glowing ring when active status exists */}
+                    {activeStatuses.length > 0 && (
+                      <LinearGradient
+                        colors={['rgba(56,189,248,0.95)', 'rgba(168,85,247,0.85)', 'rgba(236,72,153,0.75)']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={{
+                          position: 'absolute',
+                          top: -3,
+                          left: -3,
+                          right: -3,
+                          bottom: -3,
+                          borderRadius: 75,
+                          opacity: 0.9,
+                        }}
+                      />
+                    )}
                     {/* Blur Background - Apple Style Glass */}
                     <BlurView
                       intensity={80}
@@ -302,7 +331,7 @@ export default function ProfileScreen() {
                         bottom: 0,
                         borderRadius: 72,
                         borderWidth: 1.5,
-                        borderColor: 'rgba(255, 255, 255, 0.6)',
+                        borderColor: activeStatuses.length > 0 ? 'rgba(255,255,255,0.85)' : 'rgba(255, 255, 255, 0.6)',
                       }}
                     />
                     {/* Profile Image Container with inset */}
@@ -320,6 +349,7 @@ export default function ProfileScreen() {
                       <ProfileImage path={profile?.avatar_url || null} style={{ width: '100%', height: '100%' }} />
                     </View>
                   </View>
+                  </Pressable>
                 </View>
                 
                 <View className="mt-4 items-center">
