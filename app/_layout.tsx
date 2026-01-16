@@ -1,7 +1,8 @@
 import { ReferralProvider } from '@/components/ReferralProvider';
+import { ThemePreferenceProvider } from '@/components/ThemePreferenceProvider';
 import { TutorialProvider } from '@/components/TutorialProvider';
 import { ToastProvider } from '@/components/ui/ToastProvider';
-import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -124,10 +125,10 @@ function InitialLayout() {
   }
 
   return (
-    <ThemeProvider value={DefaultTheme}>
+    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack screenOptions={{ 
-          headerStyle: { backgroundColor: 'white' },
-          headerTintColor: 'black',
+          headerStyle: { backgroundColor: colorScheme === 'dark' ? '#0B1220' : 'white' },
+          headerTintColor: colorScheme === 'dark' ? 'white' : 'black',
           headerShadowVisible: false,
           headerTitleStyle: { fontWeight: 'bold' }
       }}>
@@ -150,7 +151,7 @@ function InitialLayout() {
         <Stack.Screen name="messages" options={{ headerShown: false }} />
         <Stack.Screen name="events/[id]" options={{ headerShown: false }} />
       </Stack>
-      <StatusBar style="dark" />
+      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>
   );
 }
@@ -163,7 +164,9 @@ export default function RootLayout() {
           <LocationProvider>
             <TutorialProvider>
               <ReferralProvider>
-                <InitialLayout />
+                <ThemePreferenceProvider>
+                  <InitialLayout />
+                </ThemePreferenceProvider>
               </ReferralProvider>
             </TutorialProvider>
           </LocationProvider>

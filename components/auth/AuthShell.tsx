@@ -1,3 +1,4 @@
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
@@ -127,6 +128,8 @@ function AnimatedSubtitle() {
 
 export function AuthShell({ title, subtitle, children, footer }: AuthShellProps) {
   const showAnimatedSubtitle = !subtitle; // Show animated subtitle if no custom subtitle provided
+  const scheme = useColorScheme() ?? 'light';
+  const tint = scheme === 'dark' ? 'dark' : 'light';
 
   return (
     <View className="flex-1 bg-white">
@@ -162,7 +165,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
           style={{ flex: 1, borderRadius: 999 }}
         />
         {/* Extra edge-softening blur */}
-        <BlurView intensity={40} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999 }} />
+        <BlurView intensity={40} tint={tint} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999 }} />
       </View>
 
       {/* Orb B (cyan/blue glimpse) */}
@@ -193,7 +196,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
           style={{ flex: 1, borderRadius: 999 }}
         />
         {/* Extra edge-softening blur */}
-        <BlurView intensity={35} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999 }} />
+        <BlurView intensity={35} tint={tint} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999 }} />
       </View>
 
       {/* Tiny warm highlight (very subtle) */}
@@ -224,7 +227,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
           style={{ flex: 1, borderRadius: 999 }}
         />
         {/* Extra edge-softening blur */}
-        <BlurView intensity={28} tint="light" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999 }} />
+        <BlurView intensity={28} tint={tint} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999 }} />
       </View>
 
       {/* Global soft blur wash to eliminate any remaining harsh transitions between orbs */}
@@ -232,7 +235,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
         <BlurView
           pointerEvents="none"
           intensity={18}
-          tint="light"
+          tint={tint}
           style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
         />
       )}
@@ -259,7 +262,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
               {/* Main Auth Card */}
               <BlurView
                 intensity={Platform.OS === 'android' ? 18 : 45}
-                tint="light"
+                tint={tint}
                 style={{
                   borderRadius: 28,
                   overflow: 'hidden',

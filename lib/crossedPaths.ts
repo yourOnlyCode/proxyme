@@ -376,3 +376,12 @@ export async function fetchCrossedPathPeople(params: {
   return [];
 }
 
+export async function fetchCrossedPathsBadgeCount(): Promise<number> {
+  const { data, error } = await supabase.rpc('get_my_crossed_paths_badge_count', {});
+  if (!error) {
+    const n = typeof data === 'number' ? data : Number(data);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+  if (looksLikeMissingRpc(error) || looksLikeMissingTable(error)) return 0;
+  return 0;
+}

@@ -5,6 +5,7 @@ import Avatar from '@/components/profile/Avatar';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { ClubDetail, ClubEvent, ClubMember, ForumReply, ForumTopic } from '@/lib/types';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Calendar from 'expo-calendar';
@@ -24,6 +25,14 @@ export default function ClubDetailScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
+  const cardStyle = {
+    backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+    borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+  } as const;
+  const textPrimaryStyle = { color: isDark ? '#E5E7EB' : undefined } as const;
+  const textSecondaryStyle = { color: isDark ? 'rgba(226,232,240,0.65)' : undefined } as const;
   const [club, setClub] = useState<ClubDetail | null>(null);
   const [memberStatus, setMemberStatus] = useState<'accepted' | 'invited' | 'pending' | null>(null);
   const [role, setRole] = useState<'owner' | 'admin' | 'member' | null>(null);
@@ -1388,19 +1397,27 @@ export default function ClubDetailScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           className="flex-1 bg-gray-50"
+          style={{ backgroundColor: isDark ? '#0B1220' : undefined }}
       >
         {/* Custom Header */}
-        <View className="bg-white border-b border-gray-200 px-4 pb-4 flex-row items-center" style={{ paddingTop: insets.top + 12 }}>
+        <View
+          className="bg-white border-b border-gray-200 px-4 pb-4 flex-row items-center"
+          style={{
+            paddingTop: insets.top + 12,
+            backgroundColor: isDark ? '#0B1220' : undefined,
+            borderBottomColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+          }}
+        >
             <TouchableOpacity onPress={() => router.back()} className="mr-4">
-                <IconSymbol name="chevron.left" size={24} color="#1A1A1A" />
+                <IconSymbol name="chevron.left" size={24} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
             </TouchableOpacity>
-            <Text className="text-xl font-bold text-ink flex-1">{club.name}</Text>
+            <Text className="text-xl font-bold text-ink flex-1" style={textPrimaryStyle}>{club.name}</Text>
             {isAdmin && (
                 <TouchableOpacity 
                     onPress={() => setActiveTab('settings')}
                     className="ml-4"
                 >
-                    <IconSymbol name="gearshape.fill" size={24} color="#1A1A1A" />
+                    <IconSymbol name="gearshape.fill" size={24} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
                 </TouchableOpacity>
             )}
         </View>
@@ -1408,11 +1425,11 @@ export default function ClubDetailScreen() {
         {/* Access Control View */}
         {!isMember ? (
             <View className="flex-1 p-6 items-center">
-                <Text className="text-gray-600 text-center mb-6 text-lg">{club.description || 'No description provided.'}</Text>
+                <Text className="text-gray-600 text-center mb-6 text-lg" style={textSecondaryStyle}>{club.description || 'No description provided.'}</Text>
 
                 {leaders.length > 0 && (
-                  <View className="w-full bg-white border border-gray-100 rounded-2xl p-4 mb-6">
-                    <Text className="text-gray-500 font-bold text-xs mb-3">OWNER & ADMINS</Text>
+                  <View className="w-full bg-white border border-gray-100 rounded-2xl p-4 mb-6" style={cardStyle}>
+                    <Text className="text-gray-500 font-bold text-xs mb-3" style={textSecondaryStyle}>OWNER & ADMINS</Text>
                     <View className="flex-row flex-wrap">
                       {leaders.map((l) => (
                         <TouchableOpacity
@@ -1426,14 +1443,14 @@ export default function ClubDetailScreen() {
                           </View>
                           <View>
                             <View className="flex-row items-center">
-                              <Text className="text-ink font-bold text-sm">
+                              <Text className="text-ink font-bold text-sm" style={textPrimaryStyle}>
                                 {l.profile.full_name || l.profile.username}
                               </Text>
                               {l.profile.is_verified && (
                                 <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
                               )}
                             </View>
-                            <Text className="text-gray-400 text-[10px] font-bold uppercase">
+                            <Text className="text-gray-400 text-[10px] font-bold uppercase" style={textSecondaryStyle}>
                               {l.role}
                             </Text>
                           </View>
@@ -1444,13 +1461,13 @@ export default function ClubDetailScreen() {
                 )}
                 
                 <IconSymbol name="lock.fill" size={64} color="#CBD5E0" />
-                <Text className="text-xl font-bold mt-4 mb-2 text-ink">Private Club</Text>
+                <Text className="text-xl font-bold mt-4 mb-2 text-ink" style={textPrimaryStyle}>Private Club</Text>
                 {joinPolicy === 'invite_only' ? (
-                  <Text className="text-gray-500 text-center mb-8">This club is invite only. You must be invited by an admin to join.</Text>
+                  <Text className="text-gray-500 text-center mb-8" style={textSecondaryStyle}>This club is invite only. You must be invited by an admin to join.</Text>
                 ) : memberStatus === 'pending' ? (
-                  <Text className="text-gray-500 text-center mb-8">Request sent. The owner will review it soon.</Text>
+                  <Text className="text-gray-500 text-center mb-8" style={textSecondaryStyle}>Request sent. The owner will review it soon.</Text>
                 ) : (
-                  <Text className="text-gray-500 text-center mb-8">Request to join and the owner will review it.</Text>
+                  <Text className="text-gray-500 text-center mb-8" style={textSecondaryStyle}>Request to join and the owner will review it.</Text>
                 )}
 
                 {memberStatus === 'invited' && (
@@ -1929,8 +1946,8 @@ export default function ClubDetailScreen() {
                         <View style={{ marginHorizontal: -16, marginTop: -16, marginBottom: 16 }}>
                             <ClubBanner imagePath={club.image_url} city={club.city} />
                         </View>
-                        <GlassCard className="mb-4" contentClassName="p-6" tint="light" intensity={22}>
-                            <Text className="text-2xl font-bold text-ink mb-6">Club Settings</Text>
+                        <GlassCard className="mb-4" contentClassName="p-6" tint={isDark ? 'dark' : 'light'} intensity={22}>
+                            <Text className="text-2xl font-bold text-ink mb-6" style={textPrimaryStyle}>Club Settings</Text>
                             
                             {/* Club Name */}
                             <View className="mb-4">
@@ -2038,7 +2055,7 @@ export default function ClubDetailScreen() {
 
                         {/* Danger Zone */}
                         {role === 'owner' && (
-                            <GlassCard contentClassName="p-6" tint="light" intensity={18}>
+                            <GlassCard contentClassName="p-6" tint={isDark ? 'dark' : 'light'} intensity={18}>
                                 <Text className="text-xl font-bold text-red-600 mb-4">Danger Zone</Text>
                                 <TouchableOpacity
                                     onPress={() => {

@@ -2,6 +2,7 @@ import { StatusFloatingButton } from '@/components/StatusFloatingButton';
 import { StatusProvider } from '@/components/StatusProvider';
 import { OrbBackground } from '@/components/ui/OrbBackground';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth';
 import { useProxyLocation } from '@/lib/location';
 import { supabase } from '@/lib/supabase';
@@ -13,6 +14,8 @@ import { Platform, Text, View } from 'react-native';
 export default function TabLayout() {
   const { address } = useProxyLocation();
   const { user } = useAuth();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
@@ -142,8 +145,8 @@ export default function TabLayout() {
           <OrbBackground opacity={0.42} />
           <Tabs
             screenOptions={{
-          tabBarActiveTintColor: '#2962FF', // Vibrant Blue
-          tabBarInactiveTintColor: '#9CA3AF', // Gray-400
+          tabBarActiveTintColor: isDark ? '#93C5FD' : '#2962FF',
+          tabBarInactiveTintColor: isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF',
           headerShown: false,
           sceneStyle: { backgroundColor: 'transparent' },
           tabBarStyle: {
@@ -167,11 +170,11 @@ export default function TabLayout() {
             <View style={{ flex: 1 }}>
               <LinearGradient
                 colors={[
-                  'rgba(255,255,255,0.78)',
-                  'rgba(241,245,249,0.78)',
-                  'rgba(226,232,240,0.78)',
-                  'rgba(241,245,249,0.78)',
-                  'rgba(255,255,255,0.78)',
+                  isDark ? 'rgba(11,18,32,0.76)' : 'rgba(255,255,255,0.78)',
+                  isDark ? 'rgba(15,23,42,0.76)' : 'rgba(241,245,249,0.78)',
+                  isDark ? 'rgba(2,6,23,0.76)' : 'rgba(226,232,240,0.78)',
+                  isDark ? 'rgba(15,23,42,0.76)' : 'rgba(241,245,249,0.78)',
+                  isDark ? 'rgba(11,18,32,0.76)' : 'rgba(255,255,255,0.78)',
                 ]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}

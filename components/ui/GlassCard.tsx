@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform, StyleProp, View, ViewStyle } from 'react-native';
 import { BlurView } from 'expo-blur';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 type GlassCardProps = {
   children: React.ReactNode;
@@ -29,9 +30,12 @@ export function GlassCard({
   contentClassName,
   style,
   intensity = 40,
-  tint = 'light',
+  tint,
 }: GlassCardProps) {
   const useBlur = Platform.OS === 'ios' || Platform.OS === 'web';
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
+  const resolvedTint = tint ?? (isDark ? 'dark' : 'light');
 
   return (
     <View
@@ -41,10 +45,10 @@ export function GlassCard({
           borderRadius: 24,
           overflow: 'hidden',
           borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.18)',
+          borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(255,255,255,0.18)',
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 10 },
-          shadowOpacity: 0.12,
+          shadowOpacity: isDark ? 0.22 : 0.12,
           shadowRadius: 22,
           elevation: 10,
         },
@@ -54,7 +58,7 @@ export function GlassCard({
       {useBlur ? (
         <BlurView
           intensity={intensity}
-          tint={tint}
+          tint={resolvedTint}
           style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
         />
       ) : null}
@@ -62,7 +66,9 @@ export function GlassCard({
       <View
         className={contentClassName ?? ''}
         style={{
-          backgroundColor: useBlur ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.75)',
+          backgroundColor: useBlur
+            ? (isDark ? 'rgba(2,6,23,0.28)' : 'rgba(255,255,255,0.18)')
+            : (isDark ? 'rgba(2,6,23,0.72)' : 'rgba(255,255,255,0.75)'),
         }}
       >
         {children}

@@ -1,5 +1,6 @@
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +10,11 @@ export default function SettingsScreen() {
   const { signOut } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
+  const cardStyle = { backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined } as const;
+  const textPrimary = { color: isDark ? '#E5E7EB' : undefined } as const;
+  const textSecondary = { color: isDark ? 'rgba(226,232,240,0.65)' : undefined } as const;
 
   const Row = ({
     icon,
@@ -33,14 +39,15 @@ export default function SettingsScreen() {
         shadowOpacity: 0.06,
         shadowRadius: 16,
         elevation: 2,
+        ...(danger ? {} : cardStyle),
       }}
     >
       <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${danger ? 'bg-red-50' : 'bg-gray-50'}`}>
-        <IconSymbol name={icon} size={18} color={danger ? '#EF4444' : '#111827'} />
+        <IconSymbol name={icon} size={18} color={danger ? '#EF4444' : (isDark ? '#E5E7EB' : '#111827')} />
       </View>
       <View className="flex-1 pr-2">
-        <Text className={`${danger ? 'text-red-600' : 'text-ink'} font-bold text-base`}>{title}</Text>
-        {subtitle ? <Text className="text-gray-500 text-xs mt-1">{subtitle}</Text> : null}
+        <Text className={`${danger ? 'text-red-600' : 'text-ink'} font-bold text-base`} style={danger ? undefined : textPrimary}>{title}</Text>
+        {subtitle ? <Text className="text-gray-500 text-xs mt-1" style={danger ? undefined : textSecondary}>{subtitle}</Text> : null}
       </View>
       <IconSymbol name="chevron.right" size={16} color="#9CA3AF" />
     </TouchableOpacity>
@@ -48,12 +55,12 @@ export default function SettingsScreen() {
 
   return (
     <KeyboardDismissWrapper>
-      <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>
+      <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top, backgroundColor: isDark ? '#0B1220' : undefined }}>
         <View className="px-4 py-3 flex-row items-center">
           <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-            <IconSymbol name="chevron.left" size={18} color="#111827" />
+            <IconSymbol name="chevron.left" size={18} color={isDark ? '#E5E7EB' : '#111827'} />
           </TouchableOpacity>
-          <Text className="flex-1 text-center text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular' }}>
+          <Text className="flex-1 text-center text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}>
             Settings
           </Text>
           <View className="w-10" />

@@ -4,6 +4,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { GlassCard } from '@/components/ui/GlassCard';
 import EventCard from './EventCard';
 import { ClubEvent } from '@/lib/types';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 interface ClubEventsTabProps {
     events: ClubEvent[];
@@ -28,11 +29,13 @@ export default function ClubEventsTab({
     onAddToCalendar,
     onViewUserProfile
 }: ClubEventsTabProps) {
+    const scheme = useColorScheme() ?? 'light';
+    const isDark = scheme === 'dark';
     return (
         <View className="flex-1">
             <View className="px-4 pt-4">
-                <GlassCard contentClassName="p-4 flex-row justify-between items-center" tint="light" intensity={20}>
-                    <Text className="font-bold text-gray-600">{events.length} Events</Text>
+                <GlassCard contentClassName="p-4 flex-row justify-between items-center" tint={isDark ? 'dark' : 'light'} intensity={20}>
+                    <Text className="font-bold text-gray-600" style={{ color: isDark ? '#E5E7EB' : undefined }}>{events.length} Events</Text>
                     {isAdmin && (
                         <TouchableOpacity 
                             onPress={() => onSetEventModalVisible(true)}

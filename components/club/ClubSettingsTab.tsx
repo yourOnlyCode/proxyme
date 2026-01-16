@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, ScrollView, TextInput, TouchableOpacity, Keyboard, ActivityIndicator, Alert } from 'react-native';
 import { ClubDetail } from '@/lib/types';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 interface ClubSettingsTabProps {
     club: ClubDetail | null;
@@ -31,10 +32,12 @@ export default function ClubSettingsTab({
     currentMemberCount,
     onDeleteClub
 }: ClubSettingsTabProps) {
+    const scheme = useColorScheme() ?? 'light';
+    const isDark = scheme === 'dark';
     return (
-        <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16 }}>
-            <View className="bg-white rounded-2xl p-6 mb-4 shadow-sm">
-                <Text className="text-2xl font-bold text-ink mb-6">Club Settings</Text>
+        <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16 }} style={{ backgroundColor: isDark ? '#0B1220' : undefined }}>
+            <View className="bg-white rounded-2xl p-6 mb-4 shadow-sm" style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderWidth: isDark ? 1 : 0, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
+                <Text className="text-2xl font-bold text-ink mb-6" style={{ color: isDark ? '#E5E7EB' : undefined }}>Club Settings</Text>
                 
                 {/* Club Name */}
                 <View className="mb-4">
@@ -44,6 +47,7 @@ export default function ClubSettingsTab({
                         onChangeText={onSetSettingsName}
                         placeholder="Enter club name"
                         className="bg-gray-100 p-4 rounded-xl text-lg"
+                        style={{ color: isDark ? '#E5E7EB' : undefined, backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : undefined }}
                         returnKeyType="next"
                         blurOnSubmit={false}
                         onSubmitEditing={() => Keyboard.dismiss()}
@@ -60,7 +64,7 @@ export default function ClubSettingsTab({
                         multiline
                         numberOfLines={4}
                         className="bg-gray-100 p-4 rounded-xl text-base h-32"
-                        style={{ textAlignVertical: 'top' }}
+                        style={{ textAlignVertical: 'top', color: isDark ? '#E5E7EB' : undefined, backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : undefined }}
                         returnKeyType="done"
                         blurOnSubmit={true}
                         onSubmitEditing={() => Keyboard.dismiss()}
@@ -76,6 +80,7 @@ export default function ClubSettingsTab({
                         placeholder="Leave empty for unlimited"
                         keyboardType="numeric"
                         className="bg-gray-100 p-4 rounded-xl text-lg"
+                        style={{ color: isDark ? '#E5E7EB' : undefined, backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : undefined }}
                         returnKeyType="done"
                         blurOnSubmit={true}
                         onSubmitEditing={() => Keyboard.dismiss()}
@@ -105,7 +110,7 @@ export default function ClubSettingsTab({
 
             {/* Danger Zone */}
             {role === 'owner' && (
-                <View className="bg-white rounded-2xl p-6 shadow-sm">
+                <View className="bg-white rounded-2xl p-6 shadow-sm" style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderWidth: isDark ? 1 : 0, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
                     <Text className="text-xl font-bold text-red-600 mb-4">Danger Zone</Text>
                     <TouchableOpacity
                         onPress={onDeleteClub}

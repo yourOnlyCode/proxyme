@@ -1,6 +1,7 @@
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getUserConnectionsList } from '@/lib/connections';
 import { BlurView } from 'expo-blur';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -119,6 +120,8 @@ export default function InboxScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { activeStatuses, currentProfile, openMyStatusViewer, openStatusViewer, seenStatusIds } = useStatus();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
   const [items, setItems] = useState<InboxItem[]>(() => getUiCache<InboxItem[]>('inbox.items') ?? []);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>(() => getUiCache<UpcomingEvent[]>('inbox.upcoming') ?? []);
   const [loading, setLoading] = useState(items.length === 0); // initial-only loader
@@ -138,6 +141,14 @@ export default function InboxScreen() {
   const composeClosingRef = useRef(false);
   const screenH = Dimensions.get('window').height || 800;
   const composeSheetHeight = Math.min(560, Math.max(420, Math.floor(screenH * 0.72)));
+
+  const cardStyle = {
+    backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+    borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+  } as const;
+
+  const titleStyle = { color: isDark ? '#E5E7EB' : undefined } as const;
+  const subStyle = { color: isDark ? 'rgba(226,232,240,0.65)' : undefined } as const;
 
   // Avoid stale closures inside subscriptions/focus effects.
   const hasItemsRef = useRef(items.length > 0);
@@ -660,7 +671,7 @@ export default function InboxScreen() {
         : 'No interests listed';
 
       return (
-        <View className="flex-row items-center justify-between bg-white p-4 rounded-xl mb-3 shadow-sm border border-gray-100">
+        <View className="flex-row items-center justify-between bg-white p-4 rounded-xl mb-3 shadow-sm border border-gray-100" style={cardStyle}>
           <TouchableOpacity 
             className="flex-row items-center flex-1"
             onPress={() => openProfile(item.request!.sender.id, item.id)}
@@ -669,8 +680,8 @@ export default function InboxScreen() {
               <Avatar path={item.request.sender.avatar_url} />
             </View>
             <View className="ml-3 flex-1 pr-2">
-              <Text className="font-bold text-lg mb-1">{item.request.sender.username}</Text>
-              <Text className="text-gray-500 text-xs mb-1">Sent interest</Text>
+              <Text className="font-bold text-lg mb-1" style={titleStyle}>{item.request.sender.username}</Text>
+              <Text className="text-gray-500 text-xs mb-1" style={subStyle}>Sent interest</Text>
               <Text className="text-xs text-business font-medium" numberOfLines={1}>
                 {interestsSummary}
               </Text>
@@ -713,6 +724,7 @@ export default function InboxScreen() {
       return (
         <TouchableOpacity 
           className="flex-row items-center bg-white p-4 rounded-xl mb-3 shadow-sm border border-gray-100"
+          style={cardStyle}
           onPress={() => router.push(`/chat/${item.id}`)}
           onLongPress={() => {
             if (!user?.id) return;
@@ -768,8 +780,8 @@ export default function InboxScreen() {
             )}
           </View>
           <View className="ml-3 flex-1 pr-2">
-            <Text className="font-bold text-lg mb-1">{item.conversation.partner.username}</Text>
-            <Text className="text-gray-500 text-sm" numberOfLines={1}>
+            <Text className="font-bold text-lg mb-1" style={titleStyle}>{item.conversation.partner.username}</Text>
+            <Text className="text-gray-500 text-sm" numberOfLines={1} style={subStyle}>
               {preview}
             </Text>
           </View>
@@ -1027,7 +1039,7 @@ export default function InboxScreen() {
         <View className="w-10" />
         <Text
           className="text-xl text-ink"
-          style={{ fontFamily: 'LibertinusSans-Regular' }}
+          style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}
         >
           Your Circle
         </Text>
@@ -1185,6 +1197,7 @@ export default function InboxScreen() {
       {/* Upcoming Events always at the top */}
       <TouchableOpacity
         className="mx-4 mb-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+        style={cardStyle}
         activeOpacity={0.85}
         onPress={() => setUpcomingVisible(true)}
       >
@@ -1192,8 +1205,8 @@ export default function InboxScreen() {
           <IconSymbol name="calendar" size={18} color="#2563EB" />
         </View>
         <View className="flex-1">
-          <Text className="text-ink font-bold text-base">Upcoming Events</Text>
-          <Text className="text-gray-500 text-xs" numberOfLines={1}>
+          <Text className="text-ink font-bold text-base" style={titleStyle}>Upcoming Events</Text>
+          <Text className="text-gray-500 text-xs" numberOfLines={1} style={subStyle}>
             RSVP’d + Interested events
           </Text>
         </View>
@@ -1209,10 +1222,11 @@ export default function InboxScreen() {
             activeOpacity={0.85}
             onPress={() => router.push('/messages')}
             className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+            style={cardStyle}
           >
             <View className="flex-1">
-              <Text className="text-ink font-bold text-base">Messages</Text>
-              <Text className="text-gray-500 text-xs" numberOfLines={1}>
+              <Text className="text-ink font-bold text-base" style={titleStyle}>Messages</Text>
+              <Text className="text-gray-500 text-xs" numberOfLines={1} style={subStyle}>
                 No new messages
               </Text>
             </View>
@@ -1225,6 +1239,7 @@ export default function InboxScreen() {
             activeOpacity={0.85}
             onPress={() => router.push(`/chat/${unreadMessageItems[0]!.conversation!.id}`)}
             className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+            style={cardStyle}
           >
             <View className="mr-3">
               <View style={{ shadowColor: '#0F172A', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.14, shadowRadius: 14, elevation: 4 }}>
@@ -1232,10 +1247,10 @@ export default function InboxScreen() {
               </View>
             </View>
             <View className="flex-1 pr-2">
-              <Text className="text-ink font-bold text-base" numberOfLines={1}>
+              <Text className="text-ink font-bold text-base" numberOfLines={1} style={titleStyle}>
                 {unreadMessageItems[0]!.conversation!.partner.username}
               </Text>
-              <Text className="text-gray-500 text-xs" numberOfLines={1}>
+              <Text className="text-gray-500 text-xs" numberOfLines={1} style={subStyle}>
                 {unreadMessageItems[0]!.conversation!.last_message?.content || 'New message'}
               </Text>
             </View>

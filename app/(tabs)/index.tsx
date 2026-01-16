@@ -2,6 +2,7 @@ import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatAddressLabel, recordVisit } from '@/lib/crossedPaths';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +29,14 @@ export default function HomeScreen() {
   const { signOut, user } = useAuth();
   const { isProxyActive, toggleProxy, location, address } = useProxyLocation();
   const { openModal, activeStatuses, deleteStatus } = useStatus();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
+  const cardSurfaceStyle = {
+    backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+    borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+  } as const;
+  const textPrimaryStyle = { color: isDark ? '#E5E7EB' : undefined } as const;
+  const textSecondaryStyle = { color: isDark ? 'rgba(226,232,240,0.65)' : undefined } as const;
   const currentStatus = activeStatuses && activeStatuses.length > 0 ? activeStatuses[0] : null;
   // StatusItem has: id, content, type, caption, created_at, expires_at
   const currentStatusImage = currentStatus && currentStatus.type === 'image' ? currentStatus.content : null;
@@ -565,10 +574,11 @@ export default function HomeScreen() {
         className={`mb-6 rounded-3xl overflow-hidden ${isConnected ? 'bg-gray-50' : 'bg-white'} shadow-sm`}
         style={{
           borderWidth: 1,
-          borderColor: 'rgba(148, 163, 184, 0.2)', // Slate-400 with low opacity for glass effect
+          borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148, 163, 184, 0.2)', // Slate-400 with low opacity for glass effect
+          backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.06,
+          shadowOpacity: isDark ? 0.18 : 0.06,
           shadowRadius: 8,
           elevation: 2,
         }}
@@ -578,13 +588,14 @@ export default function HomeScreen() {
           className="px-4 py-3 flex-row items-center justify-between bg-white/50"
           style={{
             borderBottomWidth: 1,
-            borderBottomColor: 'rgba(148, 163, 184, 0.15)', // Glass morphism border
+            borderBottomColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148, 163, 184, 0.15)', // Glass morphism border
+            backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : undefined,
           }}
         >
             <View className="flex-1 pr-2 justify-center">
                 <View className="flex-row items-center mb-1">
                     <TouchableOpacity onPress={() => openProfile(item)}>
-                        <Text className="text-lg font-bold text-ink mr-1" numberOfLines={1}>{item.full_name || item.username}</Text>
+                        <Text className="text-lg font-bold text-ink mr-1" numberOfLines={1} style={textPrimaryStyle}>{item.full_name || item.username}</Text>
                     </TouchableOpacity>
                     {item.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
                     {(!(item as any).connection_id && (item as any).previously_declined) ? (
@@ -626,7 +637,7 @@ export default function HomeScreen() {
                         <IconSymbol name="bubble.left.fill" size={12} color="#10B981" style={{ marginRight: 4 }} />
                     )}
                     {item.status_text && (
-                        <Text numberOfLines={1} className="text-[10px] text-green-800 italic flex-1 font-medium">"{item.status_text}"</Text>
+                        <Text numberOfLines={1} className="text-[10px] text-green-800 italic flex-1 font-medium" style={{ color: isDark ? 'rgba(187,247,208,0.95)' : undefined }}>"{item.status_text}"</Text>
                     )}
                 </TouchableOpacity>
             )}
@@ -766,7 +777,7 @@ export default function HomeScreen() {
             paddingTop: Platform.OS === 'ios' ? 50 : 20,
             paddingBottom: 8,
             paddingHorizontal: 16,
-            backgroundColor: 'rgba(248, 250, 252, 0.78)', // translucent Slate-50 so orbs show through
+            backgroundColor: isDark ? 'rgba(11, 18, 32, 0.76)' : 'rgba(248, 250, 252, 0.78)', // translucent so orbs show through
             overflow: 'hidden',
             borderBottomWidth: 0,
             shadowColor: '#000',
@@ -778,11 +789,11 @@ export default function HomeScreen() {
           {/* Clean Modern Gradient Backdrop - Subtle Overlay */}
           <LinearGradient
             colors={[
-              '#FFFFFF',
-              '#F1F5F9',
-              '#E2E8F0',
-              '#F1F5F9',
-              '#FFFFFF',
+              isDark ? 'rgba(11,18,32,0.88)' : '#FFFFFF',
+              isDark ? 'rgba(15,23,42,0.86)' : '#F1F5F9',
+              isDark ? 'rgba(2,6,23,0.88)' : '#E2E8F0',
+              isDark ? 'rgba(15,23,42,0.86)' : '#F1F5F9',
+              isDark ? 'rgba(11,18,32,0.88)' : '#FFFFFF',
             ]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -803,7 +814,7 @@ export default function HomeScreen() {
               className="w-10 h-10 items-center justify-center"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-                <IconSymbol name="point.topleft.down.curvedto.point.bottomright.up" size={26} color="#2D3748" />
+                <IconSymbol name="point.topleft.down.curvedto.point.bottomright.up" size={26} color={isDark ? '#E5E7EB' : '#2D3748'} />
                 {saveCrossedPaths && isProxyActive && crossedPathsBadgeCount > 0 ? (
                   <View
                     pointerEvents="none"
@@ -819,7 +830,7 @@ export default function HomeScreen() {
                       alignItems: 'center',
                       justifyContent: 'center',
                       borderWidth: 2,
-                      borderColor: 'rgba(248, 250, 252, 0.95)',
+                      borderColor: isDark ? 'rgba(11,18,32,0.95)' : 'rgba(248, 250, 252, 0.95)',
                     }}
                   >
                     <Text style={{ color: 'white', fontSize: 10, fontWeight: '800', lineHeight: 12 }}>
@@ -857,7 +868,7 @@ export default function HomeScreen() {
             right: 0, 
             zIndex: 100, 
             height: ANIMATED_HEADER_HEIGHT,
-            backgroundColor: '#F9FAFB',
+            backgroundColor: isDark ? 'rgba(11,18,32,0.78)' : '#F9FAFB',
             transform: [{ translateY }],
         }}
         className="px-4 pt-4 shadow-sm"
@@ -869,7 +880,8 @@ export default function HomeScreen() {
             className="bg-white rounded-3xl p-3 shadow-sm"
             style={{
               borderWidth: 1,
-              borderColor: 'rgba(148, 163, 184, 0.2)', // Glass morphism border
+              backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+              borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148, 163, 184, 0.2)', // Glass morphism border
               shadowColor: '#000',
               shadowOffset: { width: 0, height: 2 },
               shadowOpacity: 0.08,
@@ -883,8 +895,10 @@ export default function HomeScreen() {
                           <IconSymbol name={isProxyActive ? "location.fill" : "location.slash"} size={18} color={isProxyActive ? "#10B981" : "#9CA3AF"} />
                       </View>
                       <View className="flex-1">
-                          <Text className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">Proxy Mode</Text>
-                          <Text className="text-ink font-bold text-xs leading-4" numberOfLines={1}>
+                          <Text className="text-[10px] font-bold text-gray-400 uppercase mb-0.5" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
+                            Proxy Mode
+                          </Text>
+                          <Text className="text-ink font-bold text-xs leading-4" numberOfLines={1} style={{ color: isDark ? '#E5E7EB' : undefined }}>
                               {isProxyActive ? `Visible at ${getDisplayText(address)}.` : "Hidden from others."}
                           </Text>
                       </View>
@@ -926,14 +940,14 @@ export default function HomeScreen() {
           ListEmptyComponent={
               !isProxyActive ? (
                 <View className="items-center justify-center opacity-30 py-12">
-                    <IconSymbol name="location.slash.fill" size={64} color="#2D3748" />
-                    <Text className="text-center font-bold text-ink text-xl mt-4">Proxy is Off</Text>
-                    <Text className="text-center text-gray-500 text-sm mt-2">Flip the switch to connect.</Text>
+                    <IconSymbol name="location.slash.fill" size={64} color={isDark ? '#94A3B8' : '#2D3748'} />
+                    <Text className="text-center font-bold text-ink text-xl mt-4" style={textPrimaryStyle}>Proxy is Off</Text>
+                    <Text className="text-center text-gray-500 text-sm mt-2" style={textSecondaryStyle}>Flip the switch to connect.</Text>
                 </View>
               ) : (
                 <View className="items-center mt-12 opacity-60">
-                     <Text className="text-ink text-lg font-medium">No one else is here yet.</Text>
-                     <Text className="text-gray-500 text-sm mt-2 text-center px-8">Help grow the community - Tell your friends to turn on Proxy!</Text>
+                     <Text className="text-ink text-lg font-medium" style={textPrimaryStyle}>No one else is here yet.</Text>
+                     <Text className="text-gray-500 text-sm mt-2 text-center px-8" style={textSecondaryStyle}>Help grow the community - Tell your friends to turn on Proxy!</Text>
                 </View>
               )
           }

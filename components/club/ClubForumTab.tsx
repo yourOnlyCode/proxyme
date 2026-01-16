@@ -5,6 +5,7 @@ import Avatar from '@/components/profile/Avatar';
 import ReplyItem from './ReplyItem';
 import { ForumTopic, ForumReply } from '@/lib/types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 interface ClubForumTabProps {
     topics: ForumTopic[];
@@ -54,16 +55,21 @@ export default function ClubForumTab({
     replying
 }: ClubForumTabProps) {
     const insets = useSafeAreaInsets();
+    const scheme = useColorScheme() ?? 'light';
+    const isDark = scheme === 'dark';
+    const cardStyle = { backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined } as const;
+    const textPrimary = { color: isDark ? '#E5E7EB' : undefined } as const;
+    const textSecondary = { color: isDark ? 'rgba(226,232,240,0.65)' : undefined } as const;
 
     if (selectedTopic) {
         // Topic Detail View
         return (
             <>
-                <View className="p-4 bg-white border-b border-gray-200 flex-row items-center">
+                <View className="p-4 bg-white border-b border-gray-200 flex-row items-center" style={{ backgroundColor: isDark ? '#0B1220' : undefined, borderBottomColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
                     <TouchableOpacity onPress={onBackToTopics} className="mr-4">
-                        <IconSymbol name="chevron.left" size={24} color="#1A1A1A" />
+                        <IconSymbol name="chevron.left" size={24} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
                     </TouchableOpacity>
-                    <Text className="text-lg font-bold text-ink flex-1" numberOfLines={1}>{selectedTopic.title}</Text>
+                    <Text className="text-lg font-bold text-ink flex-1" numberOfLines={1} style={textPrimary}>{selectedTopic.title}</Text>
                 </View>
                 <ScrollView 
                     className="flex-1 px-4" 
@@ -71,9 +77,10 @@ export default function ClubForumTab({
                     contentContainerStyle={{ paddingBottom: 20 }}
                     showsVerticalScrollIndicator={true}
                     keyboardDismissMode="interactive"
+                    style={{ backgroundColor: isDark ? '#0B1220' : undefined }}
                 >
                     {/* Topic Header */}
-                    <View className="py-4 border-b border-gray-200">
+                    <View className="py-4 border-b border-gray-200" style={{ borderBottomColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
                         <View className="flex-row items-center justify-between mb-2">
                             <View className="flex-row items-center">
                                 {selectedTopic.is_pinned && (
@@ -87,8 +94,9 @@ export default function ClubForumTab({
                                 <TouchableOpacity 
                                     onPress={() => onEditTopic(selectedTopic)}
                                     className="px-3 py-1 bg-gray-100 rounded-full"
+                                    style={{ backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : undefined }}
                                 >
-                                    <Text className="text-xs text-gray-600">Edit</Text>
+                                    <Text className="text-xs text-gray-600" style={textSecondary}>Edit</Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -101,11 +109,11 @@ export default function ClubForumTab({
                             </TouchableOpacity>
                             <View className="flex-1">
                                 <TouchableOpacity onPress={() => onViewUserProfile(selectedTopic.created_by)}>
-                                    <Text className="text-sm font-semibold text-ink">
+                                    <Text className="text-sm font-semibold text-ink" style={textPrimary}>
                                         {selectedTopic.creator.full_name || selectedTopic.creator.username}
                                     </Text>
                                 </TouchableOpacity>
-                                <Text className="text-xs text-gray-500">
+                                <Text className="text-xs text-gray-500" style={textSecondary}>
                                     {new Date(selectedTopic.created_at).toLocaleDateString('en-US', {
                                         month: 'short',
                                         day: 'numeric',
@@ -119,7 +127,7 @@ export default function ClubForumTab({
                                 </Text>
                             </View>
                         </View>
-                        <Text className="text-ink leading-6 mb-3">{selectedTopic.content}</Text>
+                        <Text className="text-ink leading-6 mb-3" style={{ color: isDark ? 'rgba(226,232,240,0.92)' : undefined }}>{selectedTopic.content}</Text>
                         
                         {/* Support/Oppose Buttons */}
                         <View className="flex-row items-center gap-4 mt-2">
@@ -150,7 +158,7 @@ export default function ClubForumTab({
 
                     {/* Replies */}
                     <View className="py-4">
-                        <Text className="font-bold text-lg text-ink mb-3">
+                        <Text className="font-bold text-lg text-ink mb-3" style={textPrimary}>
                             {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
                         </Text>
                         {replies.map((reply) => (
@@ -175,7 +183,7 @@ export default function ClubForumTab({
                     </View>
                 </ScrollView>
                 {!selectedTopic.is_locked && (
-                    <View className="bg-white border-t border-gray-100" style={{ paddingBottom: insets.bottom }}>
+                    <View className="bg-white border-t border-gray-100" style={{ paddingBottom: insets.bottom, backgroundColor: isDark ? '#0B1220' : undefined, borderTopColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
                         {replyingToReplyId && (
                             <View className="px-4 pt-3 pb-2 bg-blue-50 flex-row items-center justify-between">
                                 <Text className="text-xs text-blue-700 font-medium">Replying to a comment</Text>
@@ -192,7 +200,7 @@ export default function ClubForumTab({
                             </View>
                         )}
                         <View className="px-4 py-3">
-                            <View className="flex-row items-end bg-gray-50 rounded-2xl px-4 py-3 border border-gray-200">
+                            <View className="flex-row items-end bg-gray-50 rounded-2xl px-4 py-3 border border-gray-200" style={cardStyle}>
                                 <TextInput
                                     value={replyingToReplyId ? editReplyContent : newReply}
                                     onChangeText={replyingToReplyId ? onSetEditReplyContent : onSetNewReply}
@@ -204,7 +212,7 @@ export default function ClubForumTab({
                                         minHeight: 40,
                                         fontSize: 16,
                                         lineHeight: 22,
-                                        color: '#1A1A1A'
+                                        color: isDark ? '#E5E7EB' : '#1A1A1A'
                                     }}
                                     multiline
                                     returnKeyType="send"

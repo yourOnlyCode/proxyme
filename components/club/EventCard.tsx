@@ -4,6 +4,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { ClubEvent } from '@/lib/types';
 import { supabase } from '@/lib/supabase';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 interface EventCardProps {
     event: ClubEvent;
@@ -26,6 +27,8 @@ export default function EventCard({
     onAddToCalendar,
     onViewProfile
 }: EventCardProps) {
+    const scheme = useColorScheme() ?? 'light';
+    const isDark = scheme === 'dark';
     const menuButtonRef = useRef<TouchableOpacity | null>(null);
     const [menu, setMenu] = useState<{ visible: boolean; x: number; y: number }>({
         visible: false,
@@ -51,9 +54,9 @@ export default function EventCard({
 
     return (
         <View className={`${isPast ? 'opacity-60' : ''}`}>
-            <GlassCard className="mx-4 mt-3" contentClassName="p-4" tint="light" intensity={28}>
+            <GlassCard className="mx-4 mt-3" contentClassName="p-4" tint={isDark ? 'dark' : 'light'} intensity={28}>
                 <View className="flex-row justify-between items-start mb-2">
-                    <Text className="font-bold text-lg text-ink flex-1">{event.title}</Text>
+                    <Text className="font-bold text-lg text-ink flex-1" style={{ color: isDark ? '#E5E7EB' : undefined }}>{event.title}</Text>
                     <View className="flex-row items-center gap-2">
                         {isPast && (
                             <View className="bg-gray-200 px-2 py-1 rounded">
@@ -73,10 +76,14 @@ export default function EventCard({
                         )}
                     </View>
                 </View>
-                {event.description && <Text className="text-gray-600 text-sm mb-3">{event.description}</Text>}
+                {event.description && (
+                  <Text className="text-gray-600 text-sm mb-3" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
+                    {event.description}
+                  </Text>
+                )}
                 <View className="flex-row items-center mb-2">
                     <IconSymbol name="calendar" size={16} color="#6B7280" />
-                    <Text className="text-gray-600 text-sm ml-2">
+                    <Text className="text-gray-600 text-sm ml-2" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
                         {eventDate.toLocaleDateString('en-US', {
                             weekday: 'short',
                             month: 'short',
@@ -90,7 +97,7 @@ export default function EventCard({
                 {event.location && (
                     <View className="flex-row items-center mb-2">
                         <IconSymbol name="location.fill" size={16} color="#6B7280" />
-                        <Text className="text-gray-600 text-sm ml-2">{event.location}</Text>
+                        <Text className="text-gray-600 text-sm ml-2" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>{event.location}</Text>
                     </View>
                 )}
                 {!isPast && (

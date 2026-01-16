@@ -1,6 +1,7 @@
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
@@ -54,6 +55,8 @@ export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const toast = useToast();
   const { activeStatuses, openMyStatusViewer } = useStatus();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -237,8 +240,9 @@ export default function ProfileScreen() {
                     className="absolute top-12 right-4 bg-paper/90 p-2 rounded-full shadow-sm backdrop-blur-md"
                     onPress={() => router.push('/(settings)/edit-profile')}
                     activeOpacity={0.85}
+                    style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderWidth: isDark ? 1 : 0, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
                 >
-                     <IconSymbol name="gearshape.fill" size={22} color="#1A1A1A" />
+                     <IconSymbol name="gearshape.fill" size={22} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
                 </TouchableOpacity>
                 
             </View>
@@ -290,7 +294,7 @@ export default function ProfileScreen() {
                     {/* Blur Background - Apple Style Glass */}
                     <BlurView
                       intensity={80}
-                      tint="light"
+                      tint={isDark ? 'dark' : 'light'}
                       style={{
                         position: 'absolute',
                         top: 0,
@@ -354,7 +358,9 @@ export default function ProfileScreen() {
                 
                 <View className="mt-4 items-center">
                     <View className="flex-row items-center justify-center flex-wrap">
-                        <Text className="text-3xl font-extrabold text-slate-900 mr-2 text-center">{profile?.full_name || 'No Name'}</Text>
+                        <Text className="text-3xl font-extrabold text-slate-900 mr-2 text-center" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+                          {profile?.full_name || 'No Name'}
+                        </Text>
                         {profile?.is_verified && (
                             <IconSymbol
                               name="checkmark.seal.fill"
@@ -448,7 +454,7 @@ export default function ProfileScreen() {
 
                 {/* Friend Code Section */}
                 {profile?.friend_code && (
-                    <GlassCard className="mt-4" contentClassName="p-3" tint="light" intensity={18}>
+                    <GlassCard className="mt-4" contentClassName="p-3" tint={isDark ? 'dark' : 'light'} intensity={18}>
                         <View className="flex-row items-center justify-between mb-2">
                             <View className="flex-row items-center flex-1">
                                 <IconSymbol name="gift.fill" size={14} color="#3B82F6" />
@@ -577,10 +583,10 @@ export default function ProfileScreen() {
                         </View>
                       </>
                     ) : (
-                      <View className="-mx-5 bg-slate-100/80 py-5 border-y border-slate-200/70">
+                      <View className="-mx-5 bg-slate-100/80 py-5 border-y border-slate-200/70" style={{ backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
                         <View className="px-5">
-                          <GlassCard contentClassName="p-6 items-center" tint="light" intensity={14}>
-                            <Text className="text-slate-400 italic">No interests added yet.</Text>
+                          <GlassCard contentClassName="p-6 items-center" tint={isDark ? 'dark' : 'light'} intensity={14}>
+                            <Text className="text-slate-400 italic" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>No interests added yet.</Text>
                           </GlassCard>
                         </View>
                       </View>

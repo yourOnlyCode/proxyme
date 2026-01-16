@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth';
 import Avatar from '@/components/profile/Avatar';
 import { getUserConnectionsList, removeConnection } from '@/lib/connections';
 import { supabase } from '@/lib/supabase';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Text, TouchableOpacity, View } from 'react-native';
@@ -28,6 +29,8 @@ export default function UserConnectionsScreen() {
     const { user } = useAuth();
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const scheme = useColorScheme() ?? 'light';
+    const isDark = scheme === 'dark';
     
     const [connections, setConnections] = useState<ConnectionItem[]>([]);
     const [loading, setLoading] = useState(false);
@@ -106,23 +109,39 @@ export default function UserConnectionsScreen() {
         const canMessage = isSelf && !!item.conversation_id;
 
         return (
-            <View className="flex-row items-center bg-white p-4 rounded-2xl mb-3 shadow-sm border border-gray-100">
+            <View
+              className="flex-row items-center bg-white p-4 rounded-2xl mb-3 shadow-sm border border-gray-100"
+              style={{
+                backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+                borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+              }}
+            >
                 <TouchableOpacity className="flex-row items-center flex-1" onPress={() => openProfile(item)} activeOpacity={0.85}>
                     <View className="w-12 h-12 rounded-full overflow-hidden bg-gray-200 border border-gray-100">
                         <Avatar url={item.avatar_url || null} size={48} onUpload={() => {}} editable={false} />
                     </View>
                     <View className="ml-3 flex-1 pr-2">
                         <View className="flex-row items-center">
-                            <Text className="font-bold text-lg text-ink mr-1">{item.full_name || item.username}</Text>
+                            <Text className="font-bold text-lg text-ink mr-1" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+                              {item.full_name || item.username}
+                            </Text>
                             {!!item.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
                         </View>
-                        <Text className="text-gray-500 text-sm">@{item.username}</Text>
+                        <Text className="text-gray-500 text-sm" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
+                          @{item.username}
+                        </Text>
 
                         {/* Goal Badges */}
                         <View className="flex-row mt-1 flex-wrap">
                             {(item.relationship_goals || []).slice(0, 2).map((g, i) => (
-                                <View key={i} className="bg-gray-100 px-2 py-0.5 rounded mr-1">
-                                    <Text className="text-[10px] text-gray-600 font-bold uppercase">{g}</Text>
+                                <View
+                                  key={i}
+                                  className="bg-gray-100 px-2 py-0.5 rounded mr-1"
+                                  style={{ backgroundColor: isDark ? 'rgba(15,23,42,0.65)' : undefined }}
+                                >
+                                    <Text className="text-[10px] text-gray-600 font-bold uppercase" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
+                                      {g}
+                                    </Text>
                                 </View>
                             ))}
                         </View>
@@ -170,18 +189,18 @@ export default function UserConnectionsScreen() {
     };
 
     return (
-        <View className="flex-1 bg-paper">
+        <View className="flex-1 bg-paper" style={{ backgroundColor: isDark ? '#0B1220' : undefined }}>
             {/* Custom Header (centered title) */}
             <View
                 className="px-4 flex-row items-center justify-between bg-paper"
-                style={{ paddingTop: insets.top + 12, paddingBottom: 12 }}
+                style={{ paddingTop: insets.top + 12, paddingBottom: 12, backgroundColor: isDark ? '#0B1220' : undefined }}
             >
                 <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2 rounded-full active:bg-gray-100">
-                    <IconSymbol name="chevron.left" size={26} color="#1A202C" />
+                    <IconSymbol name="chevron.left" size={26} color={isDark ? '#E5E7EB' : '#1A202C'} />
                 </TouchableOpacity>
                 <Text
                     className="text-xl text-ink"
-                    style={{ fontFamily: 'LibertinusSans-Regular' }}
+                    style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}
                 >
                     Connections
                 </Text>
@@ -189,14 +208,27 @@ export default function UserConnectionsScreen() {
             </View>
 
             {/* Filter Tabs */}
-            <View className="flex-row mb-6 bg-gray-100 p-1 rounded-xl mx-4">
+            <View
+              className="flex-row mb-6 bg-gray-100 p-1 rounded-xl mx-4"
+              style={{
+                backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+                borderWidth: isDark ? 1 : 0,
+                borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+              }}
+            >
                 {['All', 'Romance', 'Friendship', 'Professional'].map((t) => (
                     <TouchableOpacity 
                         key={t}
                         onPress={() => setFilter(t as any)}
                         className={`flex-1 py-2 rounded-lg items-center ${filter === t ? 'bg-white shadow-sm' : ''}`}
+                        style={{ backgroundColor: filter === t ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
                     >
-                        <Text className={`text-xs font-bold ${filter === t ? 'text-ink' : 'text-gray-500'}`}>{t}</Text>
+                        <Text
+                          className={`text-xs font-bold ${filter === t ? 'text-ink' : 'text-gray-500'}`}
+                          style={{ color: filter === t ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.65)' : undefined) }}
+                        >
+                          {t}
+                        </Text>
                     </TouchableOpacity>
                 ))}
             </View>

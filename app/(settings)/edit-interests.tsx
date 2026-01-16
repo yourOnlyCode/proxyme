@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Button, LayoutAnimation, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { InterestSelector } from '../../components/profile/InterestSelector'; // Import component
 import { KeyboardDismissWrapper } from '../../components/KeyboardDismissButton';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
@@ -14,6 +15,8 @@ type DetailedInterests = Record<string, string[]>;
 
 export default function EditInterestsScreen() {
   const { user } = useAuth();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [interestDetails, setInterestDetails] = useState<DetailedInterests>({});
@@ -84,12 +87,12 @@ export default function EditInterestsScreen() {
 
   return (
     <KeyboardDismissWrapper>
-      <View className="flex-1 bg-white">
+      <View className="flex-1 bg-white" style={{ backgroundColor: isDark ? '#0B1220' : undefined }}>
         <ScrollView className="flex-1 p-4" keyboardShouldPersistTaps="handled">
           <View className="mb-6">
-            <Text className="text-2xl font-bold mb-2">Detailed Interests</Text>
-            <Text className="text-gray-500 mb-6 text-base leading-5">
-                Select up to <Text className="font-bold text-black">3 categories</Text>. 
+            <Text className="text-2xl font-bold mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>Detailed Interests</Text>
+            <Text className="text-gray-500 mb-6 text-base leading-5" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
+                Select up to <Text className="font-bold text-black" style={{ color: isDark ? '#E5E7EB' : undefined }}>3 categories</Text>. 
                 For each, list your top 3 specific favorites.
                 {'\n\n'}
                 <Text className="italic text-gray-400">

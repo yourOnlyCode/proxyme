@@ -1,5 +1,6 @@
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { GlassCard } from '@/components/ui/GlassCard';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -27,6 +28,8 @@ export default function ClubsScreen() {
   const { address } = useProxyLocation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
   const [myClubs, setMyClubs] = useState<Club[]>(() => getUiCache<Club[]>('clubs.my') ?? []);
   const [cityClubs, setCityClubs] = useState<Club[]>(() => getUiCache<Club[]>('clubs.city') ?? []); // Discovery
   const [loading, setLoading] = useState(myClubs.length === 0 && cityClubs.length === 0); // initial-only loader
@@ -326,7 +329,7 @@ export default function ClubsScreen() {
 
   const renderClubItem = ({ item }: { item: Club }) => (
       <TouchableOpacity onPress={() => router.push(`/clubs/${item.id}`)} activeOpacity={0.92}>
-          <GlassCard className="mb-4" contentClassName="overflow-hidden" tint="light" intensity={35}>
+          <GlassCard className="mb-4" contentClassName="overflow-hidden" tint={isDark ? 'dark' : 'light'} intensity={35}>
               <View className="h-32 bg-gray-200">
                   {item.image_url ? (
                       <ClubImage path={item.image_url} />
@@ -341,7 +344,9 @@ export default function ClubsScreen() {
               </View>
               <View className="p-4">
                   <View className="flex-row justify-between items-center mb-1">
-                      <Text className="text-xl font-bold text-ink flex-1 mr-2" numberOfLines={1}>{item.name}</Text>
+                      <Text className="text-xl font-bold text-ink flex-1 mr-2" numberOfLines={1} style={{ color: isDark ? '#E5E7EB' : undefined }}>
+                        {item.name}
+                      </Text>
                       {item.role && (
                           <View className="bg-blue-100 px-2 py-0.5 rounded text-xs">
                               <Text className="text-blue-700 font-bold text-[10px] uppercase">{String(item.role)}</Text>
@@ -376,10 +381,13 @@ export default function ClubsScreen() {
   );
 
   return (
-    <View className="flex-1 bg-transparent px-4" style={{ paddingTop: insets.top + 12 }}>
+    <View
+      className="flex-1 bg-transparent px-4"
+      style={{ paddingTop: insets.top + 12, backgroundColor: isDark ? '#0B1220' : undefined }}
+    >
         <View className="flex-row justify-between items-center mb-4">
             <View className="w-10" />
-            <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular' }}>Social Clubs</Text>
+            <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}>Social Clubs</Text>
             {/* Create Button - verify limit logic handled in backend or assume UI check needed? */}
             <TouchableOpacity 
                 onPress={() => setCreateModalVisible(true)}
@@ -389,19 +397,25 @@ export default function ClubsScreen() {
             </TouchableOpacity>
         </View>
 
-        <GlassCard className="mb-6" contentClassName="p-1" tint="light" intensity={25}>
+        <GlassCard className="mb-6" contentClassName="p-1" tint={isDark ? 'dark' : 'light'} intensity={25}>
             <View className="flex-row">
                 <TouchableOpacity 
                     onPress={() => setTab('my')}
                     className={`flex-1 py-2 rounded-lg items-center ${tab === 'my' ? 'bg-white/80' : ''}`}
+                    style={{ backgroundColor: tab === 'my' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
                 >
-                    <Text className={`font-bold ${tab === 'my' ? 'text-ink' : 'text-gray-400'}`}>My Clubs</Text>
+                    <Text className={`font-bold ${tab === 'my' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'my' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
+                      My Clubs
+                    </Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
                     onPress={() => setTab('discover')}
                     className={`flex-1 py-2 rounded-lg items-center ${tab === 'discover' ? 'bg-white/80' : ''}`}
+                    style={{ backgroundColor: tab === 'discover' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
                 >
-                    <Text className={`font-bold ${tab === 'discover' ? 'text-ink' : 'text-gray-400'}`}>Discover {address?.city || 'Clubs'}</Text>
+                    <Text className={`font-bold ${tab === 'discover' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'discover' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
+                      Discover {address?.city || 'Clubs'}
+                    </Text>
                 </TouchableOpacity>
             </View>
         </GlassCard>
@@ -429,11 +443,11 @@ export default function ClubsScreen() {
             presentationStyle="pageSheet"
             onRequestClose={() => setCreateModalVisible(false)}
         >
-            <View className="flex-1 bg-white p-6">
+            <View className="flex-1 bg-white p-6" style={{ backgroundColor: isDark ? '#0B1220' : undefined }}>
                 <View className="flex-row justify-between items-center mb-6">
-                    <Text className="text-2xl font-bold text-ink">Create Club</Text>
+                    <Text className="text-2xl font-bold text-ink" style={{ color: isDark ? '#E5E7EB' : undefined }}>Create Club</Text>
                     <TouchableOpacity onPress={() => setCreateModalVisible(false)}>
-                        <Text className="text-gray-500 font-bold">Cancel</Text>
+                        <Text className="text-gray-500 font-bold" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Cancel</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -457,6 +471,11 @@ export default function ClubsScreen() {
                     onChangeText={setNewClubName}
                     placeholder="e.g. Downtown Runners"
                     className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 font-semibold text-lg"
+                    style={{
+                      color: isDark ? '#E5E7EB' : undefined,
+                      backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+                      borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+                    }}
                     returnKeyType="next"
                     blurOnSubmit={false}
                     onSubmitEditing={() => Keyboard.dismiss()}
@@ -470,7 +489,12 @@ export default function ClubsScreen() {
                     multiline
                     numberOfLines={4}
                     className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 text-base h-32"
-                    style={{ textAlignVertical: 'top' }}
+                    style={{
+                      textAlignVertical: 'top',
+                      color: isDark ? '#E5E7EB' : undefined,
+                      backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+                      borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+                    }}
                     returnKeyType="done"
                     blurOnSubmit={true}
                     onSubmitEditing={() => Keyboard.dismiss()}

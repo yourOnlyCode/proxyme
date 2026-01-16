@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import Avatar from '@/components/profile/Avatar';
 import { ForumReply } from '@/lib/types';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 interface ReplyItemProps {
     reply: ForumReply;
@@ -25,11 +26,16 @@ export default function ReplyItem({
     onViewProfile,
     depth 
 }: ReplyItemProps) {
+    const scheme = useColorScheme() ?? 'light';
+    const isDark = scheme === 'dark';
     const maxDepth = 5;
     const indent = Math.min(depth, maxDepth) * 16;
     
     return (
-        <View className="mb-4 pb-4 border-b border-gray-100" style={{ marginLeft: indent }}>
+        <View
+          className="mb-4 pb-4 border-b border-gray-100"
+          style={{ marginLeft: indent, borderBottomColor: isDark ? 'rgba(148,163,184,0.12)' : undefined }}
+        >
             <View className="flex-row items-center justify-between mb-2">
                 <View className="flex-row items-center flex-1">
                     <TouchableOpacity 
@@ -40,14 +46,14 @@ export default function ReplyItem({
                     </TouchableOpacity>
                     <View className="flex-1">
                         <TouchableOpacity onPress={() => onViewProfile(reply.created_by)} className="flex-row items-center">
-                            <Text className="text-sm font-semibold text-ink">
+                            <Text className="text-sm font-semibold text-ink" style={{ color: isDark ? '#E5E7EB' : undefined }}>
                                 {reply.creator.full_name || reply.creator.username}
                             </Text>
                             {reply.creator.is_verified && (
                                 <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
                             )}
                         </TouchableOpacity>
-                        <Text className="text-xs text-gray-500">
+                        <Text className="text-xs text-gray-500" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
                             {new Date(reply.created_at).toLocaleDateString('en-US', {
                                 month: 'short',
                                 day: 'numeric',
@@ -65,6 +71,7 @@ export default function ReplyItem({
                         <TouchableOpacity 
                             onPress={() => onEdit(reply)}
                             className="px-2 py-1 bg-gray-100 rounded"
+                            style={{ backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : undefined }}
                         >
                             <Text className="text-xs text-gray-600">Edit</Text>
                         </TouchableOpacity>
@@ -77,7 +84,7 @@ export default function ReplyItem({
                     </View>
                 )}
             </View>
-            <Text className="text-ink leading-6 mb-2">{reply.content}</Text>
+            <Text className="text-ink leading-6 mb-2" style={{ color: isDark ? 'rgba(226,232,240,0.92)' : undefined }}>{reply.content}</Text>
             
             {/* Support/Oppose and Reply Buttons */}
             <View className="flex-row items-center gap-4 mt-2">

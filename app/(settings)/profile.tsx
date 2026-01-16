@@ -1,5 +1,6 @@
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -50,6 +51,8 @@ const SOCIAL_PLATFORMS = [
 export default function EditProfileScreen() {
   const { user, signOut } = useAuth();
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -252,14 +255,24 @@ export default function EditProfileScreen() {
 
   return (
     <KeyboardDismissWrapper>
-      <SafeAreaView className="flex-1 bg-white" edges={['top']}>
+      <SafeAreaView className="flex-1 bg-white" edges={['top']} style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF' }}>
         <View className="flex-1">
           {/* Custom Header */}
-          <View className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100" style={{ paddingTop: 12, paddingBottom: 12 }}>
+          <View
+            className="px-4 flex-row items-center justify-between bg-white border-b border-gray-100"
+            style={{
+              paddingTop: 12,
+              paddingBottom: 12,
+              backgroundColor: isDark ? '#0B1220' : '#FFFFFF',
+              borderBottomColor: isDark ? 'rgba(148,163,184,0.18)' : '#F3F4F6',
+            }}
+          >
             <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2">
-              <IconSymbol name="chevron.left" size={28} color="#1A1A1A" />
+              <IconSymbol name="chevron.left" size={28} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
             </TouchableOpacity>
-            <Text className="text-xl font-bold text-ink">Edit Profile</Text>
+            <Text className="text-xl font-bold text-ink" style={{ color: isDark ? '#E5E7EB' : '#0F172A' }}>
+              Edit Profile
+            </Text>
             <View className="w-10" />
           </View>
 

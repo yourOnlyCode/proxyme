@@ -1,5 +1,6 @@
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth';
 import { fetchCrossedPathGroups, fetchCrossedPathPeople, type CrossedPathGroup, type CrossedPathPerson } from '@/lib/crossedPaths';
 import { supabase } from '@/lib/supabase';
@@ -77,6 +78,8 @@ export default function CrossedPathsScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme() ?? 'light';
+  const isDark = scheme === 'dark';
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(true);
   const [proxyOn, setProxyOn] = useState(true);
@@ -218,7 +221,7 @@ export default function CrossedPathsScreen() {
   };
 
   return (
-    <View className="flex-1 bg-white" {...panResponder.panHandlers}>
+    <View className="flex-1 bg-white" style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF' }} {...panResponder.panHandlers}>
       <ProfileModal
         visible={profileVisible}
         profile={selectedProfile}
@@ -227,12 +230,16 @@ export default function CrossedPathsScreen() {
       {/* Header */}
       <View
         className="px-4 pb-4 border-b border-gray-100 flex-row items-center"
-        style={{ paddingTop: insets.top + 12 }}
+        style={{
+          paddingTop: insets.top + 12,
+          backgroundColor: isDark ? '#0B1220' : '#FFFFFF',
+          borderBottomColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+        }}
       >
         <View className="w-10 h-10" />
         <View className="w-10 h-10 ml-auto items-center justify-center">
           <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center">
-            <IconSymbol name="xmark" size={20} color="#111827" />
+            <IconSymbol name="xmark" size={20} color={isDark ? '#E5E7EB' : '#111827'} />
           </TouchableOpacity>
         </View>
         <View
@@ -245,7 +252,7 @@ export default function CrossedPathsScreen() {
             alignItems: 'center',
           }}
         >
-          <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular' }}>
+          <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}>
             Crossed Paths
           </Text>
         </View>
@@ -254,13 +261,13 @@ export default function CrossedPathsScreen() {
       {loading ? (
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
-          <Text className="text-gray-500 mt-3">Loading…</Text>
+          <Text className="text-gray-500 mt-3" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Loading…</Text>
         </View>
       ) : !enabled ? (
         <View className="flex-1 items-center justify-center px-8">
           <IconSymbol name="clock.arrow.circlepath" size={44} color="#9CA3AF" />
-          <Text className="text-ink font-bold text-lg mt-4">Crossed Paths is off</Text>
-          <Text className="text-gray-500 text-center mt-2">
+          <Text className="text-ink font-bold text-lg mt-4" style={{ color: isDark ? '#E5E7EB' : undefined }}>Crossed Paths is off</Text>
+          <Text className="text-gray-500 text-center mt-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
             You can turn it back on in Settings → Edit Profile.
           </Text>
           <TouchableOpacity
@@ -274,8 +281,8 @@ export default function CrossedPathsScreen() {
       ) : !proxyOn ? (
         <View className="flex-1 items-center justify-center px-8">
           <IconSymbol name="location.slash.fill" size={44} color="#9CA3AF" />
-          <Text className="text-ink font-bold text-lg mt-4">Proxy is off</Text>
-          <Text className="text-gray-500 text-center mt-2">
+          <Text className="text-ink font-bold text-lg mt-4" style={{ color: isDark ? '#E5E7EB' : undefined }}>Proxy is off</Text>
+          <Text className="text-gray-500 text-center mt-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
             Turn on Proxy to collect and view Crossed Paths.
           </Text>
           <TouchableOpacity
@@ -289,8 +296,8 @@ export default function CrossedPathsScreen() {
       ) : groupList.length === 0 ? (
         <View className="flex-1 items-center justify-center px-8">
           <IconSymbol name="clock.arrow.circlepath" size={44} color="#9CA3AF" />
-          <Text className="text-ink font-bold text-lg mt-4">No crossed paths yet</Text>
-          <Text className="text-gray-500 text-center mt-2">
+          <Text className="text-ink font-bold text-lg mt-4" style={{ color: isDark ? '#E5E7EB' : undefined }}>No crossed paths yet</Text>
+          <Text className="text-gray-500 text-center mt-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
             When people show up in your Proxy feed at the same address, they’ll appear here for up to a week.
           </Text>
         </View>
@@ -303,10 +310,12 @@ export default function CrossedPathsScreen() {
             return (
             <View key={key} className="mb-6">
               <View className="flex-row items-baseline justify-between mb-3">
-                <Text className="text-ink font-bold text-base flex-1 pr-2" numberOfLines={2}>
+                <Text className="text-ink font-bold text-base flex-1 pr-2" numberOfLines={2} style={{ color: isDark ? '#E5E7EB' : undefined }}>
                   {g.address_label || 'A place you visited'}
                 </Text>
-                <Text className="text-gray-500 text-xs font-semibold">{formatDayLabel(g.day_key)}</Text>
+                <Text className="text-gray-500 text-xs font-semibold" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
+                  {formatDayLabel(g.day_key)}
+                </Text>
               </View>
               <View className="flex-row flex-wrap">
                 {people.map((p) => (
@@ -337,7 +346,7 @@ export default function CrossedPathsScreen() {
                   >
                     <View style={{ alignItems: 'center' }}>
                       <AvatarWithIntentRing path={p.avatar_url} goal={p.relationship_goals?.[0] ?? null} />
-                      <Text className="text-[11px] text-gray-700 mt-2" numberOfLines={1}>
+                      <Text className="text-[11px] text-gray-700 mt-2" numberOfLines={1} style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
                         {p.full_name || p.username || 'User'}
                       </Text>
                     </View>
@@ -349,9 +358,13 @@ export default function CrossedPathsScreen() {
                   activeOpacity={0.85}
                   onPress={() => loadMore(g)}
                   className="mt-1 self-center bg-gray-100 px-4 py-2 rounded-full border border-gray-200"
+                  style={{
+                    backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+                    borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+                  }}
                   disabled={!!st.loadingMore}
                 >
-                  <Text className="text-gray-700 font-bold text-xs">
+                  <Text className="text-gray-700 font-bold text-xs" style={{ color: isDark ? '#E5E7EB' : undefined }}>
                     {st.loadingMore ? 'Loading…' : 'View more'}
                   </Text>
                 </TouchableOpacity>

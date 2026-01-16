@@ -1,6 +1,7 @@
 import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useConnectionState } from '@/hooks/useConnectionState';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -54,6 +55,8 @@ export function ProfileModal({
 }: ProfileModalProps) {
     const { user } = useAuth();
     const router = useRouter();
+    const scheme = useColorScheme() ?? 'light';
+    const isDark = scheme === 'dark';
     const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number, hidden?: boolean } | null>(null);
     const [fetchedPhotos, setFetchedPhotos] = useState<{ url: string; order: number }[] | null>(null);
     const [fetchedProfile, setFetchedProfile] = useState<Partial<ProfileData> | null>(null);
@@ -200,7 +203,7 @@ export function ProfileModal({
             onRequestClose={onClose}
             presentationStyle="pageSheet" // Nice card effect on iOS
         >
-            <View className="flex-1 bg-white">
+            <View className="flex-1 bg-white" style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF' }}>
                  <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
                     {/* Header Image - Much Taller */}
                     <View className="w-full h-[600px] bg-gray-200 relative">
@@ -255,11 +258,20 @@ export function ProfileModal({
                         )}
                     </View>
 
-                    <View className="px-6 -mt-10 pt-4 bg-white rounded-t-3xl shadow-lg">
+                    <View
+                      className="px-6 -mt-10 pt-4 bg-white rounded-t-3xl shadow-lg"
+                      style={{
+                        backgroundColor: isDark ? '#0B1220' : '#FFFFFF',
+                        shadowColor: '#000',
+                        shadowOpacity: isDark ? 0.35 : 0.18,
+                      }}
+                    >
                         {/* Name & Badge */}
                         <View className="flex-row items-center justify-between mb-2">
                              <View className="flex-row items-center flex-1">
-                                 <Text className="text-3xl font-extrabold text-ink mr-2">{mergedProfile.full_name}</Text>
+                                 <Text className="text-3xl font-extrabold text-ink mr-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+                                   {mergedProfile.full_name}
+                                 </Text>
                                 {isTrulyConnected && (
                                     <IconSymbol name="star.fill" size={24} color="#F59E0B" style={{ marginRight: 8 }} />
                                 )}
@@ -298,9 +310,15 @@ export function ProfileModal({
                                     }
                                 }}
                                 className="flex-row mb-6 bg-gray-50 p-3 rounded-xl justify-between border border-gray-100 relative"
+                                style={{
+                                  backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined,
+                                  borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+                                }}
                             >
                                 <View className="items-center flex-1 justify-center">
-                                    <Text className="text-xl font-bold text-ink mb-1">{stats.total}</Text>
+                                    <Text className="text-xl font-bold text-ink mb-1" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+                                      {stats.total}
+                                    </Text>
                                     <IconSymbol name="person.2.fill" size={16} color="#9CA3AF" />
                                 </View>
                                 <View className="w-[1px] bg-gray-200" />
@@ -355,7 +373,9 @@ export function ProfileModal({
                         {mergedProfile.bio && (
                             <View className="mb-6">
                                 <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">About</Text>
-                                <Text className="text-ink text-lg leading-7">{mergedProfile.bio}</Text>
+                                <Text className="text-ink text-lg leading-7" style={{ color: isDark ? 'rgba(226,232,240,0.92)' : undefined }}>
+                                  {mergedProfile.bio}
+                                </Text>
                             </View>
                         )}
 
@@ -392,7 +412,13 @@ export function ProfileModal({
                  </ScrollView>
 
                  {/* Sticky Footer */}
-                 <View className="p-4 bg-white border-t border-gray-100 shadow-lg pb-8">
+                 <View
+                   className="p-4 bg-white border-t border-gray-100 shadow-lg pb-8"
+                   style={{
+                     backgroundColor: isDark ? '#0B1220' : '#FFFFFF',
+                     borderTopColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+                   }}
+                 >
                     <ProfileActionButtons
                         profile={mergedProfile}
                         variant="modal"
