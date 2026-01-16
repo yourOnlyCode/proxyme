@@ -61,18 +61,6 @@ export function SocialAuthButtons() {
         >
           <FontAwesome name="google" size={20} color="#111827" />
         </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => run('facebook')}
-          disabled={!!loadingProvider}
-          accessibilityRole="button"
-          accessibilityLabel="Continue with Facebook"
-          className="w-12 h-12 rounded-full items-center justify-center bg-white border border-slate-200 shadow-sm"
-          activeOpacity={0.85}
-          style={{ opacity: loadingProvider ? 0.6 : 1 }}
-        >
-          <FontAwesome name="facebook" size={20} color="#1877F2" />
-        </TouchableOpacity>
       </View>
     </View>
   );

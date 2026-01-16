@@ -35,7 +35,9 @@ function getParam(url: string, key: string): string | null {
 export async function signInWithProvider(provider: OAuthProvider) {
   // Web: let Supabase handle the full redirect.
   if (Platform.OS === 'web') {
-    const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+    // Use the explicit callback route so PKCE code exchange is consistent and easy to debug.
+    const redirectTo =
+      typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined;
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: redirectTo ? { redirectTo } : undefined,
@@ -46,9 +48,12 @@ export async function signInWithProvider(provider: OAuthProvider) {
 
   const returnUrl = Linking.createURL('auth/callback'); // proxybusiness://auth/callback
 
-  // Apple often ends up completing in a browser context; route it through our web landing page
-  // which will deep-link back into the app with the code.
-  const redirectTo = provider === 'apple' ? 'https://www.proxyme.app/auth/callback' : returnUrl;
+  // IMPORTANT: `redirectTo` MUST match the `returnUrl` we pass to openAuthSessionAsync,
+  // otherwise the auth session may never complete back into the app (common "callback doesn't fire" issue).
+  const redirectTo = returnUrl;
+
+  // Helpful debug breadcrumbs when OAuth "does nothing" (common: redirect URL not allowlisted).
+  console.log('[oauth] start', { provider, returnUrl, redirectTo });
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
@@ -61,9 +66,10 @@ export async function signInWithProvider(provider: OAuthProvider) {
   if (!data?.url) throw new Error('No auth URL returned.');
 
   const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
+  console.log('[oauth] browser result', result);
   if (result.type !== 'success' || !result.url) {
     // User cancelled or OS dismissed.
-    return;
+    throw new Error(`OAuth cancelled (${result.type}).`);
   }
 
   const code = getParam(result.url, 'code');
@@ -89,6 +95,10 @@ export async function signInWithProvider(provider: OAuthProvider) {
       refresh_token: refreshToken,
     });
     if (setSessionError) throw setSessionError;
+    return;
   }
+
+  // If we got here, the provider redirected back, but we couldn't extract credentials.
+  throw new Error('OAuth completed but no code/tokens were found in the callback URL.');
 }
 

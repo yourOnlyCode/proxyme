@@ -12,6 +12,29 @@ export type CrossedPathRow = {
   seen_at: string; // ISO
 };
 
+export type CrossedPathGroup = {
+  day_key: string; // YYYY-MM-DD
+  place_key: string;
+  address_label: string | null;
+  last_seen: string; // ISO
+};
+
+export type CrossedPathPerson = {
+  user_id: string;
+  username: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+  is_verified: boolean;
+  relationship_goals: string[] | null;
+  match_percent: number;
+  same_intent: boolean;
+  last_seen: string;
+  cursor_intent: number;
+  cursor_match: number;
+  cursor_seen_at: string;
+  cursor_user_id: string;
+};
+
 export type CrossedPathProfile = {
   id: string;
   username: string | null;
@@ -22,12 +45,18 @@ export type CrossedPathProfile = {
 
 const STORAGE_KEY_PREFIX = 'crossedPaths:v1:';
 const STORAGE_SEEN_PREFIX = 'crossedPaths:seenIds:v1:';
+const STORAGE_VISITS_PREFIX = 'crossedPaths:visits:v1:';
 
 const inMemorySeen = new Map<string, Set<string>>();
 
 function looksLikeMissingTable(error: any) {
   // PostgREST missing table: 42P01
   return error?.code === '42P01' || `${error?.message ?? ''}`.toLowerCase().includes('does not exist');
+}
+
+function looksLikeMissingRpc(error: any) {
+  // PostgREST missing function: 42883 or "Could not find the function"
+  return error?.code === '42883' || `${error?.message ?? ''}`.toLowerCase().includes('could not find the function');
 }
 
 export function formatAddressLabel(address: ExpoLocation.LocationGeocodedAddress | null): string | null {
@@ -39,7 +68,6 @@ export function formatAddressLabel(address: ExpoLocation.LocationGeocodedAddress
   const name = String(a.name ?? '').trim();
   const streetNumber = String(a.streetNumber ?? '').trim();
   const street = String(a.street ?? '').trim();
-  const streetLine = `${streetNumber} ${street}`.trim();
 
   const city = String(a.city ?? '').trim();
   const region = String(a.region ?? '').trim();
@@ -48,7 +76,7 @@ export function formatAddressLabel(address: ExpoLocation.LocationGeocodedAddress
     !name ||
     /^\d+$/.test(name) ||
     // Sometimes reverse geocode returns a literal address line as the "name".
-    /\d+/.test(name) && (name.includes(' ') || name.includes(','));
+    (/\d+/.test(name) && (name.includes(' ') || name.includes(',')));
 
   const primary = (() => {
     if (!isNameStreety) return name;
@@ -117,10 +145,81 @@ export function hashKey(s: string): string {
   // Simple stable hash (djb2) for onConflict keying without heavy deps.
   const str = normalizeKey(s);
   let hash = 5381;
-  for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash) + str.charCodeAt(i);
+  for (let i = 0; i < str.length; i++) hash = (hash << 5) + hash + str.charCodeAt(i);
   return `h${(hash >>> 0).toString(16)}`;
 }
 
+export function computePlaceKeyHash(params: {
+  addressLabel: string;
+  address?: ExpoLocation.LocationGeocodedAddress | null;
+  location?: { lat: number; long: number } | null;
+}): string {
+  return hashKey(placeKeyInput({ addressLabel: params.addressLabel, address: params.address ?? null, location: params.location ?? null }));
+}
+
+export async function recordVisit(params: {
+  viewerId: string;
+  addressLabel: string | null;
+  address?: ExpoLocation.LocationGeocodedAddress | null;
+  location?: { lat: number; long: number } | null;
+  seenAt?: Date;
+}): Promise<void> {
+  // Writes a single (user, place, day) "visit" row for scalable Crossed Paths.
+  const addressLabel = params.addressLabel?.trim() || null;
+  if (!addressLabel) return;
+
+  const seenAt = params.seenAt ?? new Date();
+  const day_key = dayKeyLocal(seenAt);
+  const place_key = computePlaceKeyHash({ addressLabel, address: params.address ?? null, location: params.location ?? null });
+  const seen_at = seenAt.toISOString();
+
+  // Primary: Supabase table
+  const { error } = await supabase
+    .from('crossed_path_visits')
+    .upsert(
+      {
+        user_id: params.viewerId,
+        place_key,
+        day_key,
+        seen_at,
+        address_label: addressLabel,
+      } as any,
+      { onConflict: 'user_id,day_key,place_key' },
+    );
+
+  if (!error) return;
+
+  // Fallback: local storage (per device) if table isn't deployed yet.
+  if (!looksLikeMissingTable(error)) return;
+  const key = `${STORAGE_VISITS_PREFIX}${params.viewerId}`;
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    const existing: Array<{ user_id: string; place_key: string; day_key: string; seen_at: string; address_label: string | null }> = raw
+      ? (JSON.parse(raw) as any[])
+      : [];
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const kept = (existing || []).filter((r) => new Date(r.seen_at).getTime() >= weekAgo);
+
+    const sig = new Set(kept.map((r) => `${r.user_id}|${r.day_key}|${r.place_key}`));
+    const sigKey = `${params.viewerId}|${day_key}|${place_key}`;
+    if (!sig.has(sigKey)) {
+      kept.push({ user_id: params.viewerId, place_key, day_key, seen_at, address_label: addressLabel });
+    } else {
+      // Update seen_at to latest
+      for (const r of kept) {
+        if (`${r.user_id}|${r.day_key}|${r.place_key}` === sigKey) {
+          r.seen_at = seen_at;
+          r.address_label = addressLabel;
+        }
+      }
+    }
+    await AsyncStorage.setItem(key, JSON.stringify(kept));
+  } catch {
+    // ignore
+  }
+}
+
+// Legacy writer (v1): writes per-user crossed_paths rows.
 export async function recordCrossedPaths(params: {
   viewerId: string;
   addressLabel: string | null;
@@ -138,7 +237,7 @@ export async function recordCrossedPaths(params: {
   const day_key = dayKeyLocal(seenAt);
   // "Exact place" fingerprint: address when available, otherwise venue name + snapped geo.
   // We store ONLY the hash as the key; no raw coordinates go into the DB.
-  const address_key = hashKey(placeKeyInput({ addressLabel, address: params.address ?? null, location: params.location ?? null }));
+  const address_key = computePlaceKeyHash({ addressLabel, address: params.address ?? null, location: params.location ?? null });
   const seen_at = seenAt.toISOString();
 
   const seenKey = `${viewerId}:${day_key}:${address_key}`;
@@ -176,9 +275,7 @@ export async function recordCrossedPaths(params: {
   if (rows.length === 0) return;
 
   // Primary: Supabase table.
-  const { error } = await supabase
-    .from('crossed_paths')
-    .upsert(rows as any, { onConflict: 'user_id,crossed_user_id,day_key,address_key' });
+  const { error } = await supabase.from('crossed_paths').upsert(rows as any, { onConflict: 'user_id,crossed_user_id,day_key,address_key' });
 
   if (!error) {
     for (const p of newProfiles) seenSet.add(p.id);
@@ -215,6 +312,7 @@ export async function recordCrossedPaths(params: {
   }
 }
 
+// Legacy reader (v1): reads per-user crossed_paths rows.
 export async function fetchCrossedPaths(params: { viewerId: string }): Promise<CrossedPathRow[]> {
   const { viewerId } = params;
   const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -241,5 +339,40 @@ export async function fetchCrossedPaths(params: { viewerId: string }): Promise<C
   } catch {
     return [];
   }
+}
+
+export async function fetchCrossedPathGroups(): Promise<CrossedPathGroup[]> {
+  const { data, error } = await supabase.rpc('get_my_crossed_paths_groups', {});
+  if (!error) {
+    return ((data as any[]) || []).map((r) => ({
+      day_key: String(r.day_key),
+      place_key: String(r.place_key),
+      address_label: (r.address_label as string | null) ?? null,
+      last_seen: String(r.last_seen),
+    }));
+  }
+  if (looksLikeMissingRpc(error) || looksLikeMissingTable(error)) return [];
+  return [];
+}
+
+export async function fetchCrossedPathPeople(params: {
+  day_key: string;
+  place_key: string;
+  limit?: number;
+  cursor?: { intent: number; match: number; seen_at: string; user_id: string } | null;
+}): Promise<CrossedPathPerson[]> {
+  const payload: any = {
+    p_day: params.day_key,
+    p_place_key: params.place_key,
+    p_limit: params.limit ?? 30,
+    p_cursor_intent: params.cursor?.intent ?? null,
+    p_cursor_match: params.cursor?.match ?? null,
+    p_cursor_seen_at: params.cursor?.seen_at ?? null,
+    p_cursor_user_id: params.cursor?.user_id ?? null,
+  };
+  const { data, error } = await supabase.rpc('get_crossed_paths_people', payload);
+  if (!error) return (data as any as CrossedPathPerson[]) || [];
+  if (looksLikeMissingRpc(error) || looksLikeMissingTable(error)) return [];
+  return [];
 }
 

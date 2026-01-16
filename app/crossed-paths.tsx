@@ -1,25 +1,19 @@
+import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/lib/auth';
+import { fetchCrossedPathGroups, fetchCrossedPathPeople, type CrossedPathGroup, type CrossedPathPerson } from '@/lib/crossedPaths';
 import { supabase } from '@/lib/supabase';
-import { fetchCrossedPaths, type CrossedPathRow } from '@/lib/crossedPaths';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, Image, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type ProfileLite = {
-  id: string;
-  username: string | null;
-  full_name: string | null;
-  avatar_url: string | null;
-  is_verified: boolean | null;
-};
-
-type Group = {
-  key: string;
-  day_key: string;
-  address_label: string | null;
-  profiles: ProfileLite[];
+type GroupState = {
+  group: CrossedPathGroup;
+  people: CrossedPathPerson[];
+  cursor: { intent: number; match: number; seen_at: string; user_id: string } | null;
+  hasMore: boolean;
+  loadingMore: boolean;
 };
 
 function formatDayLabel(dayKey: string) {
@@ -49,14 +43,47 @@ function Avatar({ path }: { path: string | null }) {
   );
 }
 
+function intentColor(goal?: string | null) {
+  switch (goal) {
+    case 'Romance':
+      return '#E11D48'; // tailwind romance
+    case 'Friendship':
+      return '#059669'; // tailwind friendship
+    case 'Business':
+      return '#2563EB'; // tailwind business
+    default:
+      return null;
+  }
+}
+
+function AvatarWithIntentRing({ path, goal }: { path: string | null; goal?: string | null }) {
+  const ring = intentColor(goal);
+  return (
+    <View
+      style={{
+        width: 70,
+        height: 70,
+        borderRadius: 35,
+        padding: ring ? 3 : 0,
+        backgroundColor: ring ? ring : 'transparent',
+      }}
+    >
+      <Avatar path={path} />
+    </View>
+  );
+}
+
 export default function CrossedPathsScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(true);
-  const [rows, setRows] = useState<CrossedPathRow[]>([]);
-  const [profilesById, setProfilesById] = useState<Record<string, ProfileLite>>({});
+  const [proxyOn, setProxyOn] = useState(true);
+  const [groups, setGroups] = useState<CrossedPathGroup[]>([]);
+  const [groupStates, setGroupStates] = useState<Record<string, GroupState>>({});
+  const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
+  const [profileVisible, setProfileVisible] = useState(false);
 
   // Swipe LEFT (from the right edge) to close. This avoids native-stack gestureDirection tweaks.
   const panResponder = useMemo(() => {
@@ -92,35 +119,54 @@ export default function CrossedPathsScreen() {
       if (!user) return;
       setLoading(true);
       try {
-        const { data: me } = await supabase.from('profiles').select('save_crossed_paths').eq('id', user.id).maybeSingle();
+        const { data: me } = await supabase
+          .from('profiles')
+          .select('save_crossed_paths, is_proxy_active')
+          .eq('id', user.id)
+          .maybeSingle();
         const isEnabled = (me as any)?.save_crossed_paths ?? true;
+        const isProxyActive = (me as any)?.is_proxy_active ?? false;
         if (!mounted) return;
         setEnabled(isEnabled);
-        if (!isEnabled) {
-          setRows([]);
-          setProfilesById({});
+        setProxyOn(isProxyActive);
+        // Only show/collect Crossed Paths when Proxy is ON and the user hasn't disabled the feature.
+        if (!isEnabled || !isProxyActive) {
+          setGroups([]);
+          setGroupStates({});
           return;
         }
 
-        const r = await fetchCrossedPaths({ viewerId: user.id });
+        const gs = await fetchCrossedPathGroups();
         if (!mounted) return;
-        setRows(r);
+        setGroups(gs);
 
-        const ids = Array.from(new Set(r.map((x) => x.crossed_user_id).filter(Boolean)));
-        if (ids.length === 0) {
-          setProfilesById({});
-          return;
+        // Prime the first page for each group so the screen feels "filled" immediately.
+        const initial: Record<string, GroupState> = {};
+        for (const g of gs) {
+          const key = `${g.day_key}|${g.place_key}`;
+          initial[key] = { group: g, people: [], cursor: null, hasMore: true, loadingMore: false };
         }
-        const { data } = await supabase
-          .from('profiles')
-          .select('id, username, full_name, avatar_url, is_verified')
-          .in('id', ids);
-        const map: Record<string, ProfileLite> = {};
-        for (const p of (data as any[]) || []) {
-          map[p.id] = p as ProfileLite;
+        setGroupStates(initial);
+
+        // Fetch the first batch for each group (sequential to avoid spiky load)
+        for (const g of gs) {
+          const key = `${g.day_key}|${g.place_key}`;
+          const people = await fetchCrossedPathPeople({ day_key: g.day_key, place_key: g.place_key, limit: 12, cursor: null });
+          const last = people.length ? people[people.length - 1] : null;
+          if (!mounted) return;
+          setGroupStates((prev) => ({
+            ...prev,
+            [key]: {
+              group: g,
+              people,
+              cursor: last
+                ? { intent: last.cursor_intent, match: last.cursor_match, seen_at: last.cursor_seen_at, user_id: last.cursor_user_id }
+                : null,
+              hasMore: people.length === 12,
+              loadingMore: false,
+            },
+          }));
         }
-        if (!mounted) return;
-        setProfilesById(map);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -131,27 +177,53 @@ export default function CrossedPathsScreen() {
     };
   }, [user?.id]);
 
-  const groups: Group[] = useMemo(() => {
-    const by = new Map<string, Group>();
-    for (const r of rows) {
-      const profile = profilesById[r.crossed_user_id];
-      if (!profile) continue;
-      // Dedupe: if the label is the same for the same day, treat it as one group even if address_key differs.
-      const labelKey = (r.address_label || '').trim();
-      const key = `${r.day_key}|${labelKey || r.address_key}`;
-      const g = by.get(key) || { key, day_key: r.day_key, address_label: r.address_label ?? null, profiles: [] };
-      if (!g.profiles.find((p) => p.id === profile.id)) g.profiles.push(profile);
-      by.set(key, g);
-    }
-    // Hide empty groups (requirement #5)
-    const list = Array.from(by.values()).filter((g) => g.profiles.length > 0);
-    // Sort newest first
-    list.sort((a, b) => (a.day_key < b.day_key ? 1 : a.day_key > b.day_key ? -1 : 0));
+  const groupList = useMemo(() => {
+    const list = [...groups];
+    list.sort((a, b) => {
+      if (a.day_key !== b.day_key) return a.day_key < b.day_key ? 1 : -1;
+      return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
+    });
     return list;
-  }, [rows, profilesById]);
+  }, [groups]);
+
+  const loadMore = async (g: CrossedPathGroup) => {
+    const key = `${g.day_key}|${g.place_key}`;
+    const st = groupStates[key];
+    if (!st || st.loadingMore || !st.hasMore) return;
+
+    setGroupStates((prev) => ({
+      ...prev,
+      [key]: { ...prev[key]!, loadingMore: true },
+    }));
+    const next = await fetchCrossedPathPeople({ day_key: g.day_key, place_key: g.place_key, limit: 24, cursor: st.cursor });
+    const last = next.length ? next[next.length - 1] : null;
+    setGroupStates((prev) => {
+      const current = prev[key];
+      if (!current) return prev;
+      const seen = new Set(current.people.map((p) => p.user_id));
+      const merged = [...current.people, ...next.filter((p) => !seen.has(p.user_id))];
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          people: merged,
+          cursor: last
+            ? { intent: last.cursor_intent, match: last.cursor_match, seen_at: last.cursor_seen_at, user_id: last.cursor_user_id }
+            : current.cursor,
+          hasMore: next.length === 24,
+          loadingMore: false,
+        },
+      };
+    });
+  };
 
   return (
     <View className="flex-1 bg-white" {...panResponder.panHandlers}>
+      <ProfileModal
+        visible={profileVisible}
+        profile={selectedProfile}
+        onClose={() => setProfileVisible(false)}
+      />
       {/* Header */}
       <View
         className="px-4 pb-4 border-b border-gray-100 flex-row items-center"
@@ -199,7 +271,22 @@ export default function CrossedPathsScreen() {
             <Text className="text-white font-bold">Open Settings</Text>
           </TouchableOpacity>
         </View>
-      ) : groups.length === 0 ? (
+      ) : !proxyOn ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <IconSymbol name="location.slash.fill" size={44} color="#9CA3AF" />
+          <Text className="text-ink font-bold text-lg mt-4">Proxy is off</Text>
+          <Text className="text-gray-500 text-center mt-2">
+            Turn on Proxy to collect and view Crossed Paths.
+          </Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push('/(tabs)')}
+            className="mt-5 bg-black px-5 py-3 rounded-xl"
+          >
+            <Text className="text-white font-bold">Go to Proxy</Text>
+          </TouchableOpacity>
+        </View>
+      ) : groupList.length === 0 ? (
         <View className="flex-1 items-center justify-center px-8">
           <IconSymbol name="clock.arrow.circlepath" size={44} color="#9CA3AF" />
           <Text className="text-ink font-bold text-lg mt-4">No crossed paths yet</Text>
@@ -209,8 +296,12 @@ export default function CrossedPathsScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
-          {groups.map((g) => (
-            <View key={g.key} className="mb-6">
+          {groupList.map((g) => {
+            const key = `${g.day_key}|${g.place_key}`;
+            const st = groupStates[key];
+            const people = st?.people || [];
+            return (
+            <View key={key} className="mb-6">
               <View className="flex-row items-baseline justify-between mb-3">
                 <Text className="text-ink font-bold text-base flex-1 pr-2" numberOfLines={2}>
                   {g.address_label || 'A place you visited'}
@@ -218,15 +309,34 @@ export default function CrossedPathsScreen() {
                 <Text className="text-gray-500 text-xs font-semibold">{formatDayLabel(g.day_key)}</Text>
               </View>
               <View className="flex-row flex-wrap">
-                {g.profiles.map((p) => (
+                {people.map((p) => (
                   <TouchableOpacity
-                    key={p.id}
+                    key={p.user_id}
                     activeOpacity={0.85}
                     style={{ width: '33.33%', paddingRight: 10, paddingBottom: 14 }}
-                    onPress={() => router.push(`/connections/${p.id}`)}
+                    onPress={() => {
+                      // Open the same profile modal used across the app (not the connections route).
+                      setSelectedProfile({
+                        id: p.user_id,
+                        username: p.username || 'user',
+                        full_name: p.full_name || p.username || 'User',
+                        bio: '',
+                        avatar_url: p.avatar_url,
+                        detailed_interests: null,
+                        relationship_goals: null,
+                        is_verified: !!p.is_verified,
+                        city: undefined,
+                        state: undefined,
+                        social_links: undefined,
+                        status_text: undefined,
+                        status_image_url: undefined,
+                        status_created_at: undefined,
+                      });
+                      setProfileVisible(true);
+                    }}
                   >
                     <View style={{ alignItems: 'center' }}>
-                      <Avatar path={p.avatar_url} />
+                      <AvatarWithIntentRing path={p.avatar_url} goal={p.relationship_goals?.[0] ?? null} />
                       <Text className="text-[11px] text-gray-700 mt-2" numberOfLines={1}>
                         {p.full_name || p.username || 'User'}
                       </Text>
@@ -234,8 +344,20 @@ export default function CrossedPathsScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+              {st?.hasMore ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => loadMore(g)}
+                  className="mt-1 self-center bg-gray-100 px-4 py-2 rounded-full border border-gray-200"
+                  disabled={!!st.loadingMore}
+                >
+                  <Text className="text-gray-700 font-bold text-xs">
+                    {st.loadingMore ? 'Loading…' : 'View more'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
-          ))}
+          );})}
         </ScrollView>
       )}
     </View>

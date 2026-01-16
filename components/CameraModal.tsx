@@ -3,7 +3,7 @@ import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Dimensions, Easing, Image, KeyboardAvoidingView, Modal, PanResponder, Platform, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Easing, Image, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { State, TapGestureHandler } from 'react-native-gesture-handler';
 
 const getScreenDimensions = () => {
@@ -373,12 +373,71 @@ export function CameraModal({
                         className="flex-1 bg-black"
                         style={{ transform: [{ translateX: slideAnim }] }}
                     >
-                        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-                            <Image 
-                                source={{ uri: capturedPhoto }} 
-                                style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
-                                resizeMode="contain"
-                            />
+                        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                            <View style={{ flex: 1 }}>
+                                {/* Tap off to dismiss keyboard */}
+                                <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+                                    <Image 
+                                        source={{ uri: capturedPhoto }} 
+                                        style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+                                        resizeMode="contain"
+                                    />
+                                </TouchableWithoutFeedback>
+                                <View className="absolute bottom-0 left-0 right-0 bg-black/70 p-6 pb-12">
+                                    <TextInput
+                                        value={caption}
+                                        onChangeText={setCaption}
+                                        placeholder="Write a caption..."
+                                        placeholderTextColor="rgba(255,255,255,0.6)"
+                                        multiline
+                                        style={{ color: 'white' }}
+                                        className="bg-white/15 border border-white/15 rounded-2xl px-4 py-3 mb-4"
+                                    />
+                                    <View className="flex-row justify-center">
+                                        <TouchableOpacity 
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                handleRetake();
+                                            }}
+                                            className="bg-white/20 px-6 py-3 rounded-full mr-6"
+                                        >
+                                            <Text className="text-white font-bold">Retake</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
+                                            onPress={() => {
+                                                Keyboard.dismiss();
+                                                void handleSendStatus();
+                                            }}
+                                            disabled={sending}
+                                            className="bg-white px-6 py-3 rounded-full"
+                                        >
+                                            {sending ? (
+                                                <ActivityIndicator color="#000" />
+                                            ) : (
+                                                <Text className="text-black font-bold">Send Status</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            </View>
+                        </KeyboardAvoidingView>
+                    </Animated.View>
+                </Modal>
+            );
+        }
+        return (
+            <Modal visible={visible} animationType="none" transparent>
+                <View className="flex-1 bg-black">
+                    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                        <View style={{ flex: 1 }}>
+                            {/* Tap off to dismiss keyboard */}
+                            <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+                                <Image 
+                                    source={{ uri: capturedPhoto }} 
+                                    style={{ width: Math.max(Number(SCREEN_WIDTH) || 0, 1), height: Math.max(Number(SCREEN_HEIGHT) || 0, 1) }}
+                                    resizeMode="contain"
+                                />
+                            </TouchableWithoutFeedback>
                             <View className="absolute bottom-0 left-0 right-0 bg-black/70 p-6 pb-12">
                                 <TextInput
                                     value={caption}
@@ -391,13 +450,19 @@ export function CameraModal({
                                 />
                                 <View className="flex-row justify-center">
                                     <TouchableOpacity 
-                                        onPress={handleRetake}
+                                        onPress={() => {
+                                            Keyboard.dismiss();
+                                            handleRetake();
+                                        }}
                                         className="bg-white/20 px-6 py-3 rounded-full mr-6"
                                     >
                                         <Text className="text-white font-bold">Retake</Text>
                                     </TouchableOpacity>
                                     <TouchableOpacity 
-                                        onPress={handleSendStatus}
+                                        onPress={() => {
+                                            Keyboard.dismiss();
+                                            void handleSendStatus();
+                                        }}
                                         disabled={sending}
                                         className="bg-white px-6 py-3 rounded-full"
                                     >
@@ -408,49 +473,6 @@ export function CameraModal({
                                         )}
                                     </TouchableOpacity>
                                 </View>
-                            </View>
-                        </KeyboardAvoidingView>
-                    </Animated.View>
-                </Modal>
-            );
-        }
-        return (
-            <Modal visible={visible} animationType="none" transparent>
-                <View className="flex-1 bg-black">
-                    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-                        <Image 
-                            source={{ uri: capturedPhoto }} 
-                            style={{ width: Math.max(Number(SCREEN_WIDTH) || 0, 1), height: Math.max(Number(SCREEN_HEIGHT) || 0, 1) }}
-                            resizeMode="contain"
-                        />
-                        <View className="absolute bottom-0 left-0 right-0 bg-black/70 p-6 pb-12">
-                            <TextInput
-                                value={caption}
-                                onChangeText={setCaption}
-                                placeholder="Write a caption..."
-                                placeholderTextColor="rgba(255,255,255,0.6)"
-                                multiline
-                                style={{ color: 'white' }}
-                                className="bg-white/15 border border-white/15 rounded-2xl px-4 py-3 mb-4"
-                            />
-                            <View className="flex-row justify-center">
-                                <TouchableOpacity 
-                                    onPress={handleRetake}
-                                    className="bg-white/20 px-6 py-3 rounded-full mr-6"
-                                >
-                                    <Text className="text-white font-bold">Retake</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity 
-                                    onPress={handleSendStatus}
-                                    disabled={sending}
-                                    className="bg-white px-6 py-3 rounded-full"
-                                >
-                                    {sending ? (
-                                        <ActivityIndicator color="#000" />
-                                    ) : (
-                                        <Text className="text-black font-bold">Send Status</Text>
-                                    )}
-                                </TouchableOpacity>
                             </View>
                         </View>
                     </KeyboardAvoidingView>

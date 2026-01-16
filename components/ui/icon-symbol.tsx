@@ -25,6 +25,8 @@ const MAPPING = {
   'xmark.circle.fill': 'cancel',
   'arrow.triangle.2.circlepath': 'cached',
   'clock.arrow.circlepath': 'history',
+  // Proxy header: "swirling road" / route-style icon
+  'point.topleft.down.curvedto.point.bottomright.up': 'alt-route',
   'eye.fill': 'visibility',
   'eye.slash.fill': 'visibility-off',
   'pencil': 'edit',

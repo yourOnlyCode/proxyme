@@ -2,7 +2,7 @@ import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
-import { formatAddressLabel, recordCrossedPaths } from '@/lib/crossedPaths';
+import { formatAddressLabel, recordVisit } from '@/lib/crossedPaths';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -72,8 +72,27 @@ export default function HomeScreen() {
   const [userCity, setUserCity] = useState<string | null>(null);
   const [referralCount, setReferralCount] = useState<number>(0);
   const [saveCrossedPaths, setSaveCrossedPaths] = useState(true);
+  const [crossedPathsBadgeCount, setCrossedPathsBadgeCount] = useState(0);
   const [showFriendCodeToast, setShowFriendCodeToast] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  const refreshCrossedPathsBadge = useCallback(async () => {
+    if (!user || !saveCrossedPaths || !isProxyActive) {
+      setCrossedPathsBadgeCount(0);
+      return;
+    }
+    try {
+      const { data, error } = await supabase.rpc('get_my_crossed_paths_badge_count', {});
+      if (error) {
+        setCrossedPathsBadgeCount(0);
+        return;
+      }
+      const n = typeof data === 'number' ? data : Number(data);
+      setCrossedPathsBadgeCount(Number.isFinite(n) && n > 0 ? n : 0);
+    } catch {
+      // ignore
+    }
+  }, [user?.id, saveCrossedPaths, isProxyActive]);
 
   // Check if user has opted out of seeing the referral popup
   const checkDontShowAgain = async () => {
@@ -249,19 +268,15 @@ export default function HomeScreen() {
       try {
         const addressLabel = formatAddressLabel(address);
         if (saveCrossedPaths) {
-          await recordCrossedPaths({
+          // v2: write a single "visit" (cheap) instead of per-user crossed path rows.
+          await recordVisit({
             viewerId: user.id,
             addressLabel,
             address,
             location: location ? { lat: location.coords.latitude, long: location.coords.longitude } : null,
-            profiles: filtered.map((u: any) => ({
-              id: u.id,
-              username: u.username ?? null,
-              full_name: u.full_name ?? null,
-              avatar_url: u.avatar_url ?? null,
-              is_verified: (u as any).is_verified ?? null,
-            })),
           });
+          // Update the small badge on the Crossed Paths icon.
+          void refreshCrossedPathsBadge();
         }
       } catch {
         // ignore
@@ -343,6 +358,7 @@ export default function HomeScreen() {
       if (isProxyActive && location) {
         fetchProxyFeed();
       }
+      void refreshCrossedPathsBadge();
     }, [isProxyActive, location, user])
   );
 
@@ -787,7 +803,30 @@ export default function HomeScreen() {
               className="w-10 h-10 items-center justify-center"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-                <IconSymbol name="clock.arrow.circlepath" size={24} color="#2D3748" />
+                <IconSymbol name="point.topleft.down.curvedto.point.bottomright.up" size={26} color="#2D3748" />
+                {saveCrossedPaths && isProxyActive && crossedPathsBadgeCount > 0 ? (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 4,
+                      minWidth: 16,
+                      height: 16,
+                      paddingHorizontal: 4,
+                      borderRadius: 999,
+                      backgroundColor: '#EF4444',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 2,
+                      borderColor: 'rgba(248, 250, 252, 0.95)',
+                    }}
+                  >
+                    <Text style={{ color: 'white', fontSize: 10, fontWeight: '800', lineHeight: 12 }}>
+                      {crossedPathsBadgeCount > 99 ? '99+' : String(crossedPathsBadgeCount)}
+                    </Text>
+                  </View>
+                ) : null}
             </TouchableOpacity>
             
             {/* Proxme Title (Center) - Absolutely positioned for perfect centering */}

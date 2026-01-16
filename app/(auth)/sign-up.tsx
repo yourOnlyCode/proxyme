@@ -51,7 +51,7 @@ export default function SignUp() {
         </Text>
         <TextInput
           className="bg-white/80 border border-slate-200 rounded-2xl px-4 py-4 text-base mb-4 text-ink"
-          placeholder="you@example.com"
+          placeholder="youare@beautiful.com.com"
           placeholderTextColor="#94A3B8"
           autoCapitalize="none"
           keyboardType="email-address"

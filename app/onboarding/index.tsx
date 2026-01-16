@@ -372,7 +372,7 @@ export default function OnboardingScreen() {
                   <TouchableOpacity
                     key={opt}
                     onPress={() => selectGoal(opt)}
-                    className={`w-full py-6 rounded-2xl border mb-4 items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
+                    className={`w-full py-2 rounded-xl border mb-4 items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
                   >
                     <Text className={`font-bold text-xl ${getGoalTextStyle(opt, isSelected)}`}>{opt}</Text>
                   </TouchableOpacity>
