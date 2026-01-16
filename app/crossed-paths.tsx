@@ -253,7 +253,7 @@ export default function CrossedPathsScreen() {
           }}
         >
           <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}>
-            Crossed Paths
+            crossed paths
           </Text>
         </View>
       </View>

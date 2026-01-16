@@ -1,5 +1,6 @@
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { useStatus } from '@/components/StatusProvider';
+import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getUserConnectionsList } from '@/lib/connections';
@@ -122,6 +123,7 @@ export default function InboxScreen() {
   const { activeStatuses, currentProfile, openMyStatusViewer, openStatusViewer, seenStatusIds } = useStatus();
   const scheme = useColorScheme() ?? 'light';
   const isDark = scheme === 'dark';
+  const [focused, setFocused] = useState(true);
   const [items, setItems] = useState<InboxItem[]>(() => getUiCache<InboxItem[]>('inbox.items') ?? []);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>(() => getUiCache<UpcomingEvent[]>('inbox.upcoming') ?? []);
   const [loading, setLoading] = useState(items.length === 0); // initial-only loader
@@ -136,6 +138,11 @@ export default function InboxScreen() {
   const [storyUsers, setStoryUsers] = useState<StoryUser[]>([]);
   const [storiesLoading, setStoriesLoading] = useState(false);
   const router = useRouter();
+
+  const composeRef = useRef<View | null>(null);
+  const storiesRef = useRef<View | null>(null);
+  const myStoryRef = useRef<View | null>(null);
+  const upcomingRef = useRef<View | null>(null);
 
   const composeSheetAnim = useRef(new Animated.Value(0)).current; // 0 closed, 1 open
   const composeClosingRef = useRef(false);
@@ -381,6 +388,14 @@ export default function InboxScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composeVisible]);
+
+  // Only show coach marks when this tab is focused (prevents background tabs from popping a tour).
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
 
   const fetchData = async (opts?: { silent?: boolean }) => {
     if (!user) return;
@@ -1041,36 +1056,40 @@ export default function InboxScreen() {
           className="text-xl text-ink"
           style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}
         >
-          Your Circle
+          your circle
         </Text>
-        <TouchableOpacity
-          onPress={() => {
-            openCompose();
-          }}
-          activeOpacity={0.85}
-        >
-          <BlurView
-            intensity={18}
-            tint="light"
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              overflow: 'hidden',
-              borderWidth: 1,
-              borderColor: 'rgba(255,255,255,0.70)',
-              backgroundColor: 'rgba(255,255,255,0.30)',
-              alignItems: 'center',
-              justifyContent: 'center',
+        <View ref={composeRef} collapsable={false}>
+          <TouchableOpacity
+            onPress={() => {
+              openCompose();
             }}
+            activeOpacity={0.85}
           >
-            <IconSymbol name="square.and.pencil" size={18} color="#475569" />
-          </BlurView>
-        </TouchableOpacity>
+            <BlurView
+              intensity={18}
+              tint="light"
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                overflow: 'hidden',
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.70)',
+                backgroundColor: 'rgba(255,255,255,0.30)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <IconSymbol name="square.and.pencil" size={18} color="#475569" />
+            </BlurView>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Stories carousel (Instagram-style) */}
       <View
+        ref={storiesRef}
+        collapsable={false}
         className="mb-2"
         style={{
           backgroundColor: 'rgba(241,245,249,0.80)',
@@ -1091,19 +1110,21 @@ export default function InboxScreen() {
           contentContainerStyle={{ paddingHorizontal: 14, paddingRight: 22, paddingVertical: 10 }}
         >
           {/* Me (always first) */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => {
-              if (activeStatuses.length > 0) openMyStatusViewer(0);
-              else router.push('/(tabs)/explore');
-            }}
-            style={{ marginRight: 12, alignItems: 'center', width: 76 }}
-          >
-            <StoryAvatar path={currentProfile?.avatar_url || null} hasStory={activeStatuses.length > 0} />
-            <Text className="text-[11px] text-gray-700 mt-1" numberOfLines={1}>
-              You
-            </Text>
-          </TouchableOpacity>
+          <View ref={myStoryRef} collapsable={false}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => {
+                if (activeStatuses.length > 0) openMyStatusViewer(0);
+                else router.push('/(tabs)/explore');
+              }}
+              style={{ marginRight: 12, alignItems: 'center', width: 76 }}
+            >
+              <StoryAvatar path={currentProfile?.avatar_url || null} hasStory={activeStatuses.length > 0} />
+              <Text className="text-[11px] text-gray-700 mt-1" numberOfLines={1}>
+                You
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           {/* Divider between "You" and everyone else */}
           <View
@@ -1195,15 +1216,16 @@ export default function InboxScreen() {
       </View>
 
       {/* Upcoming Events always at the top */}
-      <TouchableOpacity
-        className="mx-4 mb-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
-        style={cardStyle}
-        activeOpacity={0.85}
-        onPress={() => setUpcomingVisible(true)}
-      >
-        <View className="w-9 h-9 rounded-full bg-business/10 items-center justify-center mr-3">
-          <IconSymbol name="calendar" size={18} color="#2563EB" />
-        </View>
+      <View ref={upcomingRef} collapsable={false}>
+        <TouchableOpacity
+          className="mx-4 mb-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex-row items-center"
+          style={cardStyle}
+          activeOpacity={0.85}
+          onPress={() => setUpcomingVisible(true)}
+        >
+          <View className="w-9 h-9 rounded-full bg-business/10 items-center justify-center mr-3">
+            <IconSymbol name="calendar" size={18} color="#2563EB" />
+          </View>
         <View className="flex-1">
           <Text className="text-ink font-bold text-base" style={titleStyle}>Upcoming Events</Text>
           <Text className="text-gray-500 text-xs" numberOfLines={1} style={subStyle}>
@@ -1213,7 +1235,8 @@ export default function InboxScreen() {
         <View className="bg-gray-100 px-3 py-1 rounded-full">
           <Text className="text-gray-700 font-bold text-xs">{String(upcomingEvents.length)}</Text>
         </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </View>
 
       {/* Messages (directly below Upcoming Events) */}
       <View className="mx-4 mb-3">
@@ -1512,6 +1535,37 @@ export default function InboxScreen() {
           </Animated.View>
         </View>
       </Modal>
+
+      <CoachMarks
+        enabled={focused}
+        storageKey="tutorial:tab:circle:v1"
+        steps={[
+          {
+            key: 'stories',
+            title: 'Stories',
+            body: 'View your connections’ statuses here (unviewed first).',
+            targetRef: storiesRef,
+          },
+          {
+            key: 'myStatus',
+            title: 'Your status',
+            body: 'Tap your profile to view or edit your current status.',
+            targetRef: myStoryRef,
+          },
+          {
+            key: 'upcoming',
+            title: 'Upcoming events',
+            body: 'Your saved events live here so you don’t miss anything.',
+            targetRef: upcomingRef,
+          },
+          {
+            key: 'compose',
+            title: 'Quick message',
+            body: 'Tap this to quickly message a connection from a 3‑column grid.',
+            targetRef: composeRef,
+          },
+        ]}
+      />
     </View>
   );
 }

@@ -1,3 +1,4 @@
+import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -82,6 +83,8 @@ export default function CityFeedScreen() {
     setListHeight(windowHeight - tabBarHeight);
   }, [windowHeight, tabBarHeight]);
   const feedListRef = useRef<FlatList<any> | null>(null);
+  const feedContainerRef = useRef<View | null>(null);
+  const [focused, setFocused] = useState(true);
   const [pageIndex, setPageIndex] = useState(0);
   const { user } = useAuth();
   const { location, address } = useProxyLocation();
@@ -380,6 +383,14 @@ export default function CityFeedScreen() {
     }, [fetchFeed])
   );
 
+  // Only show coach marks when this tab is focused (prevents background tabs from popping a tour).
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
+
   const sendInterest = async (targetUserId: string) => {
       const { error } = await supabase
         .from('interests')
@@ -498,10 +509,11 @@ export default function CityFeedScreen() {
 
   return (
     <View className="flex-1 bg-transparent" {...cityFeedPanResponder.panHandlers}>
-      <FlatList
-        ref={feedListRef as any}
-        data={feed}
-        renderItem={({ item }) => (
+      <View ref={feedContainerRef} collapsable={false} style={{ flex: 1 }}>
+        <FlatList
+          ref={feedListRef as any}
+          data={feed}
+          renderItem={({ item }) => (
             item.kind === 'profile' ? (
               <CityFeedCard 
                   item={item.profile} 
@@ -626,8 +638,8 @@ export default function CityFeedScreen() {
                 }}
               />
             )
-        )}
-        keyExtractor={(item) => item.id}
+          )}
+          keyExtractor={(item) => item.id}
         // Prevent iOS inset adjustment jitter on tab switch (can show "past the top" until first scroll)
         contentInsetAdjustmentBehavior="never"
         automaticallyAdjustContentInsets={false}
@@ -662,7 +674,7 @@ export default function CityFeedScreen() {
                 </View>
             )
         }
-        ListFooterComponent={
+          ListFooterComponent={
             feed.length > 0 ? (
                 <View style={{ height: listHeight, width: width }} className="items-center justify-center px-8">
                     <IconSymbol name="checkmark.circle.fill" size={50} color="#4ade80" />
@@ -678,7 +690,33 @@ export default function CityFeedScreen() {
                     </TouchableOpacity>
                 </View>
             ) : null
-        }
+          }
+        />
+      </View>
+
+      <CoachMarks
+        enabled={focused}
+        storageKey="tutorial:tab:city:v1"
+        steps={[
+          {
+            key: 'about',
+            title: 'City',
+            body: 'This tab is for viewing the happenings across your city.',
+            anchor: 'top',
+          },
+          {
+            key: 'status',
+            title: 'Update your status',
+            body: 'Tap the + button to post a status that shows to people across your city.',
+            anchor: 'bottomRight',
+          },
+          {
+            key: 'feed',
+            title: 'Scroll the feed',
+            body: 'Swipe through people’s statuses and club events happening around you.',
+            targetRef: feedContainerRef,
+          },
+        ]}
       />
       <ProfileModal 
          visible={modalVisible}

@@ -1,5 +1,6 @@
 import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
+import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -45,6 +46,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const toast = useToast();
+  const [focused, setFocused] = useState(true);
 
   // Scroll Animation
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -84,6 +86,9 @@ export default function HomeScreen() {
   const [crossedPathsBadgeCount, setCrossedPathsBadgeCount] = useState(0);
   const [showFriendCodeToast, setShowFriendCodeToast] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const proxyToggleRef = useRef<View | null>(null);
+  const crossedPathsIconRef = useRef<View | null>(null);
+  const firstCardRef = useRef<View | null>(null);
 
   const refreshCrossedPathsBadge = useCallback(async () => {
     if (!user || !saveCrossedPaths || !isProxyActive) {
@@ -371,6 +376,14 @@ export default function HomeScreen() {
     }, [isProxyActive, location, user])
   );
 
+  // Only show coach marks when this tab is focused (prevents background tabs from popping a tour).
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
+
   const sendInterest = async (targetUserId: string) => {
       // Legacy helper; ProfileActionButtons now drives this flow.
       // Keep for safety and remove success toast (UI should update via button state).
@@ -542,7 +555,7 @@ export default function HomeScreen() {
     })
   ).current;
 
-  const renderCard = ({ item }: { item: FeedProfile }) => {
+  const renderCard = ({ item, index }: { item: FeedProfile; index: number }) => {
     const primaryGoal = item.relationship_goals?.[0];
     const colors = getGoalColors(primaryGoal);
     const isConnected = !!item.connection_id;
@@ -571,6 +584,7 @@ export default function HomeScreen() {
 
     return (
       <View 
+        ref={index === 0 ? firstCardRef : undefined}
         className={`mb-6 rounded-3xl overflow-hidden ${isConnected ? 'bg-gray-50' : 'bg-white'} shadow-sm`}
         style={{
           borderWidth: 1,
@@ -814,7 +828,9 @@ export default function HomeScreen() {
               className="w-10 h-10 items-center justify-center"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-                <IconSymbol name="point.topleft.down.curvedto.point.bottomright.up" size={26} color={isDark ? '#E5E7EB' : '#2D3748'} />
+                <View ref={crossedPathsIconRef} collapsable={false}>
+                  <IconSymbol name="point.topleft.down.curvedto.point.bottomright.up" size={26} color={isDark ? '#E5E7EB' : '#2D3748'} />
+                </View>
                 {saveCrossedPaths && isProxyActive && crossedPathsBadgeCount > 0 ? (
                   <View
                     pointerEvents="none"
@@ -889,6 +905,7 @@ export default function HomeScreen() {
               elevation: 3,
             }}
           >
+              <View ref={proxyToggleRef} collapsable={false}>
               <View className="flex-row justify-between items-center">
                   <View className="flex-row items-center flex-1">
                       <View className={`w-8 h-8 rounded-full items-center justify-center mr-3 ${isProxyActive ? 'bg-green-50' : 'bg-gray-50'}`}>
@@ -910,6 +927,7 @@ export default function HomeScreen() {
                       thumbColor={'#fff'}
                       style={{ transform: [{ scaleX: 0.6 }, { scaleY: 0.6 }] }} 
                   />
+              </View>
               </View>
           </TouchableOpacity>
       </Animated.View>
@@ -951,8 +969,36 @@ export default function HomeScreen() {
                 </View>
               )
           }
-          renderItem={renderCard}
+          renderItem={({ item, index }) => renderCard({ item, index })}
           showsVerticalScrollIndicator={false}
+      />
+
+      <CoachMarks
+        enabled={focused}
+        storageKey="tutorial:tab:proxy:v1"
+        steps={[
+          {
+            key: 'toggle',
+            title: 'Proxy Mode',
+            body: 'Flip this switch to be visible to people right here, right now.',
+            targetRef: proxyToggleRef as any,
+            anchor: 'top',
+          },
+          {
+            key: 'cards',
+            title: 'Nearby people',
+            body: 'Users that populate here are at the same place as you.',
+            targetRef: firstCardRef as any,
+            anchor: 'center',
+          },
+          {
+            key: 'history',
+            title: 'Crossed Paths',
+            body: 'Tap here to view people you crossed paths with over the last week.',
+            targetRef: crossedPathsIconRef as any,
+            anchor: 'topLeft',
+          },
+        ]}
       />
 
       <StatusPreviewModal 

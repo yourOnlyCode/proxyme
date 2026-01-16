@@ -24,6 +24,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Avatar from '../../components/profile/Avatar';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
+import { validateFullName, validateUsername } from '../../lib/nameValidation';
 import { supabase } from '../../lib/supabase';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -116,6 +117,17 @@ export default function EditProfileScreen() {
     try {
       setSaving(true);
       if (!user) throw new Error('No user on the session!');
+
+      const u = validateUsername(username);
+      if (!u.ok) {
+        Alert.alert('Username', u.message);
+        return;
+      }
+      const n = validateFullName(fullName);
+      if (!n.ok) {
+        Alert.alert('Name', n.message);
+        return;
+      }
 
       let cleanAvatarPath = avatarUrl;
       if (avatarUrl && avatarUrl.startsWith('http')) {

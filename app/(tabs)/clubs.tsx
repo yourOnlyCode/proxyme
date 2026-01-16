@@ -1,9 +1,10 @@
+import { CoachMarks } from '@/components/ui/CoachMarks';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Modal, RefreshControl, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
@@ -30,12 +31,24 @@ export default function ClubsScreen() {
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme() ?? 'light';
   const isDark = scheme === 'dark';
+  const [focused, setFocused] = useState(true);
+  const createRef = useRef<View | null>(null);
+  const tabsRef = useRef<View | null>(null);
+  const listRef = useRef<View | null>(null);
   const [myClubs, setMyClubs] = useState<Club[]>(() => getUiCache<Club[]>('clubs.my') ?? []);
   const [cityClubs, setCityClubs] = useState<Club[]>(() => getUiCache<Club[]>('clubs.city') ?? []); // Discovery
   const [loading, setLoading] = useState(myClubs.length === 0 && cityClubs.length === 0); // initial-only loader
   const [refreshing, setRefreshing] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [tab, setTab] = useState<'my' | 'discover'>('my');
+
+  // Only show coach marks when this tab is focused (prevents background tabs from popping a tour).
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
 
   // Create Form
   const [newClubName, setNewClubName] = useState('');
@@ -117,7 +130,7 @@ export default function ClubsScreen() {
             
             if (error) throw error;
             
-            const clubs = data.map((item: any) => ({
+            const clubs = (data ?? []).map((item: any) => ({
                 ...item.club,
                 role: item.role,
                 is_member: true
@@ -389,51 +402,82 @@ export default function ClubsScreen() {
             <View className="w-10" />
             <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}>Social Clubs</Text>
             {/* Create Button - verify limit logic handled in backend or assume UI check needed? */}
-            <TouchableOpacity 
-                onPress={() => setCreateModalVisible(true)}
-                className="bg-black w-10 h-10 rounded-full items-center justify-center shadow-md"
-            >
-                <IconSymbol name="plus" size={24} color="white" />
-            </TouchableOpacity>
+            <View ref={createRef} collapsable={false}>
+              <TouchableOpacity 
+                  onPress={() => setCreateModalVisible(true)}
+                  className="bg-black w-10 h-10 rounded-full items-center justify-center shadow-md"
+              >
+                  <IconSymbol name="plus" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
         </View>
 
-        <GlassCard className="mb-6" contentClassName="p-1" tint={isDark ? 'dark' : 'light'} intensity={25}>
-            <View className="flex-row">
-                <TouchableOpacity 
-                    onPress={() => setTab('my')}
-                    className={`flex-1 py-2 rounded-lg items-center ${tab === 'my' ? 'bg-white/80' : ''}`}
-                    style={{ backgroundColor: tab === 'my' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
-                >
-                    <Text className={`font-bold ${tab === 'my' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'my' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
-                      My Clubs
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    onPress={() => setTab('discover')}
-                    className={`flex-1 py-2 rounded-lg items-center ${tab === 'discover' ? 'bg-white/80' : ''}`}
-                    style={{ backgroundColor: tab === 'discover' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
-                >
-                    <Text className={`font-bold ${tab === 'discover' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'discover' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
-                      Discover {address?.city || 'Clubs'}
-                    </Text>
-                </TouchableOpacity>
-            </View>
-        </GlassCard>
+        <View ref={tabsRef} collapsable={false}>
+          <GlassCard className="mb-6" contentClassName="p-1" tint={isDark ? 'dark' : 'light'} intensity={25}>
+              <View className="flex-row">
+                  <TouchableOpacity 
+                      onPress={() => setTab('my')}
+                      className={`flex-1 py-2 rounded-lg items-center ${tab === 'my' ? 'bg-white/80' : ''}`}
+                      style={{ backgroundColor: tab === 'my' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
+                  >
+                      <Text className={`font-bold ${tab === 'my' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'my' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
+                        My Clubs
+                      </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                      onPress={() => setTab('discover')}
+                      className={`flex-1 py-2 rounded-lg items-center ${tab === 'discover' ? 'bg-white/80' : ''}`}
+                      style={{ backgroundColor: tab === 'discover' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
+                  >
+                      <Text className={`font-bold ${tab === 'discover' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'discover' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
+                        Discover {address?.city || 'Clubs'}
+                      </Text>
+                  </TouchableOpacity>
+              </View>
+          </GlassCard>
+        </View>
 
-        <FlatList
-            data={tab === 'my' ? myClubs : cityClubs}
-            renderItem={renderClubItem}
-            keyExtractor={item => item.id}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchClubs} />}
-            ListEmptyComponent={
-                <View className="items-center mt-20 opacity-50">
-                    <IconSymbol name="person.3.fill" size={48} color="#CBD5E0" />
-                    <Text className="text-gray-500 mt-4 font-medium">
-                        {tab === 'my' ? "You haven't joined any clubs yet." : `No clubs found in ${address?.city || 'your city'}.`}
-                    </Text>
-                </View>
-            }
-            contentContainerStyle={{ paddingBottom: 100 }}
+        <View ref={listRef} collapsable={false} style={{ flex: 1 }}>
+          <FlatList
+              data={tab === 'my' ? myClubs : cityClubs}
+              renderItem={renderClubItem}
+              keyExtractor={item => item.id}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchClubs} />}
+              ListEmptyComponent={
+                  <View className="items-center mt-20 opacity-50">
+                      <IconSymbol name="person.3.fill" size={48} color="#CBD5E0" />
+                      <Text className="text-gray-500 mt-4 font-medium">
+                          {tab === 'my' ? "You haven't joined any clubs yet." : `No clubs found in ${address?.city || 'your city'}.`}
+                      </Text>
+                  </View>
+              }
+              contentContainerStyle={{ paddingBottom: 100 }}
+          />
+        </View>
+
+        <CoachMarks
+          enabled={focused}
+          storageKey="tutorial:tab:clubs:v1"
+          steps={[
+            {
+              key: 'tabs',
+              title: 'Your clubs vs discover',
+              body: 'Switch between clubs you’re in and clubs you can discover in your city.',
+              targetRef: tabsRef,
+            },
+            {
+              key: 'create',
+              title: 'Create a club',
+              body: 'Tap + to start a new club and invite people in.',
+              targetRef: createRef,
+            },
+            {
+              key: 'list',
+              title: 'Browse clubs',
+              body: 'Tap a club to view its forum, events, members, and settings.',
+              targetRef: listRef,
+            },
+          ]}
         />
 
         {/* Create Club Modal */}

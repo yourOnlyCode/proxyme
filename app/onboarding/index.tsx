@@ -1,5 +1,7 @@
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { OrbBackground } from '@/components/ui/OrbBackground';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -15,10 +17,12 @@ import {
   UIManager,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/profile/Avatar';
 import { InterestSelector } from '../../components/profile/InterestSelector';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
+import { validateFullName, validateUsername } from '../../lib/nameValidation';
 import { supabase } from '../../lib/supabase';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -36,6 +40,7 @@ const STEPS = [
 export default function OnboardingScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -161,6 +166,16 @@ export default function OnboardingScreen() {
         Alert.alert('Required', 'Please enter your username and full name.');
         return;
       }
+      const u = validateUsername(username);
+      if (!u.ok) {
+        Alert.alert('Username', u.message);
+        return;
+      }
+      const n = validateFullName(fullName);
+      if (!n.ok) {
+        Alert.alert('Name', n.message);
+        return;
+      }
       if (relationshipGoals.length === 0) {
         Alert.alert('Required', 'Please select what you are looking for.');
         return;
@@ -231,6 +246,13 @@ export default function OnboardingScreen() {
 
       // Small delay to ensure routing check sees updated data
       await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Prevent the legacy global tutorial modal from showing now that we use per-tab coach marks.
+      try {
+        await AsyncStorage.setItem('hasSeenTutorial', 'true');
+      } catch {
+        // ignore
+      }
       
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -242,19 +264,44 @@ export default function OnboardingScreen() {
 
   if (loading) return <View className="flex-1 justify-center"><ActivityIndicator /></View>;
 
+  const canGoNext = (() => {
+    if (saving || applyingFriendCode) return false;
+    if (step === 0) return true;
+    if (step === 1) {
+      if (!avatarUrl) return false;
+      const u = validateUsername(username);
+      const n = validateFullName(fullName);
+      if (!u.ok || !n.ok) return false;
+      if (relationshipGoals.length === 0) return false; // intent required
+      return true;
+    }
+    if (step === 2) return Object.keys(detailedInterests).length > 0;
+    return true;
+  })();
+
   return (
     <KeyboardDismissWrapper>
-    <View className="flex-1 bg-white pt-12">
-      <View className="px-6 mb-6">
-        <View className="mb-2">
-          <Text className="text-3xl font-bold text-ink">{STEPS[step].title}</Text>
-          <Text className="text-gray-500 text-base mt-1">{STEPS[step].subtitle}</Text>
+    <View className="flex-1 bg-transparent">
+      <OrbBackground opacity={0.42} />
+
+      {/* Header */}
+      <View
+        className="px-6 pb-3 border-b border-gray-100"
+        style={{ paddingTop: insets.top + 10, backgroundColor: 'rgba(255,255,255,0.85)' }}
+      >
+        <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular' }}>
+          On Boarding
+        </Text>
+        <View className="mt-2">
+          <Text className="text-[18px] font-bold text-ink">{STEPS[step].title}</Text>
+          <Text className="text-gray-500 text-sm mt-1">{STEPS[step].subtitle}</Text>
         </View>
-        <View className="flex-row items-center justify-between mb-2">
+
+        <View className="flex-row items-center justify-between mt-3">
           <View className="h-1.5 bg-gray-100 rounded-full flex-1 overflow-hidden mr-3">
             <View className="h-full bg-black rounded-full" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} />
           </View>
-          <Text className="text-gray-400 font-bold text-sm">{step + 1}/{STEPS.length}</Text>
+          <Text className="text-gray-400 font-bold text-xs">{step + 1}/{STEPS.length}</Text>
         </View>
       </View>
 
@@ -311,7 +358,7 @@ export default function OnboardingScreen() {
           <View className="mt-4">
             <View className="items-center mt-2">
               <Avatar url={avatarUrl} size={150} onUpload={(url) => setAvatarUrl(url)} editable />
-              <Text className="text-gray-400 text-sm mt-3">Tap to upload your main photo</Text>
+              <Text className="text-gray-400 text-xs mt-2">Tap to upload your main photo</Text>
             </View>
 
             <View className="mt-6">
@@ -325,7 +372,7 @@ export default function OnboardingScreen() {
                 <TextInput
                   value={username}
                   onChangeText={setUsername}
-                  className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg text-ink"
+                  className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
                   placeholder="Unique username"
                   autoCapitalize="none"
                   returnKeyType="next"
@@ -339,7 +386,7 @@ export default function OnboardingScreen() {
                 <TextInput
                   value={fullName}
                   onChangeText={setFullName}
-                  className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg text-ink"
+                  className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
                   placeholder="Your name"
                   returnKeyType="next"
                   blurOnSubmit={false}
@@ -354,7 +401,7 @@ export default function OnboardingScreen() {
                   onChangeText={setBio}
                   multiline
                   numberOfLines={4}
-                  className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg h-32 text-ink"
+                  className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base h-28 text-ink"
                   returnKeyType="done"
                   blurOnSubmit
                   onSubmitEditing={() => Keyboard.dismiss()}
@@ -365,19 +412,24 @@ export default function OnboardingScreen() {
             </View>
 
             <View className="mt-2">
-              <Text className="text-gray-500 mb-3 ml-1 font-bold">What are you looking for?</Text>
+              <Text className="text-gray-500 mb-2 ml-1 font-bold">What are you looking for?</Text>
               {RELATIONSHIP_OPTS.map((opt) => {
                 const isSelected = relationshipGoals.includes(opt);
                 return (
                   <TouchableOpacity
                     key={opt}
                     onPress={() => selectGoal(opt)}
-                    className={`w-full py-2 rounded-xl border mb-4 items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
+                    className={`w-full py-3 rounded-xl border mb-3 items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
                   >
-                    <Text className={`font-bold text-xl ${getGoalTextStyle(opt, isSelected)}`}>{opt}</Text>
+                    <Text className={`font-bold text-base ${getGoalTextStyle(opt, isSelected)}`}>{opt}</Text>
                   </TouchableOpacity>
                 );
               })}
+              {relationshipGoals.length === 0 ? (
+                <Text className="text-[11px] text-gray-400 mt-1 ml-1">
+                  Required to continue.
+                </Text>
+              ) : null}
             </View>
           </View>
         )}
@@ -392,26 +444,26 @@ export default function OnboardingScreen() {
         )}
       </ScrollView>
 
-      <View className="p-6 bg-white border-t border-gray-100">
+      <View className="px-6 py-4 bg-white border-t border-gray-100">
         <View className="flex-row space-x-4">
           {step > 0 && (
             <TouchableOpacity
               onPress={prevStep}
               disabled={saving || applyingFriendCode}
-              className="flex-1 bg-gray-100 py-4 rounded-2xl items-center border border-gray-200"
+              className="flex-1 bg-gray-100 py-3 rounded-2xl items-center border border-gray-200"
             >
-              <Text className="text-gray-600 font-bold text-lg">Back</Text>
+              <Text className="text-gray-600 font-bold text-sm">Back</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
             onPress={nextStep}
-            disabled={saving || applyingFriendCode}
-            className="flex-1 bg-black py-4 rounded-2xl items-center shadow-lg"
+            disabled={!canGoNext}
+            className={`flex-1 py-3 rounded-2xl items-center shadow-lg ${canGoNext ? 'bg-black' : 'bg-gray-300'}`}
           >
             {saving || applyingFriendCode ? (
               <ActivityIndicator color="white" />
             ) : (
-              <Text className="text-white font-bold text-lg">{step === STEPS.length - 1 ? 'Finish' : 'Next'}</Text>
+              <Text className="text-white font-bold text-sm">{step === STEPS.length - 1 ? 'Finish' : 'Next'}</Text>
             )}
           </TouchableOpacity>
         </View>

@@ -1,4 +1,5 @@
 import { useStatus } from '@/components/StatusProvider';
+import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -57,10 +58,21 @@ export default function ProfileScreen() {
   const { activeStatuses, openMyStatusViewer } = useStatus();
   const scheme = useColorScheme() ?? 'light';
   const isDark = scheme === 'dark';
+  const [focused, setFocused] = useState(true);
+  const gearRef = useRef<View | null>(null);
+  const summaryRef = useRef<View | null>(null);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<{ total: number, romance: number, friendship: number, business: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  // Only show coach marks when this tab is focused (prevents background tabs from popping a tour).
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
 
   // Swipe left (from right edge) to open Settings
   const initialTouchX = useRef<number | null>(null);
@@ -236,19 +248,21 @@ export default function ProfileScreen() {
                 )}
 
                 {/* Settings Button (back in banner) */}
-                <TouchableOpacity 
-                    className="absolute top-12 right-4 bg-paper/90 p-2 rounded-full shadow-sm backdrop-blur-md"
-                    onPress={() => router.push('/(settings)/edit-profile')}
-                    activeOpacity={0.85}
-                    style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderWidth: isDark ? 1 : 0, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
-                >
-                     <IconSymbol name="gearshape.fill" size={22} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
-                </TouchableOpacity>
+                <View ref={gearRef} collapsable={false} style={{ position: 'absolute', top: 48, right: 16 }}>
+                  <TouchableOpacity 
+                      className="bg-paper/90 p-2 rounded-full shadow-sm backdrop-blur-md"
+                      onPress={() => router.push('/(settings)/edit-profile')}
+                      activeOpacity={0.85}
+                      style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderWidth: isDark ? 1 : 0, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
+                  >
+                       <IconSymbol name="gearshape.fill" size={22} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
+                  </TouchableOpacity>
+                </View>
                 
             </View>
 
             {/* Profile Info */}
-            <View className="px-5 -mt-16">
+            <View ref={summaryRef} collapsable={false} className="px-5 -mt-16">
                 {/* Profile Photo Circle with Apple Glass Morphism - Centered horizontally */}
                 <View className="items-center mb-4">
                   <Pressable
@@ -648,6 +662,31 @@ export default function ProfileScreen() {
 
             </View>
         </ScrollView>
+
+        <CoachMarks
+          enabled={focused}
+          storageKey="tutorial:tab:profile:v1"
+          steps={[
+            {
+              key: 'summary',
+              title: 'Your profile',
+              body: 'This is a summary of what other users will see.',
+              targetRef: summaryRef,
+            },
+            {
+              key: 'status',
+              title: 'View your status',
+              body: 'Tap your profile photo to view your active status (if you have one).',
+              anchor: 'center',
+            },
+            {
+              key: 'settings',
+              title: 'Edit your profile',
+              body: 'Tap the gear to edit, or swipe left from the right edge.',
+              targetRef: gearRef,
+            },
+          ]}
+        />
     </View>
   );
 }
