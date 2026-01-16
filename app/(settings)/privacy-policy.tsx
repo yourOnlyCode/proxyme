@@ -29,31 +29,74 @@ export default function PrivacyPolicyScreen() {
             className="bg-white border border-gray-100 rounded-3xl p-5 shadow-sm"
             style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
           >
-            <Text className="text-gray-500 text-xs mb-3" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Last updated: TBD</Text>
-
-            <Text className="text-ink font-bold text-lg mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>Summary</Text>
-            <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
-              This is a placeholder privacy policy screen. Replace this text with your official privacy policy before publishing.
+            <Text className="text-gray-500 text-xs mb-3" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
+              Last updated: 2026-01-16
             </Text>
 
-            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>What we collect</Text>
+            <Text className="text-ink font-bold text-lg mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+              Summary
+            </Text>
             <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
-              - Account details you provide (email, profile info){'\n'}
-              - Content you upload (photos, comments){'\n'}
-              - Approximate location/city for discovery (if enabled){'\n'}
-              - Basic usage/diagnostic data for reliability
+              Proxyme is a social app with location-based discovery, messaging, clubs, events, and temporary statuses. We collect only what we need to
+              run these features, keep the community safe, and improve reliability.
             </Text>
 
-            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>How we use it</Text>
+            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+              Age & date of birth
+            </Text>
             <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
-              - Provide core features (profiles, messaging, events){'\n'}
-              - Safety & moderation workflows{'\n'}
-              - Improve performance and reliability
+              - We ask for your date of birth to determine which experience you are eligible for.{'\n'}
+              - We separate experiences by age group (13–17 vs 18+) so minors and adults do not see each other in discovery or connection flows.{'\n'}
+              - 13–17 accounts are friendship-only. Romance intent is disabled for minors.{'\n'}
+              - If you report someone as underage, we may restrict their account while we review.
             </Text>
 
-            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>Contact</Text>
+            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+              What we collect
+            </Text>
             <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
-              For privacy requests, contact support (see the Contact page).
+              - Account/profile info you provide (username, name, bio, photos, interests, intent preferences){'\n'}
+              - Messages and shared content you send in chats{'\n'}
+              - Temporary statuses you post (and their captions){'\n'}
+              - Safety signals (blocks, reports, report reasons, and optional details){'\n'}
+              - Location signals used for discovery (if you enable Proxy)
+            </Text>
+
+            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+              Location & Crossed Paths (privacy-first)
+            </Text>
+            <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
+              - Proxy discovery uses your device location when enabled.{'\n'}
+              - Crossed Paths only collects/updates data when Proxy is ON and Crossed Paths history is enabled in settings.{'\n'}
+              - We store a non-reversible “place fingerprint” (a hashed key) to match people at the same spot without storing raw coordinates in this history table.{'\n'}
+              - We show a redacted label (venue name or a street block) and do not need to display exact addresses.{'\n'}
+              - Crossed Paths is designed to show up to a week of history.
+            </Text>
+
+            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+              How we use data
+            </Text>
+            <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
+              - Provide core features (discovery, messaging, clubs, events, statuses){'\n'}
+              - Enforce age segmentation and romance age-range preferences (18+ only){'\n'}
+              - Safety & moderation (blocking, reporting, review workflows){'\n'}
+              - Reliability and fraud prevention
+            </Text>
+
+            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+              Your choices
+            </Text>
+            <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
+              - You can turn Proxy and Crossed Paths history on/off in settings.{'\n'}
+              - You can block or report users at any time.{'\n'}
+              - You can edit your profile information in settings.
+            </Text>
+
+            <Text className="text-ink font-bold text-lg mt-6 mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+              Contact
+            </Text>
+            <Text className="text-gray-700 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
+              For privacy requests or questions, contact support (see the Contact page).
             </Text>
           </View>
         </ScrollView>

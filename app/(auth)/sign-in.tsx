@@ -35,7 +35,7 @@ export default function SignIn() {
       subtitle=""
       footer={
         <View className="flex-row justify-center mt-1">
-          <Text className="text-slate-600">Don't have an account? </Text>
+          <Text className="text-slate-600">Don’t have an account? </Text>
           <Link href="/(auth)/sign-up" asChild>
             <TouchableOpacity>
               <Text className="font-bold text-ink">Sign Up</Text>
@@ -50,7 +50,7 @@ export default function SignIn() {
         </Text>
         <TextInput
           className="bg-white/80 border border-slate-200 rounded-2xl px-4 py-4 text-base mb-4 text-ink"
-          placeholder="you@example.com"
+          placeholder="youare@beautiful.com"
           placeholderTextColor="#94A3B8"
           autoCapitalize="none"
           keyboardType="email-address"

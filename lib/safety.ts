@@ -1,7 +1,25 @@
 import { Alert, Platform } from 'react-native';
 import { supabase } from './supabase';
 
-async function submitReportAndHide(reporterId: string, reportedId: string, reason: string) {
+type ReportReason = { code: string; label: string; askDetails?: boolean };
+
+const USER_REPORT_REASONS: ReportReason[] = [
+  { code: 'UNDERAGE', label: 'Underage / minor', askDetails: true },
+  { code: 'OFFENSIVE_USERNAME', label: 'Offensive username' },
+  { code: 'HARASSMENT', label: 'Harassment / bullying', askDetails: true },
+  { code: 'SEXUAL_CONTENT', label: 'Sexual content', askDetails: true },
+  { code: 'INAPPROPRIATE_BEHAVIOR', label: 'Inappropriate behavior', askDetails: true },
+  { code: 'SPAM_SCAM', label: 'Spam / scam' },
+  { code: 'IMPERSONATION', label: 'Impersonation', askDetails: true },
+  { code: 'HATE_VIOLENCE', label: 'Hate / violence', askDetails: true },
+  { code: 'OTHER', label: 'Other', askDetails: true },
+];
+
+async function submitReportAndHide(
+  reporterId: string,
+  reportedId: string,
+  reason: { code: string; label: string; description?: string | null },
+) {
   // 1) Hide immediately for the reporter
   await supabase.from('blocked_users').upsert(
     {
@@ -16,8 +34,9 @@ async function submitReportAndHide(reporterId: string, reportedId: string, reaso
     reporter_id: reporterId,
     reported_user_id: reportedId,
     content_type: 'user',
-    reason,
-    description: null,
+    reason_code: reason.code,
+    reason: reason.label,
+    description: reason.description ?? null,
     status: 'pending',
   } as any);
 
@@ -80,26 +99,34 @@ export function showSafetyOptions(currentUserId: string, targetUserId: string, o
                         text: 'Continue',
                         style: 'destructive',
                         onPress: () => {
-                          if (Platform.OS === 'ios') {
-                            Alert.prompt(
-                              'Report User',
-                              'Please describe the reason for reporting:',
-                              (reason) => {
-                                const r = (reason || '').trim() || 'No reason provided';
-                                submitReportAndHide(currentUserId, targetUserId, r);
-                                onBlockSuccess(); // remove from current UI immediately
-                              },
-                            );
-                          } else {
-                            // Android: no Alert.prompt — offer quick reasons
-                            Alert.alert('Reason', 'Choose a reason:', [
-                              { text: 'Spam', onPress: () => { submitReportAndHide(currentUserId, targetUserId, 'Spam'); onBlockSuccess(); } },
-                              { text: 'Harassment', onPress: () => { submitReportAndHide(currentUserId, targetUserId, 'Harassment'); onBlockSuccess(); } },
-                              { text: 'Nudity', onPress: () => { submitReportAndHide(currentUserId, targetUserId, 'Nudity'); onBlockSuccess(); } },
-                              { text: 'Other', style: 'destructive', onPress: () => { submitReportAndHide(currentUserId, targetUserId, 'Other'); onBlockSuccess(); } },
-                              { text: 'Cancel', style: 'cancel' },
-                            ]);
-                          }
+                          const showReasonPicker = () => {
+                            const actions = [
+                              ...USER_REPORT_REASONS.map((r) => ({
+                                text: r.label,
+                                onPress: () => {
+                                  if (Platform.OS === 'ios' && r.askDetails) {
+                                    Alert.prompt(
+                                      'Add details (optional)',
+                                      'Any extra context helps our team review faster.',
+                                      (details) => {
+                                        const d = (details || '').trim() || null;
+                                        submitReportAndHide(currentUserId, targetUserId, { code: r.code, label: r.label, description: d });
+                                        onBlockSuccess();
+                                      },
+                                    );
+                                  } else {
+                                    submitReportAndHide(currentUserId, targetUserId, { code: r.code, label: r.label, description: null });
+                                    onBlockSuccess();
+                                  }
+                                },
+                              })),
+                              { text: 'Cancel', style: 'cancel' as const },
+                            ];
+
+                            Alert.alert('Reason', 'Choose a reason:', actions as any);
+                          };
+
+                          showReasonPicker();
                         },
                       },
                     ]);

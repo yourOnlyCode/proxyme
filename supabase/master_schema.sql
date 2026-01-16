@@ -24,6 +24,11 @@ create table if not exists public.profiles (
   -- Additional columns from migrations
   hide_connections boolean DEFAULT false,
   relationship_goals text[],
+  -- Age & romance preferences
+  birthdate date,
+  age_group text,
+  romance_min_age integer default 18,
+  romance_max_age integer default 99,
   detailed_interests jsonb,
   is_verified boolean DEFAULT false,
   city text,
@@ -43,6 +48,18 @@ begin
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'relationship_goals') then
         alter table public.profiles add column relationship_goals text[];
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'birthdate') then
+        alter table public.profiles add column birthdate date;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'age_group') then
+        alter table public.profiles add column age_group text;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'romance_min_age') then
+        alter table public.profiles add column romance_min_age integer default 18;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'romance_max_age') then
+        alter table public.profiles add column romance_max_age integer default 99;
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'detailed_interests') then
         alter table public.profiles add column detailed_interests jsonb;
@@ -85,6 +102,58 @@ begin
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'save_crossed_paths') then
         alter table public.profiles add column save_crossed_paths boolean not null default true;
     end if;
+end $$;
+
+-- Age enforcement (13+ required; minors have no intent; romance age prefs never below 18)
+create or replace function public.enforce_profile_age_rules()
+returns trigger
+language plpgsql
+security definer
+as $$
+declare
+  age_years integer;
+begin
+  if new.birthdate is null then
+    -- Don't hard-break legacy users; but keep fields consistent if set later.
+    return new;
+  end if;
+
+  age_years := date_part('year', age(new.birthdate))::int;
+
+  if age_years < 13 then
+    raise exception 'Users must be at least 13 years old.';
+  end if;
+
+  if age_years < 18 then
+    new.age_group := 'minor';
+    -- Minors are friendship-only (no romance/professional).
+    new.relationship_goals := array['Friendship']::text[];
+    -- Romance prefs are irrelevant for minors; keep safe defaults.
+    new.romance_min_age := 18;
+    new.romance_max_age := 99;
+  else
+    new.age_group := 'adult';
+    if new.romance_min_age is null or new.romance_min_age < 18 then
+      new.romance_min_age := 18;
+    end if;
+    if new.romance_max_age is null or new.romance_max_age < new.romance_min_age then
+      new.romance_max_age := greatest(new.romance_min_age, coalesce(new.romance_max_age, 99));
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'profiles_enforce_age_rules') then
+    create trigger profiles_enforce_age_rules
+    before insert or update of birthdate, relationship_goals, romance_min_age, romance_max_age
+    on public.profiles
+    for each row
+    execute function public.enforce_profile_age_rules();
+  end if;
 end $$;
 
 -- RLS for profiles
@@ -556,11 +625,20 @@ CREATE TABLE IF NOT EXISTS public.reports (
     reported_user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
     content_type TEXT NOT NULL CHECK (content_type IN ('user', 'post', 'message', 'story')),
     content_id UUID, 
+    reason_code TEXT,
     reason TEXT NOT NULL,
     description TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'resolved', 'dismissed')),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure reports columns exist (idempotent)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_name = 'reports' and column_name = 'reason_code') then
+    alter table public.reports add column reason_code text;
+  end if;
+end $$;
 
 ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
 
@@ -1865,7 +1943,14 @@ returns table (
 language plpgsql
 security definer
 as $$
+declare
+  my_age_group text;
 begin
+  select coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end)
+  into my_age_group
+  from public.profiles p
+  where p.id = auth.uid();
+
   return query
   select
     p.id,
@@ -1881,6 +1966,7 @@ begin
   where
     p.is_proxy_active = true
     and p.id <> auth.uid() -- exclude self
+    and coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = coalesce(my_age_group, 'adult')
     and st_dwithin(
       p.location,
       st_point(long, lat)::geography,
@@ -1924,9 +2010,22 @@ security definer
 as $$
 declare
   my_details jsonb;
+  my_age_group text;
+  my_primary_goal text;
+  my_romance_min int;
+  my_romance_max int;
 begin
   select p.detailed_interests into my_details 
   from public.profiles p 
+  where p.id = auth.uid();
+
+  select
+    coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end),
+    p.relationship_goals[1],
+    coalesce(p.romance_min_age, 18),
+    coalesce(p.romance_max_age, 99)
+  into my_age_group, my_primary_goal, my_romance_min, my_romance_max
+  from public.profiles p
   where p.id = auth.uid();
 
   return query
@@ -2003,10 +2102,18 @@ begin
     public.profiles p
   where
     p.id <> auth.uid()
+    and coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = coalesce(my_age_group, 'adult')
     and not exists (
         select 1 from public.blocked_users b 
         where (b.blocker_id = auth.uid() and b.blocked_id = p.id)
            or (b.blocker_id = p.id and b.blocked_id = auth.uid())
+    )
+    and (
+      coalesce(my_primary_goal, '') <> 'Romance'
+      or (
+        p.birthdate is not null
+        and date_part('year', age(p.birthdate))::int between greatest(18, my_romance_min) and greatest(greatest(18, my_romance_min), my_romance_max)
+      )
     )
     and st_dwithin(
       p.location,
@@ -2042,7 +2149,14 @@ returns table (
 language plpgsql
 security definer
 as $$
+declare
+  my_age_group text;
 begin
+  select coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end)
+  into my_age_group
+  from public.profiles p
+  where p.id = auth.uid();
+
   return query
   select
     p.id,
@@ -2062,6 +2176,7 @@ begin
   where
     p.is_proxy_active = true
     and p.id <> auth.uid()
+    and coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = coalesce(my_age_group, 'adult')
     and st_dwithin(
       p.location,
       st_point(long, lat)::geography,
@@ -2071,6 +2186,46 @@ begin
     dist_meters asc;
 end;
 $$;
+
+-- Prevent cross-age connections (no minor-adult interactions via interests)
+create or replace function public.enforce_interest_age_segmentation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  sender_group text;
+  receiver_group text;
+begin
+  select coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end)
+  into sender_group
+  from public.profiles p
+  where p.id = new.sender_id;
+
+  select coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end)
+  into receiver_group
+  from public.profiles p
+  where p.id = new.receiver_id;
+
+  if coalesce(sender_group, 'adult') <> coalesce(receiver_group, 'adult') then
+    raise exception 'Age-restricted: users must be in the same age group.';
+  end if;
+
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'a_interests_enforce_age_segmentation') then
+    create trigger a_interests_enforce_age_segmentation
+    before insert or update of sender_id, receiver_id
+    on public.interests
+    for each row
+    execute function public.enforce_interest_age_segmentation();
+  end if;
+end $$;
 
 -- Get city user count (for referral popup eligibility)
 -- Drop existing function if it exists to allow return type changes

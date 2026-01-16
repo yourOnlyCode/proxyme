@@ -370,7 +370,7 @@ export default function EditProfileScreen() {
             </View>
 
             <View className="mb-6">
-              <Text className="text-gray-500 mb-2 ml-1 font-bold">What're you looking for?</Text>
+              <Text className="text-gray-500 mb-2 ml-1 font-bold">What’re you looking for?</Text>
               <View className="flex-row justify-between">
                 {RELATIONSHIP_OPTS.map((opt) => {
                   const isSelected = relationshipGoals.includes(opt);

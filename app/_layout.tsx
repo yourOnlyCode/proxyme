@@ -15,6 +15,7 @@ import { LocationProvider } from '../lib/location'; // New Import
 import { registerForPushNotificationsAsync } from '../lib/push';
 import { supabase } from '../lib/supabase';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -166,7 +167,9 @@ export default function RootLayout() {
             <TutorialProvider>
               <ReferralProvider>
                 <ThemePreferenceProvider>
-                  <InitialLayout />
+                  <ErrorBoundary>
+                    <InitialLayout />
+                  </ErrorBoundary>
                 </ThemePreferenceProvider>
               </ReferralProvider>
             </TutorialProvider>

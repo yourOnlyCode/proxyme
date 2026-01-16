@@ -96,13 +96,22 @@ export default function HomeScreen() {
       return;
     }
     try {
-      const { data, error } = await supabase.rpc('get_my_crossed_paths_badge_count', {});
+      const { data, error } = await supabase.rpc('get_my_crossed_paths_badge_status', {});
       if (error) {
         setCrossedPathsBadgeCount(0);
         return;
       }
-      const n = typeof data === 'number' ? data : Number(data);
-      setCrossedPathsBadgeCount(Number.isFinite(n) && n > 0 ? n : 0);
+
+      const row = Array.isArray(data) ? (data[0] as any) : (data as any);
+      const nRaw = row?.badge_count;
+      const n = typeof nRaw === 'number' ? nRaw : Number(nRaw);
+      const latest = row?.latest_seen_at ? new Date(String(row.latest_seen_at)).getTime() : 0;
+
+      const seenRaw = await AsyncStorage.getItem('crossedPaths:badgeSeenAt:v1');
+      const seenAt = seenRaw ? new Date(String(seenRaw)).getTime() : 0;
+
+      const shouldShow = Number.isFinite(n) && n > 0 && latest > seenAt;
+      setCrossedPathsBadgeCount(shouldShow ? n : 0);
     } catch {
       // ignore
     }
@@ -651,7 +660,9 @@ export default function HomeScreen() {
                         <IconSymbol name="bubble.left.fill" size={12} color="#10B981" style={{ marginRight: 4 }} />
                     )}
                     {item.status_text && (
-                        <Text numberOfLines={1} className="text-[10px] text-green-800 italic flex-1 font-medium" style={{ color: isDark ? 'rgba(187,247,208,0.95)' : undefined }}>"{item.status_text}"</Text>
+                        <Text numberOfLines={1} className="text-[10px] text-green-800 italic flex-1 font-medium" style={{ color: isDark ? 'rgba(187,247,208,0.95)' : undefined }}>
+                          “{item.status_text}”
+                        </Text>
                     )}
                 </TouchableOpacity>
             )}
@@ -1154,7 +1165,7 @@ export default function HomeScreen() {
                     )}
                   </View>
                   <Text className="text-xs text-gray-600" style={{ fontWeight: '400' }}>
-                    Don't show this again
+                    Don’t show this again
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1296,7 +1307,7 @@ function StatusPreviewModal({ visible, profile, onClose }: { visible: boolean, p
                        )}
                        {profile.status_text && (
                            <View className="p-8 items-center justify-center">
-                               <Text className="text-2xl font-medium text-center text-ink italic leading-8">"{profile.status_text}"</Text>
+                               <Text className="text-2xl font-medium text-center text-ink italic leading-8">“{profile.status_text}”</Text>
                            </View>
                        )}
                        <View className="p-4 bg-gray-50 border-t border-gray-100 items-center">

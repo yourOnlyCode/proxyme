@@ -218,7 +218,7 @@ export function ProfileActionButtons({
         <View className="space-y-3">
           <View className="mb-2 px-4 py-2 bg-blue-50 rounded-xl border border-blue-200">
             <Text className="text-blue-700 text-sm font-semibold text-center">
-              You've been shown interest!
+              You’ve been shown interest!
             </Text>
           </View>
           <View className="flex-row space-x-3">

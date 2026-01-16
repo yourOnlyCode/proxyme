@@ -4,9 +4,10 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import { Dimensions, Image, Linking, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Dimensions, Image, Linking, Modal, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../lib/auth';
+import { showSafetyOptions } from '../lib/safety';
 import { supabase } from '../lib/supabase';
 import { calculateMatchPercentage as calculateMatchPercentageShared } from '../lib/match';
 
@@ -64,6 +65,44 @@ export function ProfileModal({
     const [fullScreenVisible, setFullScreenVisible] = useState(false);
     const [fullScreenIndex, setFullScreenIndex] = useState(0);
     const fullScreenScrollRef = useRef<ScrollView>(null);
+    const scrollTopRef = useRef(0);
+    const swipeY = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+      if (!visible) swipeY.setValue(0);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [visible]);
+
+    const swipeDownResponder = useMemo(() => {
+      return PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_evt, gestureState) => {
+          if (!visible) return false;
+          if (fullScreenVisible) return false;
+          // Only allow swipe-to-close when scrolled to top (prevents fighting the ScrollView).
+          if (scrollTopRef.current > 6) return false;
+          const isVertical = Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+          const isDown = gestureState.dy > 10;
+          return isVertical && isDown;
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const dy = Math.max(0, gestureState.dy);
+          swipeY.setValue(dy);
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          const shouldClose = gestureState.dy > 90 || (gestureState.vy > 0.85 && gestureState.dy > 40);
+          if (shouldClose) {
+            onClose();
+            swipeY.setValue(0);
+            return;
+          }
+          Animated.spring(swipeY, { toValue: 0, useNativeDriver: true }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(swipeY, { toValue: 0, useNativeDriver: true }).start();
+        },
+      });
+    }, [visible, fullScreenVisible, onClose, swipeY]);
 
     // Scroll to correct photo when full-screen opens
     useEffect(() => {
@@ -203,8 +242,19 @@ export function ProfileModal({
             onRequestClose={onClose}
             presentationStyle="pageSheet" // Nice card effect on iOS
         >
-            <View className="flex-1 bg-white" style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF' }}>
-                 <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
+            <Animated.View
+              className="flex-1 bg-white"
+              style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF', transform: [{ translateY: swipeY }] }}
+              {...swipeDownResponder.panHandlers}
+            >
+                 <ScrollView
+                   className="flex-1"
+                   contentContainerStyle={{ paddingBottom: 100 }}
+                   scrollEventThrottle={16}
+                   onScroll={(e) => {
+                     scrollTopRef.current = e.nativeEvent.contentOffset.y || 0;
+                   }}
+                 >
                     {/* Header Image - Much Taller */}
                     <View className="w-full h-[600px] bg-gray-200 relative">
                         {displayPhotos.length > 1 ? (
@@ -241,6 +291,24 @@ export function ProfileModal({
                             </TouchableOpacity>
                         )}
                         
+                        {/* Overflow Menu (Report / Block) */}
+                        {user?.id && mergedProfile?.id && user.id !== mergedProfile.id ? (
+                          <TouchableOpacity
+                            onPress={() => {
+                              showSafetyOptions(user.id, mergedProfile.id, () => {
+                                // Hide immediately + refresh parent screens
+                                onStateChange?.();
+                                onClose();
+                              });
+                            }}
+                            className="absolute top-12 right-14 bg-black/30 p-2 rounded-full backdrop-blur-md"
+                            accessibilityRole="button"
+                            accessibilityLabel="More options"
+                          >
+                            <IconSymbol name="ellipsis" size={18} color="white" />
+                          </TouchableOpacity>
+                        ) : null}
+
                         <TouchableOpacity 
                             onPress={onClose}
                             className="absolute top-12 right-4 bg-black/30 p-2 rounded-full backdrop-blur-md"
@@ -266,35 +334,36 @@ export function ProfileModal({
                         shadowOpacity: isDark ? 0.35 : 0.18,
                       }}
                     >
-                        {/* Name & Badge */}
-                        <View className="flex-row items-center justify-between mb-2">
-                             <View className="flex-row items-center flex-1">
-                                 <Text className="text-3xl font-extrabold text-ink mr-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
-                                   {mergedProfile.full_name}
-                                 </Text>
-                                {isTrulyConnected && (
-                                    <IconSymbol name="star.fill" size={24} color="#F59E0B" style={{ marginRight: 8 }} />
-                                )}
-                                {mergedProfile.is_verified && (
-                                    <IconSymbol name="checkmark.seal.fill" size={24} color="#3B82F6" style={{ marginRight: 8 }} />
-                                )}
-                                {matchPercentage > 0 && (
-                                    <View className="bg-green-100 px-2 py-1 rounded-lg">
-                                        <Text className="text-green-700 font-bold text-xs">{matchPercentage}% Match</Text>
-                                    </View>
-                                )}
-                             </View>
-                        </View>
-                        
-                        {/* Username & Socials */}
-                        <View className="flex-row items-center mb-4 flex-wrap">
-                            <Text className="text-gray-500 font-medium text-lg mr-3">@{mergedProfile.username}</Text>
-                            <SocialIcons links={mergedProfile.social_links} />
-                            {!isTrulyConnected && connectionState.state === 'interest_declined' && (
-                              <View className="ml-3 mt-2 px-2 py-1 rounded-full bg-orange-50 border border-orange-200">
-                                <Text className="text-[11px] font-bold text-orange-700">Previously declined your interest</Text>
+                        {/* Name */}
+                        <View className="items-center mb-2">
+                          <View className="flex-row items-center">
+                            <Text
+                              className="text-[22px] font-extrabold text-ink"
+                              style={{ color: isDark ? '#E5E7EB' : undefined, textAlign: 'center' }}
+                              numberOfLines={1}
+                            >
+                              {mergedProfile.full_name}
+                            </Text>
+                            {mergedProfile.is_verified ? (
+                              <View className="ml-2">
+                                <IconSymbol name="checkmark.seal.fill" size={18} color="#3B82F6" />
                               </View>
-                            )}
+                            ) : null}
+                          </View>
+                          <Text className="text-gray-500 font-medium text-[13px] mt-1">@{mergedProfile.username}</Text>
+                          <View className="mt-2">
+                            <SocialIcons links={mergedProfile.social_links} />
+                          </View>
+                          {!isTrulyConnected && connectionState.state === 'interest_declined' ? (
+                            <View className="mt-3 px-3 py-1.5 rounded-full bg-orange-50 border border-orange-200">
+                              <Text className="text-[11px] font-bold text-orange-700">Previously declined your interest</Text>
+                            </View>
+                          ) : null}
+                          {matchPercentage > 0 ? (
+                            <View className="mt-3 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200">
+                              <Text className="text-[11px] font-extrabold text-emerald-700">{matchPercentage}% match</Text>
+                            </View>
+                          ) : null}
                         </View>
 
                         {/* Connection Stats */}
@@ -343,7 +412,7 @@ export function ProfileModal({
                         )}
 
                         {/* Location */}
-                        <View className="flex-row items-center mb-6">
+                        <View className="flex-row items-center justify-center mb-6">
                             <IconSymbol name="location.fill" size={16} color="#9CA3AF" />
                             <Text className="text-gray-500 ml-1">
                                 {mergedProfile.dist_meters ? `${Math.round(mergedProfile.dist_meters)}m away` : 'Nearby'}
@@ -355,13 +424,13 @@ export function ProfileModal({
                         {/* Relationship Goals */}
                         {mergedProfile.relationship_goals && mergedProfile.relationship_goals.length > 0 && (
                             <View className="mb-6">
-                                <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">Looking For</Text>
-                                <View className="flex-row flex-wrap">
+                                <Text className="text-[12px] font-bold text-gray-400 uppercase tracking-wider mb-2 text-center">Looking for</Text>
+                                <View className="flex-row flex-wrap justify-center">
                                     {mergedProfile.relationship_goals.map((goal, idx) => {
                                         const badgeColors = getGoalColors(goal);
                                         return (
-                                            <View key={idx} className={`px-4 py-2 rounded-full mr-2 mb-2 ${badgeColors.badgeBg}`}>
-                                                <Text className={`${badgeColors.text} font-bold`}>{goal}</Text>
+                                            <View key={idx} className={`px-3 py-1.5 rounded-full mr-2 mb-2 ${badgeColors.badgeBg}`}>
+                                                <Text className={`${badgeColors.text} font-bold text-[12px]`}>{goal}</Text>
                                             </View>
                                         );
                                     })}
@@ -372,8 +441,8 @@ export function ProfileModal({
                         {/* Bio */}
                         {mergedProfile.bio && (
                             <View className="mb-6">
-                                <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">About</Text>
-                                <Text className="text-ink text-lg leading-7" style={{ color: isDark ? 'rgba(226,232,240,0.92)' : undefined }}>
+                                <Text className="text-[12px] font-bold text-gray-400 uppercase tracking-wider mb-2 text-center">About</Text>
+                                <Text className="text-ink text-[14px] leading-6 text-center" style={{ color: isDark ? 'rgba(226,232,240,0.92)' : undefined }}>
                                   {mergedProfile.bio}
                                 </Text>
                             </View>
@@ -381,11 +450,11 @@ export function ProfileModal({
 
                         {/* Interests */}
                         <View className="mb-8">
-                             <Text className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">Interests</Text>
+                             <Text className="text-[12px] font-bold text-gray-400 uppercase tracking-wider mb-3 text-center">Interests</Text>
                              {loadingProfile && allInterests.length === 0 && (
                                  <Text className="text-gray-400 italic mb-2">Loading interests...</Text>
                              )}
-                             <View className="flex-row flex-wrap">
+                             <View className="flex-row flex-wrap justify-center">
                                 {allInterests.map((item, idx) => (
                                     <View 
                                         key={idx} 
@@ -393,14 +462,11 @@ export function ProfileModal({
                                             item.isShared ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-100'
                                         }`}
                                     >
-                                        <Text className={`font-medium ${
+                                        <Text className={`font-medium text-[12px] ${
                                             item.isShared ? 'text-blue-700' : 'text-gray-700'
                                         }`}>
                                             {item.value || item.category}
                                         </Text>
-                                        {item.isShared && (
-                                             <View className="absolute -top-1 -right-1 bg-blue-500 rounded-full w-3 h-3 border border-white" />
-                                        )}
                                     </View>
                                 ))}
                              </View>
@@ -426,7 +492,7 @@ export function ProfileModal({
                         onStateChange={onStateChange}
                     />
                  </View>
-            </View>
+            </Animated.View>
 
             {/* Full Screen Photo Viewer */}
             <Modal

@@ -2,6 +2,7 @@ import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { OrbBackground } from '@/components/ui/OrbBackground';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Slider from '@react-native-community/slider';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -17,6 +18,7 @@ import {
   UIManager,
   View,
 } from 'react-native';
+import DatePicker from 'react-native-date-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/profile/Avatar';
 import { InterestSelector } from '../../components/profile/InterestSelector';
@@ -32,6 +34,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 const RELATIONSHIP_OPTS = ['Romance', 'Friendship', 'Professional'];
 
 const STEPS = [
+  { title: 'Age', subtitle: 'Enter your date of birth. This determines the experience you’ll get.' },
   { title: 'Verification', subtitle: 'Use a friend code to keep Proxyme safe and move closer to verification.' },
   { title: 'Your Profile', subtitle: 'Add photos, your intent, and a short bio.' },
   { title: 'Interests', subtitle: 'Pick interests so Proxyme can match you with the right people.' },
@@ -47,6 +50,10 @@ export default function OnboardingScreen() {
   const [applyingFriendCode, setApplyingFriendCode] = useState(false);
   const [step, setStep] = useState(0);
 
+  // Age gate
+  const [birthdate, setBirthdate] = useState<Date | null>(null);
+  const [birthdatePickerOpen, setBirthdatePickerOpen] = useState(false);
+
   // Referral
   const [friendCode, setFriendCode] = useState('');
 
@@ -56,6 +63,8 @@ export default function OnboardingScreen() {
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [relationshipGoals, setRelationshipGoals] = useState<string[]>([]);
+  const [romanceMinAge, setRomanceMinAge] = useState(18);
+  const [romanceMaxAge, setRomanceMaxAge] = useState(35);
 
   // Interests
   const [detailedInterests, setDetailedInterests] = useState<Record<string, string[]>>({});
@@ -71,19 +80,26 @@ export default function OnboardingScreen() {
 
       const { data, error, status } = await supabase
         .from('profiles')
-        .select('username, full_name, bio, avatar_url, relationship_goals, detailed_interests, referred_by')
+        .select('username, full_name, bio, avatar_url, relationship_goals, detailed_interests, referred_by, birthdate, romance_min_age, romance_max_age')
         .eq('id', user.id)
         .single();
 
       if (error && status !== 406) throw error;
 
       if (data) {
+        if (data.birthdate) {
+          // Supabase date comes back as YYYY-MM-DD
+          const d = new Date(String(data.birthdate) + 'T00:00:00.000Z');
+          if (!Number.isNaN(d.getTime())) setBirthdate(d);
+        }
         setUsername(data.username || '');
         setFullName(data.full_name || '');
         setBio(data.bio || '');
         setAvatarUrl(data.avatar_url);
         setRelationshipGoals(data.relationship_goals || []);
         setDetailedInterests(data.detailed_interests || {});
+        setRomanceMinAge(Math.max(18, Number(data.romance_min_age ?? 18)));
+        setRomanceMaxAge(Math.max(18, Number(data.romance_max_age ?? 35)));
         // If already referred, keep input blank (and RPC will reject re-applying anyway).
       }
     } catch (error) {
@@ -96,6 +112,23 @@ export default function OnboardingScreen() {
   const selectGoal = (goal: string) => {
     setRelationshipGoals([goal]);
   };
+
+  const ageYears = (() => {
+    if (!birthdate) return null;
+    const now = new Date();
+    let age = now.getFullYear() - birthdate.getFullYear();
+    const m = now.getMonth() - birthdate.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < birthdate.getDate())) age -= 1;
+    return age;
+  })();
+  const isMinor = ageYears !== null && ageYears >= 13 && ageYears < 18;
+  const isUnder13 = ageYears !== null && ageYears < 13;
+
+      // Minors are friendship-only and do not choose intent.
+  useEffect(() => {
+    if (isMinor) setRelationshipGoals([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMinor]);
 
   const getGoalStyle = (goal: string, isSelected: boolean) => {
     switch (goal) {
@@ -143,8 +176,20 @@ export default function OnboardingScreen() {
   };
 
   const nextStep = async () => {
-    // Step 0: friend code (optional)
+    // Step 0: DOB (required)
     if (step === 0) {
+      if (!birthdate) {
+        Alert.alert('Required', 'Please enter your date of birth.');
+        return;
+      }
+      if (ageYears !== null && ageYears < 13) {
+        Alert.alert('Not eligible', 'You must be at least 13 years old to use this app.');
+        return;
+      }
+    }
+
+    // Step 1: friend code (optional)
+    if (step === 1) {
       if (friendCode.trim()) {
         try {
           await applyFriendCode();
@@ -156,8 +201,8 @@ export default function OnboardingScreen() {
       }
     }
 
-    // Step 1: profile requirements
-    if (step === 1) {
+    // Step 2: profile requirements
+    if (step === 2) {
       if (!avatarUrl) {
         Alert.alert('Required', 'Please upload a profile picture.');
         return;
@@ -176,14 +221,26 @@ export default function OnboardingScreen() {
         Alert.alert('Name', n.message);
         return;
       }
-      if (relationshipGoals.length === 0) {
+      if (!isMinor && relationshipGoals.length === 0) {
         Alert.alert('Required', 'Please select what you are looking for.');
         return;
       }
+      if (!isMinor && relationshipGoals[0] === 'Romance') {
+        const min = Math.max(18, Math.floor(romanceMinAge));
+        const max = Math.max(min, Math.floor(romanceMaxAge));
+        if (min < 18) {
+          Alert.alert('Romance age range', 'Minimum age must be 18 or higher.');
+          return;
+        }
+        if (max < min) {
+          Alert.alert('Romance age range', 'Please make sure your max age is not lower than your min age.');
+          return;
+        }
+      }
     }
 
-    // Step 2: interests
-    if (step === 2) {
+    // Step 3: interests
+    if (step === 3) {
       const hasInterest = Object.keys(detailedInterests).length > 0;
       if (!hasInterest) {
         Alert.alert('Required', 'Please add at least one interest category.');
@@ -220,11 +277,14 @@ export default function OnboardingScreen() {
       }
 
       const updates = {
+        birthdate: birthdate ? birthdate.toISOString().slice(0, 10) : null,
         username,
         full_name: fullName,
         bio,
         avatar_url: cleanAvatarPath,
-        relationship_goals: relationshipGoals,
+        relationship_goals: isMinor ? ['Friendship'] : relationshipGoals,
+        romance_min_age: !isMinor ? Math.max(18, Math.floor(romanceMinAge)) : 18,
+        romance_max_age: !isMinor ? Math.max(Math.max(18, Math.floor(romanceMinAge)), Math.floor(romanceMaxAge)) : 99,
         detailed_interests: detailedInterests,
         is_onboarded: true,
         updated_at: new Date(),
@@ -266,16 +326,23 @@ export default function OnboardingScreen() {
 
   const canGoNext = (() => {
     if (saving || applyingFriendCode) return false;
-    if (step === 0) return true;
-    if (step === 1) {
+    if (step === 0) return !!birthdate && !isUnder13;
+    if (step === 1) return true;
+    if (step === 2) {
       if (!avatarUrl) return false;
       const u = validateUsername(username);
       const n = validateFullName(fullName);
       if (!u.ok || !n.ok) return false;
-      if (relationshipGoals.length === 0) return false; // intent required
+      if (!isMinor && relationshipGoals.length === 0) return false; // intent required for adults only
+      if (!isMinor && relationshipGoals[0] === 'Romance') {
+        const min = Math.max(18, Math.floor(romanceMinAge));
+        const max = Math.max(min, Math.floor(romanceMaxAge));
+        if (min < 18) return false;
+        if (max < min) return false;
+      }
       return true;
     }
-    if (step === 2) return Object.keys(detailedInterests).length > 0;
+    if (step === 3) return Object.keys(detailedInterests).length > 0;
     return true;
   })();
 
@@ -307,6 +374,64 @@ export default function OnboardingScreen() {
 
       <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
         {step === 0 && (
+          <View className="mt-6">
+            <View className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <View className="flex-row items-center mb-3">
+                <View className="w-10 h-10 rounded-full bg-black items-center justify-center mr-3">
+                  <IconSymbol name="person.crop.circle" size={18} color="white" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-ink font-bold text-lg">Date of birth</Text>
+                  <Text className="text-gray-500 text-sm mt-0.5">
+                    This is used to keep experiences age-appropriate. We don’t show your age publicly right now.
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setBirthdatePickerOpen(true)}
+                className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mt-3"
+              >
+                <Text className="text-gray-500 font-bold mb-1 ml-1">Birthday</Text>
+                <Text className="text-ink text-xl font-extrabold">
+                  {birthdate ? birthdate.toLocaleDateString() : 'Tap to select'}
+                </Text>
+                {ageYears !== null ? (
+                  <Text className={`text-xs mt-2 ${isUnder13 ? 'text-red-600' : 'text-gray-400'}`}>
+                    {isUnder13 ? 'You must be at least 13 to use this app.' : `Age: ${ageYears}`}
+                  </Text>
+                ) : (
+                  <Text className="text-gray-400 text-xs mt-2">You must be 13+ to continue.</Text>
+                )}
+              </TouchableOpacity>
+
+              <DatePicker
+                modal
+                open={birthdatePickerOpen}
+                date={birthdate ?? new Date(2000, 0, 1)}
+                mode="date"
+                maximumDate={new Date()}
+                onConfirm={(d) => {
+                  setBirthdatePickerOpen(false);
+                  setBirthdate(d);
+                }}
+                onCancel={() => setBirthdatePickerOpen(false)}
+              />
+
+              {isMinor ? (
+                <View className="mt-4 px-4 py-3 rounded-2xl bg-friendship/10 border border-friendship/20">
+                  <Text className="text-friendship font-bold text-sm">Friendship-only mode (13–17)</Text>
+                  <Text className="text-gray-500 text-xs mt-1">
+                    You’ll only see people in your age group, and romantic intent is disabled.
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        )}
+
+        {step === 1 && (
           <View className="mt-6">
             <View className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
               <View className="flex-row items-center mb-3">
@@ -344,7 +469,7 @@ export default function OnboardingScreen() {
                 onPress={() => {
                   setFriendCode('');
                   LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setStep(1);
+                  setStep(2);
                 }}
                 className="mt-4 items-center"
               >
@@ -354,7 +479,7 @@ export default function OnboardingScreen() {
           </View>
         )}
 
-        {step === 1 && user && (
+        {step === 2 && user && (
           <View className="mt-4">
             <View className="items-center mt-2">
               <Avatar url={avatarUrl} size={150} onUpload={(url) => setAvatarUrl(url)} editable />
@@ -412,29 +537,74 @@ export default function OnboardingScreen() {
             </View>
 
             <View className="mt-2">
-              <Text className="text-gray-500 mb-2 ml-1 font-bold">What are you looking for?</Text>
-              {RELATIONSHIP_OPTS.map((opt) => {
-                const isSelected = relationshipGoals.includes(opt);
-                return (
-                  <TouchableOpacity
-                    key={opt}
-                    onPress={() => selectGoal(opt)}
-                    className={`w-full py-3 rounded-xl border mb-3 items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
-                  >
-                    <Text className={`font-bold text-base ${getGoalTextStyle(opt, isSelected)}`}>{opt}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-              {relationshipGoals.length === 0 ? (
-                <Text className="text-[11px] text-gray-400 mt-1 ml-1">
-                  Required to continue.
-                </Text>
-              ) : null}
+              {!isMinor ? (
+                <>
+                  <Text className="text-gray-500 mb-2 ml-1 font-bold">What are you looking for?</Text>
+                  {RELATIONSHIP_OPTS.map((opt) => {
+                    const isSelected = relationshipGoals.includes(opt);
+                    return (
+                      <TouchableOpacity
+                        key={opt}
+                        onPress={() => selectGoal(opt)}
+                        className={`w-full py-3 rounded-xl border mb-3 items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
+                      >
+                        <Text className={`font-bold text-base ${getGoalTextStyle(opt, isSelected)}`}>{opt}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  {relationshipGoals.length === 0 ? (
+                    <Text className="text-[11px] text-gray-400 mt-1 ml-1">
+                      Required to continue.
+                    </Text>
+                  ) : null}
+
+                  {relationshipGoals[0] === 'Romance' ? (
+                    <View className="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                      <Text className="text-gray-500 font-bold mb-2">Romance age range</Text>
+                      <View className="flex-row items-center justify-between mb-2">
+                        <Text className="text-ink font-extrabold">{Math.max(18, Math.floor(romanceMinAge))}</Text>
+                        <Text className="text-gray-400 text-xs">to</Text>
+                        <Text className="text-ink font-extrabold">{Math.max(Math.max(18, Math.floor(romanceMinAge)), Math.floor(romanceMaxAge))}</Text>
+                      </View>
+                      <Text className="text-gray-400 text-xs mb-2">Minimum (18+)</Text>
+                      <Slider
+                        minimumValue={18}
+                        maximumValue={99}
+                        step={1}
+                        value={romanceMinAge}
+                        onValueChange={(v) => {
+                          setRomanceMinAge(v);
+                          if (v > romanceMaxAge) setRomanceMaxAge(v);
+                        }}
+                        minimumTrackTintColor="#111827"
+                        maximumTrackTintColor="#E5E7EB"
+                      />
+                      <Text className="text-gray-400 text-xs mt-3 mb-2">Maximum</Text>
+                      <Slider
+                        minimumValue={18}
+                        maximumValue={99}
+                        step={1}
+                        value={romanceMaxAge}
+                        onValueChange={(v) => setRomanceMaxAge(v)}
+                        minimumTrackTintColor="#111827"
+                        maximumTrackTintColor="#E5E7EB"
+                      />
+                    </View>
+                  ) : null}
+                </>
+              ) : (
+                <View className="bg-friendship/10 border border-friendship/20 rounded-2xl p-4">
+                  <Text className="text-friendship font-bold">Friendship-only mode</Text>
+                  <Text className="text-gray-500 text-xs mt-1">
+                    Intent is hidden for 13–17 accounts. You’ll only see people in your age group.
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <View className="mt-2">
             <Text className="text-gray-500 mb-4 text-base leading-5">
               Select up to <Text className="font-bold text-black">3 categories</Text>, then add your top favorites.

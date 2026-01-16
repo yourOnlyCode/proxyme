@@ -133,7 +133,7 @@ export default function EventCard({
                             >
                                 <IconSymbol name="xmark.circle.fill" size={16} color={event.user_rsvp === 'cant' ? '#EF4444' : '#6B7280'} />
                                 <Text className={`text-xs font-semibold ml-1 ${event.user_rsvp === 'cant' ? 'text-red-700' : 'text-gray-600'}`}>
-                                    Can't ({event.rsvp_counts?.cant || 0})
+                                    Can’t ({event.rsvp_counts?.cant || 0})
                                 </Text>
                             </TouchableOpacity>
                         </View>

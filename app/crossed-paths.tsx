@@ -4,6 +4,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth';
 import { fetchCrossedPathGroups, fetchCrossedPathPeople, type CrossedPathGroup, type CrossedPathPerson } from '@/lib/crossedPaths';
 import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, Image, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
@@ -87,6 +88,7 @@ export default function CrossedPathsScreen() {
   const [groupStates, setGroupStates] = useState<Record<string, GroupState>>({});
   const [selectedProfile, setSelectedProfile] = useState<ProfileData | null>(null);
   const [profileVisible, setProfileVisible] = useState(false);
+  const BADGE_SEEN_KEY = 'crossedPaths:badgeSeenAt:v1';
 
   // Swipe LEFT (from the right edge) to close. This avoids native-stack gestureDirection tweaks.
   const panResponder = useMemo(() => {
@@ -118,6 +120,8 @@ export default function CrossedPathsScreen() {
 
   useEffect(() => {
     let mounted = true;
+    // Mark badge as "checked" when the user opens this screen.
+    AsyncStorage.setItem(BADGE_SEEN_KEY, new Date().toISOString()).catch(() => {});
     async function run() {
       if (!user) return;
       setLoading(true);
@@ -310,7 +314,7 @@ export default function CrossedPathsScreen() {
             return (
             <View key={key} className="mb-6">
               <View className="flex-row items-baseline justify-between mb-3">
-                <Text className="text-ink font-bold text-base flex-1 pr-2" numberOfLines={2} style={{ color: isDark ? '#E5E7EB' : undefined }}>
+                <Text className="text-ink font-bold text-[13px] flex-1 pr-2" numberOfLines={2} style={{ color: isDark ? '#E5E7EB' : undefined }}>
                   {g.address_label || 'A place you visited'}
                 </Text>
                 <Text className="text-gray-500 text-xs font-semibold" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>

@@ -70,12 +70,8 @@ const CITY_RANGE = 50000; // 50km for "City"
 
 export default function CityFeedScreen() {
   const { width, height: windowHeight } = useWindowDimensions();
-  let tabBarHeight = 0;
-  try {
-      tabBarHeight = useBottomTabBarHeight();
-  } catch (e) {
-      tabBarHeight = 80; // Fallback
-  }
+  // Must be called unconditionally (hooks rule). This screen is rendered inside Tabs, so it should be safe.
+  const tabBarHeight = useBottomTabBarHeight() || 80;
 
   // Initialize to window height immediately to avoid a "sliver" layout until first interaction/layout pass.
   const [listHeight, setListHeight] = useState(windowHeight - tabBarHeight);
@@ -669,7 +665,7 @@ export default function CityFeedScreen() {
             ) : (
                 <View style={{ height: listHeight }} className="items-center justify-center px-10 opacity-70">
                     <IconSymbol name="moon.stars.fill" size={64} color="#A0AEC0" />
-                    <Text className="text-gray-400 text-xl font-bold mt-6 text-center">It's quiet in {address?.city || 'the city'}...</Text>
+                    <Text className="text-gray-400 text-xl font-bold mt-6 text-center">It’s quiet in {address?.city || 'the city'}...</Text>
                     <Text className="text-gray-600 text-base mt-2 text-center">Be the first to share your status!</Text>
                 </View>
             )
@@ -678,7 +674,7 @@ export default function CityFeedScreen() {
             feed.length > 0 ? (
                 <View style={{ height: listHeight, width: width }} className="items-center justify-center px-8">
                     <IconSymbol name="checkmark.circle.fill" size={50} color="#4ade80" />
-                    <Text className="text-ink text-xl font-extrabold mt-6 text-center">You're All Caught Up!</Text>
+                    <Text className="text-ink text-xl font-extrabold mt-6 text-center">You’re All Caught Up!</Text>
                     <Text className="text-gray-400 text-lg mt-4 text-center mb-8">
                         Start a conversation with your connections.
                     </Text>
@@ -1194,7 +1190,7 @@ function CityFeedCard({
                                     <FeedImage path={item.avatar_url} containerHeight={128} containerWidth={128} />
                                 </View>
                                 <Text className="text-white text-3xl font-bold mb-2 text-center shadow-lg">
-                                    View {item.full_name}'s Profile
+                                    View {item.full_name}’s Profile
                                 </Text>
                                 <Text className="text-white/80 text-lg text-center mb-6 shadow-md">
                                     Tap to see more
@@ -1226,7 +1222,7 @@ function CityFeedCard({
                         ) : (
                             <View className="w-full h-full items-center justify-center bg-ink p-8">
                                 <Text className="text-white text-2xl font-bold italic text-center leading-9">
-                                    "{currentStatus.content}"
+                                    “{currentStatus.content}”
                                 </Text>
                             </View>
                         )}

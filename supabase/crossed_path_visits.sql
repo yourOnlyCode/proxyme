@@ -2,6 +2,10 @@
 -- Store minimal visit records (user_id + place_key_hash + timestamp) and compute crossed paths on read.
 -- Retention: 7 days (app queries last 7 days; add scheduled cleanup/partitioning later if desired).
 
+-- Ensure required profile columns exist (so this file can be run independently of master schema).
+alter table public.profiles add column if not exists birthdate date;
+alter table public.profiles add column if not exists age_group text;
+
 create table if not exists public.crossed_path_visits (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -171,6 +175,7 @@ as $$
     select id,
            coalesce(save_crossed_paths, true) as save_crossed_paths,
            coalesce(is_proxy_active, false) as is_proxy_active,
+           coalesce(age_group, case when birthdate is not null and date_part('year', age(birthdate))::int < 18 then 'minor' else 'adult' end) as age_group,
            relationship_goals,
            detailed_interests
     from public.profiles
@@ -209,6 +214,7 @@ as $$
            c.last_seen
     from candidates c
     join public.profiles p on p.id = c.user_id
+    where coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = (select age_group from me)
   ),
   ordered as (
     select *,
@@ -259,6 +265,7 @@ as $$
     select id,
            coalesce(save_crossed_paths, true) as save_crossed_paths,
            coalesce(is_proxy_active, false) as is_proxy_active,
+           coalesce(age_group, case when birthdate is not null and date_part('year', age(birthdate))::int < 18 then 'minor' else 'adult' end) as age_group,
            relationship_goals,
            detailed_interests
     from public.profiles
@@ -290,8 +297,69 @@ as $$
             end) as same_intent
     from pairs
     join public.profiles p on p.id = pairs.other_user_id
+    where coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = (select age_group from me)
   )
   select coalesce(count(*), 0)::integer
   from scored
   where same_intent = true or match_percent > 0;
+$$;
+
+-- Badge status: includes count + latest matching "last_seen" so clients can clear the badge after viewing.
+create or replace function public.get_my_crossed_paths_badge_status(p_since timestamptz default (now() - interval '7 days'))
+returns table (
+  badge_count integer,
+  latest_seen_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+  with me as (
+    select id,
+           coalesce(save_crossed_paths, true) as save_crossed_paths,
+           coalesce(is_proxy_active, false) as is_proxy_active,
+           coalesce(age_group, case when birthdate is not null and date_part('year', age(birthdate))::int < 18 then 'minor' else 'adult' end) as age_group,
+           relationship_goals,
+           detailed_interests
+    from public.profiles
+    where id = auth.uid()
+  ),
+  pairs as (
+    select other.user_id as other_user_id,
+           max(other.seen_at) as last_seen
+    from public.crossed_path_visits mine
+    join public.crossed_path_visits other
+      on other.day_key = mine.day_key
+     and other.place_key = mine.place_key
+     and other.user_id <> mine.user_id
+    join me on me.id = mine.user_id
+    where me.save_crossed_paths = true
+      and me.is_proxy_active = true
+      and mine.seen_at >= p_since
+    group by other.user_id
+  ),
+  scored as (
+    select p.id,
+           pr.last_seen,
+           public.cp_match_percent((select detailed_interests from me), p.detailed_interests) as match_percent,
+           (case
+              when (select relationship_goals from me) is null then false
+              when p.relationship_goals is null then false
+              when (select relationship_goals from me)[1] is null then false
+              when p.relationship_goals[1] is null then false
+              else (p.relationship_goals[1] = (select relationship_goals from me)[1])
+            end) as same_intent
+    from pairs pr
+    join public.profiles p on p.id = pr.other_user_id
+    where coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = (select age_group from me)
+  ),
+  filtered as (
+    select *
+    from scored
+    where same_intent = true or match_percent > 0
+  )
+  select
+    coalesce(count(*), 0)::integer as badge_count,
+    max(last_seen) as latest_seen_at
+  from filtered;
 $$;

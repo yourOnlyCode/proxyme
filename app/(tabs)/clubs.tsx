@@ -400,7 +400,7 @@ export default function ClubsScreen() {
     >
         <View className="flex-row justify-between items-center mb-4">
             <View className="w-10" />
-            <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}>Social Clubs</Text>
+            <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular', color: isDark ? '#E5E7EB' : undefined }}>social clubs</Text>
             {/* Create Button - verify limit logic handled in backend or assume UI check needed? */}
             <View ref={createRef} collapsable={false}>
               <TouchableOpacity 
@@ -415,10 +415,14 @@ export default function ClubsScreen() {
         <View ref={tabsRef} collapsable={false}>
           <GlassCard className="mb-6" contentClassName="p-1" tint={isDark ? 'dark' : 'light'} intensity={25}>
               <View className="flex-row">
-                  <TouchableOpacity 
+                <TouchableOpacity 
                       onPress={() => setTab('my')}
                       className={`flex-1 py-2 rounded-lg items-center ${tab === 'my' ? 'bg-white/80' : ''}`}
-                      style={{ backgroundColor: tab === 'my' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
+                    style={{
+                      backgroundColor: tab === 'my' ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.96)') : undefined,
+                      borderWidth: tab === 'my' ? 1 : 0,
+                      borderColor: tab === 'my' ? (isDark ? 'rgba(226,232,240,0.20)' : 'rgba(15,23,42,0.08)') : undefined,
+                    }}
                   >
                       <Text className={`font-bold ${tab === 'my' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'my' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
                         My Clubs
@@ -427,7 +431,11 @@ export default function ClubsScreen() {
                   <TouchableOpacity 
                       onPress={() => setTab('discover')}
                       className={`flex-1 py-2 rounded-lg items-center ${tab === 'discover' ? 'bg-white/80' : ''}`}
-                      style={{ backgroundColor: tab === 'discover' ? (isDark ? 'rgba(15,23,42,0.85)' : undefined) : undefined }}
+                    style={{
+                      backgroundColor: tab === 'discover' ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.96)') : undefined,
+                      borderWidth: tab === 'discover' ? 1 : 0,
+                      borderColor: tab === 'discover' ? (isDark ? 'rgba(226,232,240,0.20)' : 'rgba(15,23,42,0.08)') : undefined,
+                    }}
                   >
                       <Text className={`font-bold ${tab === 'discover' ? 'text-ink' : 'text-gray-400'}`} style={{ color: tab === 'discover' ? (isDark ? '#E5E7EB' : undefined) : (isDark ? 'rgba(226,232,240,0.55)' : undefined) }}>
                         Discover {address?.city || 'Clubs'}

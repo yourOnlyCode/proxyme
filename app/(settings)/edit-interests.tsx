@@ -96,7 +96,7 @@ export default function EditInterestsScreen() {
                 For each, list your top 3 specific favorites.
                 {'\n\n'}
                 <Text className="italic text-gray-400">
-                    Example: For <Text className="font-bold text-gray-500">Coffee</Text>, list your favorite local cafe like "Blue Bottle" or "Joe's Coffee".
+                    Example: For <Text className="font-bold text-gray-500">Coffee</Text>, list your favorite local cafe like “Blue Bottle” or “Joe’s Coffee”.
                 </Text>
             </Text>
             

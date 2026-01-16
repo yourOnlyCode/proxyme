@@ -97,11 +97,9 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [activeStatuses, setActiveStatuses] = useState<StatusItem[]>([]);
   const statusTabScrollRef = useRef<ScrollView | null>(null);
   
-  // Penpal Data
-  const [penpalMessage, setPenpalMessage] = useState('');
-  const [sendingPenpal, setSendingPenpal] = useState(false);
-
   // Clubs Data
+  const [myClubs, setMyClubs] = useState<any[]>([]);
+  const [loadingClubs, setLoadingClubs] = useState(false);
   const [selectedClub, setSelectedClub] = useState<any | null>(null);
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
@@ -109,33 +107,45 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [forumContent, setForumContent] = useState('');
   const [creatingPost, setCreatingPost] = useState(false);
 
-  const sendPenpal = async () => {
-    if (!penpalMessage.trim()) {
-      toast.show('Message Required', 'error');
-      return;
-    }
-    setSendingPenpal(true);
-    try {
-      const { data, error } = await supabase.rpc('send_penpal_message', { content: penpalMessage });
-      if (error) throw error;
-      if (data.success) {
-        setPenpalMessage('');
-        toast.show('Penpal message sent!', 'success');
-        router.push(`/chat/${data.connection_id}`);
-        closeModal();
-      } else {
-        if (data.error === 'limit_reached') {
-          toast.show('You can only have one penpal at a time. Get verified for more!', 'error');
-        } else if (data.error === 'no_users_found') {
-          toast.show('No penpals found. Try again later!', 'error');
-        }
+  // Fetch clubs for the status modal (used by the "clubs" tab).
+  useEffect(() => {
+    if (!modalVisible || activeTab !== 'clubs' || !user) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingClubs(true);
+      try {
+        const { data, error } = await supabase
+          .from('club_members')
+          .select(
+            `
+              role,
+              club:clubs (
+                id, name, description, image_url, city
+              )
+            `,
+          )
+          .eq('user_id', user.id)
+          .eq('status', 'accepted');
+        if (error) throw error;
+        const clubs = (data || []).map((item: any) => ({ ...item.club, role: item.role }));
+        if (!cancelled) setMyClubs(clubs);
+      } catch {
+        if (!cancelled) toast.show('Failed to load clubs', 'error');
+      } finally {
+        if (!cancelled) setLoadingClubs(false);
       }
-    } catch (e: any) {
-      toast.show(e.message || 'Failed to send penpal message', 'error');
-    } finally {
-      setSendingPenpal(false);
-    }
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalVisible, activeTab, user?.id]);
+
+  useEffect(() => {
+    if (!selectedClub || !modalVisible || activeTab !== 'clubs') return;
+    fetchUpcomingEvents(selectedClub.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClub, modalVisible, activeTab]);
 
   const fetchUpcomingEvents = async (clubId: string) => {
     if (!user) return;
@@ -722,7 +732,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                                                 ) : (
                                                     <View className="flex-1 items-center justify-center p-2 bg-blue-50">
                                                         {item.content && item.content.trim() ? (
-                                                            <Text numberOfLines={4} className="text-[10px] text-center font-medium italic">"{item.content}"</Text>
+                                                            <Text numberOfLines={4} className="text-[10px] text-center font-medium italic">“{item.content}”</Text>
                                                         ) : (
                                                             <Text className="text-[10px] text-center font-medium italic text-slate-400">No content</Text>
                                                         )}
@@ -815,143 +825,8 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  // Render Penpal Tab Content
-  const renderPenpalTab = () => {
-    const [myPenpals, setMyPenpals] = useState<any[]>([]);
-
-    useEffect(() => {
-      if (modalVisible && activeTab === 'penpal' && user) {
-        fetchMyPenpals();
-      }
-    }, [modalVisible, activeTab, user]);
-
-    const fetchMyPenpals = async () => {
-      if (!user) return;
-      const { data } = await supabase
-        .from('interests')
-        .select(`
-          id,
-          type,
-          status,
-          sender:profiles!interests_sender_id_fkey(id, username, full_name, avatar_url, city, is_verified),
-          receiver:profiles!interests_receiver_id_fkey(id, username, full_name, avatar_url, city, is_verified)
-        `)
-        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .eq('type', 'penpal')
-        .eq('status', 'accepted');
-      
-      if (data) {
-        const penpals = data.map((p: any) => ({
-          id: p.id,
-          partner: p.sender_id === user.id ? p.receiver : p.sender,
-        }));
-        setMyPenpals(penpals);
-      }
-    };
-
-    return (
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <View className="mb-6">
-          <Text className="text-lg font-bold text-slate-900 mb-2">Send to Random Penpal</Text>
-          <Text className="text-slate-500 text-sm mb-4">
-            Send a message to a random person in a different city. You can only have one active penpal at a time unless verified.
-          </Text>
-          <TextInput
-            value={penpalMessage}
-            onChangeText={setPenpalMessage}
-            placeholder="Say hello from your city..."
-            placeholderTextColor="#9CA3AF"
-            multiline
-            className="bg-slate-50 p-4 rounded-xl text-slate-900 text-lg min-h-[120px] mb-4"
-            textAlignVertical="top"
-          />
-        </View>
-
-        {myPenpals.length > 0 && (
-          <View className="mt-6">
-            <Text className="text-lg font-bold text-slate-900 mb-4">My Penpals</Text>
-            {myPenpals.map((penpal) => (
-              <TouchableOpacity
-                key={penpal.id}
-                onPress={() => {
-                  router.push(`/chat/${penpal.id}`);
-                  closeModal();
-                }}
-                className="bg-slate-50 rounded-xl p-4 mb-3 flex-row items-center"
-              >
-                {penpal.partner?.avatar_url ? (
-                  <Image source={{ uri: penpal.partner.avatar_url }} className="w-12 h-12 rounded-full mr-3" />
-                ) : (
-                  <View className="w-12 h-12 rounded-full bg-gray-300 mr-3 items-center justify-center">
-                    <IconSymbol name="person.fill" size={20} color="#9CA3AF" />
-                  </View>
-                )}
-                <View className="flex-1">
-                  <View className="flex-row items-center">
-                    <Text className="font-bold text-slate-900">{penpal.partner?.full_name || penpal.partner?.username || 'Unknown'}</Text>
-                    {penpal.partner?.is_verified && (
-                      <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" style={{ marginLeft: 4 }} />
-                    )}
-                  </View>
-                  {penpal.partner?.city && <Text className="text-slate-500 text-sm">{penpal.partner.city}</Text>}
-                </View>
-                <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-      </ScrollView>
-    );
-  };
-
   // Render Clubs Tab Content
   const renderClubsTab = () => {
-    const [myClubs, setMyClubs] = useState<any[]>([]);
-    const [loadingClubs, setLoadingClubs] = useState(false);
-
-    useEffect(() => {
-      if (modalVisible && activeTab === 'clubs' && user) {
-        fetchMyClubs();
-        if (selectedClub) {
-          fetchUpcomingEvents(selectedClub.id);
-        }
-      }
-    }, [modalVisible, activeTab, user]);
-
-    useEffect(() => {
-      if (selectedClub && modalVisible && activeTab === 'clubs') {
-        fetchUpcomingEvents(selectedClub.id);
-      }
-    }, [selectedClub, modalVisible, activeTab]);
-
-    const fetchMyClubs = async () => {
-      if (!user) return;
-      setLoadingClubs(true);
-      try {
-        const { data, error } = await supabase
-          .from('club_members')
-          .select(`
-            role,
-            club:clubs (
-              id, name, description, image_url, city
-            )
-          `)
-          .eq('user_id', user.id)
-          .eq('status', 'accepted');
-        
-        if (error) throw error;
-        const clubs = (data || []).map((item: any) => ({
-          ...item.club,
-          role: item.role,
-        }));
-        setMyClubs(clubs);
-      } catch (e: any) {
-        toast.show('Failed to load clubs', 'error');
-      } finally {
-        setLoadingClubs(false);
-      }
-    };
-
 
     const formatEventDate = (dateString: string) => {
       const date = new Date(dateString);
@@ -1110,7 +985,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
         ) : myClubs.length === 0 ? (
           <View className="items-center py-8">
             <IconSymbol name="person.3.fill" size={48} color="#9CA3AF" />
-            <Text className="text-slate-500 mt-4 text-center">You're not a member of any clubs yet.</Text>
+            <Text className="text-slate-500 mt-4 text-center">You’re not a member of any clubs yet.</Text>
             <TouchableOpacity
               onPress={() => {
                 router.push('/(tabs)/clubs');
@@ -1564,7 +1439,7 @@ function StatusPreviewModal({
                             <View className="w-full h-full items-center justify-center bg-ink p-8">
                                 {currentStatus.content && currentStatus.content.trim() ? (
                                     <Text className="text-white text-2xl font-bold italic text-center leading-9">
-                                        "{currentStatus.content}"
+                                        “{currentStatus.content}”
                                     </Text>
                                 ) : (
                                     <Text className="text-white text-2xl font-bold italic text-center leading-9">
