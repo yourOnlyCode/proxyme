@@ -16,6 +16,8 @@ This is the “ship it” list to get the app crisp, safe, and store-ready.
   - `supabase/master_schema.sql`
   - `supabase/crossed_path_visits.sql`
   - `supabase/name_moderation.sql`
+  - `supabase/storage_avatars.sql` (required for avatar uploads + public reads)
+  - Optional (recommended if you have legacy rows): `supabase/cleanup_notifications_types.sql` then validate the constraint
 - **Verify RPCs exist and run**:
   - `get_city_users`, `get_feed_users`, `get_nearby_users`
   - `get_my_crossed_paths_groups`, `get_crossed_paths_people`
@@ -23,6 +25,7 @@ This is the “ship it” list to get the app crisp, safe, and store-ready.
   - `get_user_connections_list`, `get_user_connection_stats`
 - **RLS sanity**: profiles, interests, notifications, messages, crossed_path_visits.
 - **Storage policies**: avatars bucket read/write rules, public URL handling.
+  - Ensure bucket `avatars` exists and is `public=true` (the app uses `getPublicUrl`).
 - **Seed data**:
   - `blocked_terms` table: seed a first pass list (and keep it editable).
 - **Retention**:
@@ -42,6 +45,7 @@ This is the “ship it” list to get the app crisp, safe, and store-ready.
 ### Release hardening
 - **Error boundary**: show a safe fallback instead of crashing on unexpected errors.
 - **Crash reporting** (recommended): wire Sentry (or similar) before launch.
+  - Set `EXPO_PUBLIC_SENTRY_DSN` in your app environment to enable Sentry.
 - **Analytics** (minimal, recommended):
   - sign-in success
   - onboarding completed

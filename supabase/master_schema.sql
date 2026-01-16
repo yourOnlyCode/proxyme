@@ -301,6 +301,39 @@ begin
 end;
 $$;
 
+-- Throttle interest requests (prevents spam). Applies to both proxy/city connection requests.
+create or replace function public.enforce_interest_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cnt int;
+begin
+  -- Max 50 outgoing interests per 24h per sender.
+  select count(*) into cnt
+  from public.interests i
+  where i.sender_id = new.sender_id
+    and i.created_at >= now() - interval '24 hours';
+
+  if coalesce(cnt, 0) >= 50 then
+    raise exception 'Too many connection requests. Please try again later.';
+  end if;
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'interests_rate_limit') then
+    create trigger interests_rate_limit
+    before insert on public.interests
+    for each row
+    execute function public.enforce_interest_rate_limit();
+  end if;
+end $$;
+
 drop trigger if exists trigger_interests_before_insert_autoconnect on public.interests;
 create trigger trigger_interests_before_insert_autoconnect
 before insert on public.interests
@@ -632,6 +665,40 @@ CREATE TABLE IF NOT EXISTS public.reports (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Basic abuse throttles (server-side)
+create or replace function public.enforce_report_rate_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cnt int;
+begin
+  -- Max 10 reports per 24h per reporter.
+  select count(*) into cnt
+  from public.reports r
+  where r.reporter_id = new.reporter_id
+    and r.created_at >= now() - interval '24 hours';
+
+  if coalesce(cnt, 0) >= 10 then
+    raise exception 'Too many reports. Please try again later.';
+  end if;
+
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'reports_rate_limit') then
+    create trigger reports_rate_limit
+    before insert on public.reports
+    for each row
+    execute function public.enforce_report_rate_limit();
+  end if;
+end $$;
+
 -- Ensure reports columns exist (idempotent)
 do $$
 begin
@@ -714,7 +781,7 @@ BEGIN
           'event_cancelled',
           'event_rsvp_update'
         )
-      );
+      ) NOT VALID;
   END IF;
 END $$;
 
@@ -1360,7 +1427,7 @@ BEGIN
           'event_rsvp_update',
           'event_comment'
         )
-      );
+      ) NOT VALID;
   END IF;
 END $$;
 

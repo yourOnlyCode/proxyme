@@ -18,9 +18,13 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { initMonitoring } from '@/lib/monitoring';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
+
+// Production monitoring (Sentry). No-op if EXPO_PUBLIC_SENTRY_DSN is not set.
+initMonitoring();
 
 export const unstable_settings = {
   anchor: '(tabs)',

@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f8fafc;
+  --ink: rgba(15, 23, 42, 0.92);
+  --muted: rgba(15, 23, 42, 0.68);
+  --glass: rgba(255, 255, 255, 0.62);
+  --glassBorder: rgba(15, 23, 42, 0.10);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+html {
+  background: radial-gradient(1200px 760px at 20% 10%, rgba(59, 130, 246, 0.18), transparent 60%),
+    radial-gradient(1000px 700px at 78% 22%, rgba(16, 185, 129, 0.14), transparent 58%),
+    radial-gradient(1200px 900px at 52% 86%, rgba(168, 85, 247, 0.16), transparent 55%),
+    var(--bg);
+}
+
+body {
+  color: var(--ink);
+  background: inherit;
+  min-height: 100vh;
+}
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glassBorder);
+  box-shadow: 0 16px 44px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.hoverTitle {
+  background: linear-gradient(
+    90deg,
+    rgba(15, 23, 42, 0.92),
+    rgba(59, 130, 246, 0.92),
+    rgba(168, 85, 247, 0.92),
+    rgba(15, 23, 42, 0.92)
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  transition: background-position 220ms ease;
+}
+
+.hoverTitle:hover {
+  background-position: 100% 0;
+}
+
