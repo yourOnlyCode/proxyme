@@ -7,6 +7,7 @@ export default function AuthCallback() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     code?: string | string[];
+    type?: string | string[];
     error?: string | string[];
     error_description?: string | string[];
   }>();
@@ -18,6 +19,7 @@ export default function AuthCallback() {
 
     const run = async () => {
       const code = Array.isArray(params.code) ? params.code[0] : params.code;
+      const type = Array.isArray(params.type) ? params.type[0] : params.type;
       const err = Array.isArray(params.error) ? params.error[0] : params.error;
       const errDesc = Array.isArray(params.error_description) ? params.error_description[0] : params.error_description;
 
@@ -46,6 +48,12 @@ export default function AuthCallback() {
       if (exchangeError) {
         if (!cancelled) setMessage(exchangeError.message);
         router.replace('/(auth)/sign-in');
+        return;
+      }
+
+      // Password recovery links arrive with type=recovery. After session exchange, prompt for a new password.
+      if (type === 'recovery') {
+        router.replace('/(auth)/reset-password');
         return;
       }
 

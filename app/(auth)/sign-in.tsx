@@ -1,5 +1,6 @@
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
+import * as Linking from 'expo-linking';
 import { ActivityIndicator, Alert, Keyboard, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { SocialAuthButtons } from '../../components/auth/SocialAuthButtons';
@@ -9,6 +10,7 @@ export default function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
   const router = useRouter();
 
   async function signInWithEmail() {
@@ -28,6 +30,31 @@ export default function SignIn() {
     }
 
     setLoading(false);
+  }
+
+  async function sendPasswordReset() {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      Alert.alert('Email required', 'Please enter your email above, then tap “Forgot password?”.');
+      return;
+    }
+
+    setSendingReset(true);
+    try {
+      // This must be added to Supabase Auth "Redirect URLs" allowlist.
+      const redirectTo = Linking.createURL('/auth/callback');
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
+      if (error) throw error;
+
+      Alert.alert(
+        'Check your email',
+        'If an account exists for this email, we sent a password reset link. Open it on this device to continue.',
+      );
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not send reset email. Please try again.');
+    } finally {
+      setSendingReset(false);
+    }
   }
   const content = (
     <AuthShell
@@ -84,6 +111,17 @@ export default function SignIn() {
             if (Platform.OS === 'web') e.stopPropagation();
           }}
         />
+
+        <TouchableOpacity
+          activeOpacity={0.85}
+          disabled={sendingReset}
+          onPress={() => void sendPasswordReset()}
+          className="mb-4 self-end"
+        >
+          <Text className="text-ink font-bold" style={{ opacity: sendingReset ? 0.6 : 1 }}>
+            {sendingReset ? 'Sending…' : 'Forgot password?'}
+          </Text>
+        </TouchableOpacity>
 
         <TouchableOpacity className="bg-black py-4 rounded-2xl items-center shadow-xl" onPress={() => void signInWithEmail()} disabled={loading}>
           {loading ? (
