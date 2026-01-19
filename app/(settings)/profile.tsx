@@ -61,6 +61,7 @@ export default function EditProfileScreen() {
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
   const [bio, setBio] = useState('');
+  const [currentlyInto, setCurrentlyInto] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [relationshipGoals, setRelationshipGoals] = useState<string[]>([]);
   const [socials, setSocials] = useState<SocialLinks>({});
@@ -86,7 +87,7 @@ export default function EditProfileScreen() {
 
       const { data, error, status } = await supabase
         .from('profiles')
-        .select(`username, full_name, bio, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths`)
+        .select(`username, full_name, bio, currently_into, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths`)
         .eq('id', user.id)
         .single();
 
@@ -98,6 +99,7 @@ export default function EditProfileScreen() {
         setUsername(data.username || '');
         setFullName(data.full_name || '');
         setBio(data.bio || '');
+        setCurrentlyInto((data as any).currently_into || '');
         setAvatarUrl(data.avatar_url);
         setRelationshipGoals(data.relationship_goals || []);
         setSocials(data.social_links || {});
@@ -141,6 +143,7 @@ export default function EditProfileScreen() {
         username,
         full_name: fullName,
         bio,
+        currently_into: currentlyInto.trim() || null,
         avatar_url: cleanAvatarPath,
         relationship_goals: relationshipGoals,
         social_links: socials,
@@ -360,6 +363,29 @@ export default function EditProfileScreen() {
                 style={{ textAlignVertical: 'top' }}
                 returnKeyType="done"
                 blurOnSubmit
+                onSubmitEditing={() => {
+                  if (Platform.OS !== 'web') Keyboard.dismiss();
+                }}
+                onFocus={(e) => {
+                  if (Platform.OS === 'web') e.stopPropagation();
+                }}
+              />
+            </View>
+
+            <View className="mb-6">
+              <Text className="text-gray-500 mb-1 ml-1 font-medium">Currently into</Text>
+              <Text className="text-gray-400 text-xs mb-2 ml-1">
+                This can be anything (e.g. “sushi”, “podcasts”, “coffee shops”). Matching people will see it highlighted in City.
+              </Text>
+              <TextInput
+                value={currentlyInto}
+                onChangeText={setCurrentlyInto}
+                placeholder="e.g. sushi"
+                placeholderTextColor="#9CA3AF"
+                className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
+                returnKeyType="done"
+                blurOnSubmit
+                maxLength={40}
                 onSubmitEditing={() => {
                   if (Platform.OS !== 'web') Keyboard.dismiss();
                 }}

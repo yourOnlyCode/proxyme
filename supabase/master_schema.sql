@@ -30,6 +30,7 @@ create table if not exists public.profiles (
   romance_min_age integer default 18,
   romance_max_age integer default 99,
   detailed_interests jsonb,
+  currently_into text,
   is_verified boolean DEFAULT false,
   city text,
   state text,
@@ -63,6 +64,9 @@ begin
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'detailed_interests') then
         alter table public.profiles add column detailed_interests jsonb;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'currently_into') then
+        alter table public.profiles add column currently_into text;
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'is_verified') then
         alter table public.profiles add column is_verified boolean DEFAULT false;
@@ -1052,6 +1056,7 @@ CREATE TABLE IF NOT EXISTS public.club_events (
     location TEXT,
     created_by UUID NOT NULL REFERENCES public.profiles(id) ON DELETE SET NULL,
     is_public BOOLEAN NOT NULL DEFAULT false,
+    detailed_interests jsonb,
     image_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     rsvp_count_going INTEGER DEFAULT 0,
@@ -1100,6 +1105,18 @@ BEGIN
   ) THEN
     ALTER TABLE public.club_events
       ADD COLUMN cancelled_at TIMESTAMPTZ;
+  END IF;
+END $$;
+
+-- If the table already existed (older schema), ensure detailed_interests exists.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'detailed_interests'
+  ) THEN
+    ALTER TABLE public.club_events
+      ADD COLUMN detailed_interests jsonb;
   END IF;
 END $$;
 
@@ -2048,6 +2065,87 @@ $$;
 -- Drop existing function if it exists to allow return type changes
 drop function if exists public.get_city_users(float, float, int);
 
+-- Helpers for City feed ranking (intent match, interest overlap %, currently-into match)
+create or replace function public.flatten_interest_tags(details jsonb)
+returns text[]
+language sql
+stable
+as $$
+  select coalesce(array_agg(distinct t), '{}'::text[])
+  from (
+    select lower(trim(val)) as t
+    from jsonb_each(coalesce(details, '{}'::jsonb)) e(key, value)
+    cross join lateral jsonb_array_elements_text(coalesce(e.value, '[]'::jsonb)) val
+    where length(trim(val)) > 0
+  ) s;
+$$;
+
+create or replace function public.interest_overlap_count(a jsonb, b jsonb)
+returns int
+language sql
+stable
+as $$
+  select coalesce(count(*), 0)::int
+  from unnest(public.flatten_interest_tags(a)) x
+  join unnest(public.flatten_interest_tags(b)) y
+    on x = y;
+$$;
+
+create or replace function public.interest_match_percent(a jsonb, b jsonb)
+returns float
+language sql
+stable
+as $$
+  with
+    aa as (select public.flatten_interest_tags(a) as arr),
+    bb as (select public.flatten_interest_tags(b) as arr),
+    overlap as (
+      select coalesce(count(*), 0)::float as n
+      from unnest((select arr from aa)) x
+      join unnest((select arr from bb)) y on x = y
+    ),
+    denom as (
+      select greatest(coalesce(array_length((select arr from aa), 1), 0), coalesce(array_length((select arr from bb), 1), 0))::float as d
+    )
+  select case
+    when (select d from denom) <= 0 then 0
+    else round(((((select n from overlap) / (select d from denom)) * 100.0))::numeric, 2)::float
+  end;
+$$;
+
+create or replace function public.currently_into_matches(a text, b text)
+returns boolean
+language plpgsql
+stable
+as $$
+declare
+  na text;
+  nb text;
+begin
+  na := lower(trim(coalesce(a, '')));
+  nb := lower(trim(coalesce(b, '')));
+
+  if na = '' or nb = '' then
+    return false;
+  end if;
+
+  -- Exact match first
+  if na = nb then
+    return true;
+  end if;
+
+  -- Soft contains match (avoid tiny strings)
+  if length(na) >= 4 and nb like '%' || na || '%' then
+    return true;
+  end if;
+  if length(nb) >= 4 and na like '%' || nb || '%' then
+    return true;
+  end if;
+
+  return false;
+end;
+$$;
+
 create or replace function public.get_city_users(
   lat float,
   long float,
@@ -2060,10 +2158,16 @@ returns table (
   bio text,
   avatar_url text,
   relationship_goals text[],
+  primary_goal text,
   detailed_interests jsonb,
+  currently_into text,
   photos jsonb,
   dist_meters float,
   shared_interests_count int,
+  interest_overlap_count int,
+  interest_match_percent float,
+  intent_match boolean,
+  currently_into_match boolean,
   city text,
   state text,
   is_verified boolean,
@@ -2081,6 +2185,8 @@ declare
   my_primary_goal text;
   my_romance_min int;
   my_romance_max int;
+  my_currently_into text;
+  my_primary_goal_norm text;
 begin
   select p.detailed_interests into my_details 
   from public.profiles p 
@@ -2090,10 +2196,13 @@ begin
     coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end),
     p.relationship_goals[1],
     coalesce(p.romance_min_age, 18),
-    coalesce(p.romance_max_age, 99)
-  into my_age_group, my_primary_goal, my_romance_min, my_romance_max
+    coalesce(p.romance_max_age, 99),
+    p.currently_into
+  into my_age_group, my_primary_goal, my_romance_min, my_romance_max, my_currently_into
   from public.profiles p
   where p.id = auth.uid();
+
+  my_primary_goal_norm := coalesce(my_primary_goal, case when coalesce(my_age_group, 'adult') = 'minor' then 'Friendship' else null end);
 
   return query
   select
@@ -2103,7 +2212,9 @@ begin
     p.bio,
     p.avatar_url,
     p.relationship_goals,
+    coalesce(p.relationship_goals[1], case when coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = 'minor' then 'Friendship' else null end) as primary_goal,
     p.detailed_interests,
+    p.currently_into,
     (
         select jsonb_agg(jsonb_build_object('url', pp.image_url, 'order', pp.display_order) order by pp.display_order)
         from public.profile_photos pp
@@ -2128,6 +2239,13 @@ begin
       ), 0)::int
       from jsonb_object_keys(coalesce(p.detailed_interests, '{}'::jsonb)) as key
     ) as shared_interests_count,
+    public.interest_overlap_count(my_details, p.detailed_interests) as interest_overlap_count,
+    public.interest_match_percent(my_details, p.detailed_interests) as interest_match_percent,
+    (
+      my_primary_goal_norm is not null
+      and coalesce(p.relationship_goals[1], case when coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = 'minor' then 'Friendship' else null end) = my_primary_goal_norm
+    ) as intent_match,
+    public.currently_into_matches(my_currently_into, p.currently_into) as currently_into_match,
     p.city,
     p.state,
     p.is_verified,
@@ -2188,8 +2306,11 @@ begin
       range_meters
     )
   order by
-    shared_interests_count desc,
-    dist_meters asc;
+    intent_match desc,
+    interest_match_percent desc,
+    currently_into_match desc,
+    dist_meters asc,
+    shared_interests_count desc;
 end;
 $$;
 

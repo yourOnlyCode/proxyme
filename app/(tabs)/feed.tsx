@@ -37,6 +37,12 @@ function resolvePublicAvatarUrl(path: string | null): string | null {
 type FeedProfile = ProfileData & {
   dist_meters: number;
   statuses?: StatusItem[];
+  primary_goal?: string | null;
+  currently_into?: string | null;
+  intent_match?: boolean;
+  interest_overlap_count?: number;
+  interest_match_percent?: number;
+  currently_into_match?: boolean;
 };
 
 type PublicEvent = {
@@ -192,15 +198,7 @@ export default function CityFeedScreen() {
       } else if (data) {
         // 1. Filter: Only show users with active statuses
         let filteredProfiles = data.filter((u: FeedProfile) => u.statuses && u.statuses.length > 0);
-
-        // 2. Sort: Top down based on Interest Match Score
-        if (myInterests) {
-            filteredProfiles.sort((a: FeedProfile, b: FeedProfile) => {
-                const scoreA = calculateRawMatchScore(a.detailed_interests);
-                const scoreB = calculateRawMatchScore(b.detailed_interests);
-                return scoreB - scoreA; // Descending order
-            });
-        }
+        // 2. Ordering: handled server-side via get_city_users (intent match -> interest match -> currently-into -> distance)
 
         // 3. Fetch pending requests for each user
         const userIds = filteredProfiles.map((u: FeedProfile) => u.id);
@@ -238,7 +236,7 @@ export default function CityFeedScreen() {
             if (address?.city) {
               let q = supabase
                 .from('club_events')
-                .select('id, club_id, created_by, title, description, event_date, location, is_public, image_url, is_cancelled, club:clubs(id, name, image_url, city, detailed_interests)')
+                .select('id, club_id, created_by, title, description, event_date, location, is_public, detailed_interests, image_url, is_cancelled, club:clubs(id, name, image_url, city, detailed_interests)')
                 .eq('is_public', true)
                 .eq('is_cancelled', false as any)
                 .gt('event_date', new Date().toISOString())
@@ -288,9 +286,9 @@ export default function CityFeedScreen() {
                 }
 
                 publicEvents = publicEvents.map((e) => {
-                  const clubInterests = (e as any)?.club?.detailed_interests || null;
-                  const score = calculateRawMatchScore(clubInterests);
-                  const common = getCommonInterestsFor(clubInterests);
+                  const tagged = (e as any)?.detailed_interests || (e as any)?.club?.detailed_interests || null;
+                  const score = calculateRawMatchScore(tagged);
+                  const common = getCommonInterestsFor(tagged);
                   return {
                     ...e,
                     my_rsvp: rsvpMap.get(e.id) || null,
@@ -520,7 +518,7 @@ export default function CityFeedScreen() {
                   sendInterest={sendInterest} 
                   handleSafety={handleSafety} 
                   openProfile={openProfile}
-                  percentage={calculateMatchPercentage(item.profile.detailed_interests)}
+                  percentage={Math.round(Number((item.profile as any).interest_match_percent ?? calculateMatchPercentage(item.profile.detailed_interests)) || 0)}
                   getCommonInterests={getCommonInterests}
                   handleAcceptRequest={handleAcceptRequest}
                   handleDeclineRequest={handleDeclineRequest}
@@ -1109,6 +1107,8 @@ function CityFeedCard({
     
     // Get common interests
     const commonInterests = getCommonInterests ? getCommonInterests(item.detailed_interests) : [];
+    const currentlyInto = (item as any).currently_into as string | null | undefined;
+    const currentlyIntoMatch = !!(item as any).currently_into_match;
 
     if (!currentStatus && !isShowingProfilePrompt) return null;
 
@@ -1315,6 +1315,16 @@ function CityFeedCard({
                             ))}
                         </View>
                     )}
+
+                    {/* Currently Into */}
+                    {currentlyInto ? (
+                      <View className={`flex-row items-center flex-wrap mb-2 ${currentlyIntoMatch ? 'bg-white/20' : 'bg-white/10'} px-2 py-1 rounded-full border border-white/10`}>
+                        <IconSymbol name="sparkles" size={12} color={currentlyIntoMatch ? '#F472B6' : '#E5E7EB'} style={{ marginRight: 6 }} />
+                        <Text className="text-white text-xs font-bold mr-2 shadow-sm">Currently into:</Text>
+                        <Text className="text-white/90 text-xs font-semibold shadow-sm">{currentlyInto}</Text>
+                        {currentlyIntoMatch && <Text className="text-white/80 text-[10px] font-bold ml-2">MATCH</Text>}
+                      </View>
+                    ) : null}
 
                     {/* Bio Teaser */}
                     <Text className="text-gray-200 text-xs leading-4 mb-2 font-medium shadow-sm opacity-80" numberOfLines={2}>

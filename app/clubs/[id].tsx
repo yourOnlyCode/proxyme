@@ -2,6 +2,7 @@ import EventCard from '@/components/club/EventCard';
 import ReplyItem from '@/components/club/ReplyItem';
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import Avatar from '@/components/profile/Avatar';
+import { InterestSelector } from '@/components/profile/InterestSelector';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -80,6 +81,7 @@ export default function ClubDetailScreen() {
   const [editEventLocation, setEditEventLocation] = useState('');
   const [editEventIsPublic, setEditEventIsPublic] = useState(false);
   const [editEventImage, setEditEventImage] = useState<string | null>(null);
+  const [editEventInterests, setEditEventInterests] = useState<Record<string, string[]>>({});
   const [updatingEvent, setUpdatingEvent] = useState(false);
 
   // Profile Modal State
@@ -94,6 +96,7 @@ export default function ClubDetailScreen() {
   const [newEventLocation, setNewEventLocation] = useState('');
   const [newEventIsPublic, setNewEventIsPublic] = useState(false);
   const [newEventImage, setNewEventImage] = useState<string | null>(null);
+  const [newEventInterests, setNewEventInterests] = useState<Record<string, string[]>>({});
   const [creatingEvent, setCreatingEvent] = useState(false);
 
   // Settings State
@@ -1014,6 +1017,13 @@ export default function ClubDetailScreen() {
 
       setCreatingEvent(true);
       try {
+          const cleanedEventInterests: Record<string, string[]> = {};
+          Object.keys(newEventInterests || {}).forEach((key) => {
+              const validItems = (newEventInterests[key] || []).filter((v) => String(v || '').trim() !== '');
+              if (validItems.length > 0) cleanedEventInterests[key] = validItems;
+          });
+          const eventInterestsPayload = Object.keys(cleanedEventInterests).length > 0 ? cleanedEventInterests : null;
+
           let eventImagePath: string | null = null;
           if (newEventImage && !newEventImage.startsWith('http')) {
               const fileExt = newEventImage.split('.').pop()?.toLowerCase() ?? 'jpeg';
@@ -1040,6 +1050,7 @@ export default function ClubDetailScreen() {
                 event_date: eventDateISO,
                 location: newEventLocation.trim() || null,
                 is_public: newEventIsPublic,
+                detailed_interests: eventInterestsPayload,
                 image_url: eventImagePath,
             })
             .select()
@@ -1049,7 +1060,8 @@ export default function ClubDetailScreen() {
           let error: any = primary.error;
 
           if (error?.code === '42703') {
-            // DB hasn't been migrated to include is_public yet. Retry without it.
+            // Backwards-compat: older DBs may be missing newer columns (is_public, detailed_interests, etc).
+            // Retry with only the core fields.
             const retry = await supabase
               .from('club_events')
               .insert({
@@ -1080,6 +1092,7 @@ export default function ClubDetailScreen() {
           setNewEventLocation('');
           setNewEventIsPublic(false);
           setNewEventImage(null);
+          setNewEventInterests({});
           fetchEvents();
           Alert.alert('Success', 'Event created! Members will be notified 1 hour before the event.');
       } catch (error: any) {
@@ -1096,6 +1109,7 @@ export default function ClubDetailScreen() {
       setEditEventDate(new Date(event.event_date));
       setEditEventLocation(event.location || '');
       setEditEventIsPublic(!!(event as any).is_public);
+      setEditEventInterests(((event as any).detailed_interests as any) || {});
       setEditEventModalVisible(true);
       setEventMenuVisible(false);
       setSelectedEventId(null);
@@ -1110,6 +1124,12 @@ export default function ClubDetailScreen() {
       setUpdatingEvent(true);
       try {
           const eventDateISO = editEventDate.toISOString();
+          const cleanedEventInterests: Record<string, string[]> = {};
+          Object.keys(editEventInterests || {}).forEach((key) => {
+              const validItems = (editEventInterests[key] || []).filter((v) => String(v || '').trim() !== '');
+              if (validItems.length > 0) cleanedEventInterests[key] = validItems;
+          });
+          const eventInterestsPayload = Object.keys(cleanedEventInterests).length > 0 ? cleanedEventInterests : null;
           
           const primary = await supabase
             .from('club_events')
@@ -1119,13 +1139,15 @@ export default function ClubDetailScreen() {
                 event_date: eventDateISO,
                 location: editEventLocation.trim() || null,
                 is_public: editEventIsPublic,
+                detailed_interests: eventInterestsPayload,
             })
             .eq('id', editingEvent.id)
             .eq('club_id', id);
 
           let error: any = primary.error;
           if (error?.code === '42703') {
-            // DB hasn't been migrated to include is_public yet. Retry without it.
+            // Backwards-compat: older DBs may be missing newer columns (is_public, detailed_interests, etc).
+            // Retry with only the core fields.
             const retry = await supabase
               .from('club_events')
               .update({
@@ -1147,6 +1169,7 @@ export default function ClubDetailScreen() {
           setEditEventDesc('');
           setEditEventDate(new Date());
           setEditEventLocation('');
+          setEditEventInterests({});
           await fetchEvents();
           Alert.alert('Success', 'Event updated successfully');
       } catch (error: any) {
@@ -2363,6 +2386,14 @@ export default function ClubDetailScreen() {
                             returnKeyType="next"
                             blurOnSubmit={false}
                         />
+                    </View>
+
+                    <View className="mb-4">
+                        <Text className="font-bold text-gray-500 mb-2">Event Interest Tags</Text>
+                        <Text className="text-gray-400 text-xs mb-3">
+                            Add a few tags so people who share these interests see this event sooner in the City tab.
+                        </Text>
+                        <InterestSelector interests={newEventInterests} onChange={setNewEventInterests} />
                     </View>
 
                     <View className="mb-4">

@@ -75,6 +75,7 @@ export type ClubEvent = {
     event_date: string;
     location: string | null;
     is_public?: boolean;
+    detailed_interests?: Record<string, string[]> | null;
     image_url?: string | null;
     created_by: string;
     created_at: string;
