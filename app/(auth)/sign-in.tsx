@@ -41,9 +41,16 @@ export default function SignIn() {
 
     setSendingReset(true);
     try {
-      // This must be added to Supabase Auth "Redirect URLs" allowlist.
-      const redirectTo = Linking.createURL('/auth/callback');
-      const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
+      // This must be added to Supabase Auth "Redirect URLs" allowlist:
+      // proxybusiness://auth/reset-password
+      const redirectTo =
+        Platform.OS === 'web'
+          ? typeof window !== 'undefined'
+            ? `${window.location.origin}/auth/reset-password`
+            : undefined
+          : Linking.createURL('auth/reset-password');
+
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmed, redirectTo ? { redirectTo } : undefined);
       if (error) throw error;
 
       Alert.alert(
