@@ -63,3 +63,17 @@ This is the “ship it” list to get the app crisp, safe, and store-ready.
 - **Profile modal**: swipe-down-to-close, report menu works.
 - **Offline / poor network**: graceful errors + retry.
 
+### App Store “Review Mode” (optional)
+
+To make App Review painless, the app supports a hidden **Review Mode** that only activates for specific test login emails.
+
+- **Enable**: set `EXPO_PUBLIC_REVIEW_EMAILS` to a comma-separated list of reviewer/test emails.
+  - Example: `EXPO_PUBLIC_REVIEW_EMAILS=review@proxyme.app`
+- **Behavior (only for those accounts)**:
+  - **Proxy tab**: starts with Proxy toggle OFF; once turned ON, shows 3 deterministic nearby profiles (no real-world matching required).
+  - **Crossed Paths**: shows deterministic place/day groups with people.
+  - **City tab**: shows deterministic statuses + a couple events (includes a “report this profile” prompt status).
+  - **Circle tab**: Upcoming Events shows deterministic events.
+  - **Verification gates**: review account can post photo statuses and create clubs even if verification hasn’t propagated yet.
+
+**Note**: Review Mode does not seed production data. It is client-side fixtures and only renders for the configured reviewer login(s).

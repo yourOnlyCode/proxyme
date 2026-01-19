@@ -19,6 +19,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { initMonitoring } from '@/lib/monitoring';
+import { checkAndNotifyCityMilestones } from '@/lib/cityMilestones';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -124,6 +125,16 @@ function InitialLayout() {
           registerForPushNotificationsAsync(user.id);
       }
   }, [user]);
+
+  // Community goal notifications (city milestones). Best-effort + throttled client-side.
+  useEffect(() => {
+    if (!user?.id) return;
+    // Delay slightly so we don't compete with onboarding/profile bootstrap.
+    const t = setTimeout(() => {
+      void checkAndNotifyCityMilestones(user.id);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [user?.id]);
 
   if (loading || !fontsLoaded) {
      return null; 

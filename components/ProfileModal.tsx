@@ -121,6 +121,14 @@ export function ProfileModal({
             setFetchedProfile(null);
             setLoadingProfile(true);
 
+            // App Store Review Mode: fixture profiles use local IDs and may not exist in Supabase.
+            // If the caller provided full data, skip remote fetches to avoid 500s/crashes.
+            if (String(profile.id).startsWith('review-')) {
+                setFetchedPhotos(profile.photos || null);
+                setLoadingProfile(false);
+                return;
+            }
+
             supabase.rpc('get_user_connection_stats', { target_user_id: profile.id })
                 .then(({ data, error }) => {
                     if (data) setStats(data);

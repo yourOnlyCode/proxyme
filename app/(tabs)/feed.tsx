@@ -8,6 +8,8 @@ import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { calculateMatchPercentage as calculateMatchPercentageShared, getCommonInterests as getCommonInterestsShared } from '../../lib/match';
+import { reviewCityEvents, reviewCityProfiles } from '../../lib/reviewFixtures';
+import { isReviewUser } from '../../lib/reviewMode';
 import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
@@ -180,6 +182,20 @@ export default function CityFeedScreen() {
     setLoading(true);
 
     try {
+      // App Store Review Mode: deterministic city feed (statuses + events) without backend dependency.
+      if (isReviewUser(user)) {
+        const profiles = [...reviewCityProfiles].map((p) => ({ kind: 'profile' as const, id: p.id, profile: p as any }));
+        const events = [...reviewCityEvents].map((e) => ({ kind: 'event' as const, id: `event:${e.id}`, event: e as any }));
+        const mixed: FeedItem[] = [];
+        profiles.forEach((p, idx) => {
+          mixed.push(p);
+          if ((idx + 1) % 2 === 0 && events.length > 0) mixed.push(events.shift()!);
+        });
+        mixed.push(...events);
+        setFeed(mixed);
+        return;
+      }
+
       const { data, error } = await supabase.rpc('get_city_users', {
         lat: location.coords.latitude,
         long: location.coords.longitude,

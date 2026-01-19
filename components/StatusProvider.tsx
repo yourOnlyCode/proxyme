@@ -1,18 +1,18 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useAuth } from '@/lib/auth';
+import { isReviewUser } from '@/lib/reviewMode';
 import { supabase } from '@/lib/supabase';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
-import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     Animated,
     Dimensions,
-    FlatList,
     Image,
     Keyboard,
     KeyboardAvoidingView,
@@ -27,8 +27,8 @@ import {
     View,
     useWindowDimensions
 } from 'react-native';
-import { CameraModal } from './CameraModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CameraModal } from './CameraModal';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const LAST_STATUS_TAB_KEY = 'last_status_tab';
@@ -82,7 +82,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [updating, setUpdating] = useState(false);
   const [userProfile, setUserProfile] = useState<{ avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null>(null);
   const [seenStatusIds, setSeenStatusIds] = useState<string[]>([]);
-  const persistSeenTimer = useRef<NodeJS.Timeout | null>(null);
+  const persistSeenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [relationshipGoal, setRelationshipGoal] = useState<string | null>(null);
   // Tab order: My Status (0), My Clubs (1) - Penpal hidden for beta
   const tabs = ['status', 'clubs'] as const;
@@ -539,8 +539,28 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       }
   };
 
-  const requireVerifiedForImageStatus = async () => {
+  const showVerificationRequiredPopup = () => {
+      Alert.alert(
+          'Verification required',
+          'To keep Proxyme built on trust and security, posting photo statuses is limited to verified accounts. This helps prevent bots, AI-generated spam, inappropriate content, and low-effort mass posting.\n\nGet verified to unlock photo statuses.',
+          [
+              { text: 'Not now', style: 'cancel' },
+              {
+                  text: 'Get verified',
+                  onPress: () => {
+                      setCameraModalVisible(false);
+                      setModalVisible(false);
+                      router.push('/(settings)/get-verified');
+                  },
+              },
+          ],
+      );
+  };
+
+  const ensureVerifiedForImageStatus = async (): Promise<boolean> => {
       if (!user) throw new Error('You must be signed in.');
+      // App Store Review Mode: allow the review account to post statuses even if verification state isn't propagated yet.
+      if (isReviewUser(user)) return true;
       const { data: me, error: meErr } = await supabase
           .from('profiles')
           .select('is_verified')
@@ -548,8 +568,10 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           .maybeSingle();
       if (meErr) throw meErr;
       if (!me?.is_verified) {
-          throw new Error('You must be verified to post a status image.');
+          showVerificationRequiredPopup();
+          return false;
       }
+      return true;
   };
 
   const uploadStatusImage = async (uri: string): Promise<string> => {
@@ -601,8 +623,9 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       if (!user) throw new Error('You must be signed in.');
       setUpdating(true);
       try {
+          const ok = await ensureVerifiedForImageStatus();
+          if (!ok) return;
           toast.show('Posting status...', 'info');
-          await requireVerifiedForImageStatus();
           const contentPath = await uploadStatusImage(uri);
 
           const { error } = await supabase.from('statuses').insert({
@@ -644,7 +667,6 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
 
       try {
           modalTranslateY.setValue(0);
-          toast.show('Posting status...', 'info');
 
           let content = null;
           let type = 'text';
@@ -652,10 +674,20 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           if (draftImage) {
               type = 'image';
 
-              await requireVerifiedForImageStatus();
+              const ok = await ensureVerifiedForImageStatus();
+              if (!ok) {
+                  // Restore draft and keep modal open.
+                  setStatusText(draftText);
+                  setStatusImage(draftImage);
+                  setModalVisible(true);
+                  return;
+              }
+
+              toast.show('Posting status...', 'info');
               content = await uploadStatusImage(draftImage);
           } else if (draftText.trim()) {
               type = 'text';
+              toast.show('Posting status...', 'info');
               content = draftText;
           } else {
               toast.show('Status cannot be empty.', 'error');

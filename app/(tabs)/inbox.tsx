@@ -10,6 +10,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Easing, FlatList, Image, Modal, Platform, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
+import { reviewCityEvents } from '../../lib/reviewFixtures';
+import { isReviewUser } from '../../lib/reviewMode';
 import { supabase } from '../../lib/supabase';
 import { getUiCache, loadUiCache, setUiCache } from '../../lib/uiCache';
 
@@ -409,6 +411,22 @@ export default function InboxScreen() {
     }
 
     try {
+      // App Store Review Mode: show deterministic upcoming events so reviewers see content immediately.
+      if (isReviewUser(user)) {
+        const upcoming = [...reviewCityEvents].slice(0, 2).map((e: any, idx) => ({
+          id: e.id,
+          club_id: e.club_id,
+          title: e.title,
+          event_date: e.event_date,
+          location: e.location,
+          club: e.club,
+          kind: idx === 0 ? 'hosting' : 'rsvp',
+          rsvp_status: idx === 0 ? 'going' : 'maybe',
+        }));
+        setUpcomingEvents(upcoming as any);
+        setUiCache('inbox.upcoming', upcoming as any);
+      }
+
       // Fetch pending requests + optimized conversations + notifications in parallel
       const [requestsResult, conversationsResult, notificationsResult, rsvpsResult, interestsResult] = await Promise.all([
         supabase

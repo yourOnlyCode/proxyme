@@ -783,7 +783,8 @@ BEGIN
           'event_update',
           'event_reminder',
           'event_cancelled',
-          'event_rsvp_update'
+          'event_rsvp_update',
+          'city_milestone'
         )
       ) NOT VALID;
   END IF;
@@ -1442,7 +1443,8 @@ BEGIN
           'event_reminder',
           'event_cancelled',
           'event_rsvp_update',
-          'event_comment'
+          'event_comment',
+          'city_milestone'
         )
       ) NOT VALID;
   END IF;

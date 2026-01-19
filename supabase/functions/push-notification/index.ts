@@ -68,6 +68,9 @@ serve(async (req) => {
     // Build URL based on notification type
     if (record.type === "forum_reply" && record.data?.club_id && record.data?.topic_id) {
       data = { url: `/clubs/${record.data.club_id}?tab=forum&topic=${record.data.topic_id}` };
+    } else if (record.type === "city_milestone") {
+      // Community growth milestone (send to City tab)
+      data = { url: "/(tabs)/feed" };
     } else if (record.type === "club_event" && record.data?.club_id && record.data?.event_id) {
       data = { url: `/clubs/${record.data.club_id}?tab=events` };
     } else if (record.type === "club_member" && record.data?.club_id) {

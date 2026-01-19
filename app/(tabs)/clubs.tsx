@@ -9,6 +9,7 @@ import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Modal, RefreshCont
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
+import { isReviewUser } from '../../lib/reviewMode';
 import { supabase } from '../../lib/supabase';
 import { getUiCache, loadUiCache, setUiCache } from '../../lib/uiCache';
 
@@ -214,6 +215,9 @@ export default function ClubsScreen() {
       }
 
       // Check if user is verified
+      if (isReviewUser(user)) {
+          // Allow App Store reviewer account to create a club without relying on verification propagation.
+      } else {
       const { data: profile } = await supabase
           .from('profiles')
           .select('is_verified')
@@ -233,6 +237,7 @@ export default function ClubsScreen() {
               ]
           );
           return;
+      }
       }
 
       // Enforce: users can only create one club

@@ -14,6 +14,8 @@ import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
 import { getReferralShareContent } from '../../lib/referral';
+import { reviewProxyProfiles } from '../../lib/reviewFixtures';
+import { isReviewUser } from '../../lib/reviewMode';
 import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
 
@@ -265,6 +267,23 @@ export default function HomeScreen() {
 
   const fetchProxyFeed = async () => {
     if (!user || !location || !isProxyActive) return;
+
+    // App Store Review Mode: show deterministic content without depending on real location matching.
+    if (isReviewUser(user)) {
+      setLoading(true);
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      // Provide 3 nearby profiles; skip crossed-path recording in review mode.
+      setFeed(
+        [...reviewProxyProfiles].map((p) => ({
+          ...p,
+          pending_request: null,
+          previously_declined: false,
+          connection_id: null,
+        })),
+      );
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     // fetchMyStatus(); // Refresh status too - handled globally now

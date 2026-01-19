@@ -3,6 +3,8 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth';
 import { fetchCrossedPathGroups, fetchCrossedPathPeople, type CrossedPathGroup, type CrossedPathPerson } from '@/lib/crossedPaths';
+import { reviewCrossedPathsGroups, reviewCrossedPathsPeopleByGroupKey } from '@/lib/reviewFixtures';
+import { isReviewUser } from '@/lib/reviewMode';
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -28,6 +30,10 @@ function Avatar({ path }: { path: string | null }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!path) return;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      setUrl(path);
+      return;
+    }
     const { data } = supabase.storage.from('avatars').getPublicUrl(path);
     setUrl(data.publicUrl);
   }, [path]);
@@ -126,6 +132,30 @@ export default function CrossedPathsScreen() {
       if (!user) return;
       setLoading(true);
       try {
+        // App Store Review Mode: deterministic crossed paths without backend dependency.
+        if (isReviewUser(user)) {
+          if (!mounted) return;
+          setEnabled(true);
+          setProxyOn(true);
+          const gs = [...reviewCrossedPathsGroups].map((g: any) => ({
+            ...g,
+            // CrossedPaths v2 uses place_key in the UI state key
+            place_key: (g as any).address_key,
+            last_seen: new Date().toISOString(),
+          }));
+          setGroups(gs as any);
+
+          const initial: Record<string, GroupState> = {};
+          for (const g of gs) {
+            const key = `${g.day_key}|${g.place_key}`;
+            const fixtureKey = `${g.day_key}::${g.place_key}`;
+            const people = (reviewCrossedPathsPeopleByGroupKey[fixtureKey] || []) as any[];
+            initial[key] = { group: g as any, people, cursor: null, hasMore: false, loadingMore: false };
+          }
+          setGroupStates(initial);
+          return;
+        }
+
         const { data: me } = await supabase
           .from('profiles')
           .select('save_crossed_paths, is_proxy_active')
