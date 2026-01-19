@@ -66,21 +66,28 @@ serve(async (req) => {
     body = record.body;
     
     // Build URL based on notification type
-    if (record.type === "connection_accepted" && record.data?.partner_id) {
-      // Route to the accepted conversation (interests.id), not the partner user id.
-      const me = record.user_id;
-      const partner = record.data.partner_id;
-      const { data: convo } = await supabase
-        .from("interests")
-        .select("id")
-        .eq("status", "accepted")
-        .or(`and(sender_id.eq.${me},receiver_id.eq.${partner}),and(sender_id.eq.${partner},receiver_id.eq.${me})`)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    if (record.type === "connection_accepted") {
+      // Prefer explicit conversation_id if present; otherwise resolve from interests.
+      const convoId = record.data?.conversation_id ?? null;
+      if (convoId) {
+        data = { url: `/chat/${convoId}` };
+      } else if (record.data?.partner_id) {
+        const me = record.user_id;
+        const partner = record.data.partner_id;
+        const { data: convo } = await supabase
+          .from("interests")
+          .select("id")
+          .eq("status", "accepted")
+          .or(`and(sender_id.eq.${me},receiver_id.eq.${partner}),and(sender_id.eq.${partner},receiver_id.eq.${me})`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (convo?.id) {
-        data = { url: `/chat/${convo.id}` };
+        if (convo?.id) {
+          data = { url: `/chat/${convo.id}` };
+        } else {
+          data = { url: "/(tabs)/inbox" };
+        }
       } else {
         data = { url: "/(tabs)/inbox" };
       }
@@ -91,17 +98,19 @@ serve(async (req) => {
       // Community growth milestone (send to City tab)
       data = { url: "/(tabs)/feed" };
     } else if (record.type === "club_event" && record.data?.club_id && record.data?.event_id) {
+      data = { url: `/events/${record.data.event_id}` };
+    } else if (record.type === "club_event" && record.data?.club_id) {
       data = { url: `/clubs/${record.data.club_id}?tab=events` };
     } else if (record.type === "club_member" && record.data?.club_id) {
       data = { url: `/clubs/${record.data.club_id}?tab=members` };
     } else if (record.type === "event_rsvp" && record.data?.club_id && record.data?.event_id) {
-      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+      data = { url: `/events/${record.data.event_id}` };
     } else if (record.type === "event_rsvp_update" && record.data?.club_id && record.data?.event_id) {
-      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+      data = { url: `/events/${record.data.event_id}` };
     } else if (record.type === "event_update" && record.data?.club_id && record.data?.event_id) {
-      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+      data = { url: `/events/${record.data.event_id}` };
     } else if (record.type === "event_reminder" && record.data?.club_id && record.data?.event_id) {
-      data = { url: `/clubs/${record.data.club_id}?tab=events&event=${record.data.event_id}` };
+      data = { url: `/events/${record.data.event_id}` };
     } else if (record.type === "event_cancelled" && record.data?.club_id) {
       data = { url: `/clubs/${record.data.club_id}?tab=events` };
     } else {

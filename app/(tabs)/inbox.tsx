@@ -992,9 +992,15 @@ export default function InboxScreen() {
         }
 
         if (notif.type === 'forum_reply' && notif.data?.club_id) {
-          router.push(`/clubs/${notif.data.club_id}?tab=forum`);
+          const topic = notif.data?.topic_id ? `&topic=${notif.data.topic_id}` : '';
+          router.push(`/clubs/${notif.data.club_id}?tab=forum${topic}`);
         } else if (notif.type === 'club_event' && notif.data?.club_id) {
-          router.push(`/clubs/${notif.data.club_id}?tab=events`);
+          // Prefer event detail route when we have an event id.
+          if (notif.data?.event_id) {
+            router.push(`/events/${notif.data.event_id}`);
+          } else {
+            router.push(`/clubs/${notif.data.club_id}?tab=events`);
+          }
         } else if (notif.type === 'club_member' && notif.data?.club_id) {
           router.push(`/clubs/${notif.data.club_id}?tab=members`);
         } else if (notif.type === 'club_invite' && notif.data?.club_id) {
@@ -1003,8 +1009,18 @@ export default function InboxScreen() {
           router.push(`/clubs/${notif.data.club_id}?tab=members`);
         } else if (notif.type === 'club_join_accepted' && notif.data?.club_id) {
           router.push(`/clubs/${notif.data.club_id}?tab=forum`);
+        } else if (notif.type === 'connection_request') {
+          // If the notification includes a user id, open that user profile (actions can be taken from the modal).
+          const requesterId = notif.data?.requester_id ?? notif.data?.partner_id ?? null;
+          if (requesterId) {
+            await openProfile(String(requesterId));
+          } else {
+            router.push('/requests');
+          }
         } else if (notif.type === 'connection_accepted' && notif.data?.partner_id) {
-          const convoId = await resolveConversationIdForPartner(notif.data.partner_id);
+          const convoId =
+            (notif.data?.conversation_id ? String(notif.data.conversation_id) : null) ??
+            (await resolveConversationIdForPartner(notif.data.partner_id));
           if (convoId) {
             router.push(`/chat/${convoId}`);
           } else {

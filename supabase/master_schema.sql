@@ -476,11 +476,11 @@ begin
     values
       (a_id, 'connection_accepted', 'New Connection',
         'You connected with ' || coalesce(b_username, 'someone') || '. Break the ice: ' || pick,
-        jsonb_build_object('partner_id', b_id, 'icebreaker', pick)
+        jsonb_build_object('partner_id', b_id, 'conversation_id', new.id, 'icebreaker', pick)
       ),
       (b_id, 'connection_accepted', 'New Connection',
         'You connected with ' || coalesce(a_username, 'someone') || '. Break the ice: ' || pick,
-        jsonb_build_object('partner_id', a_id, 'icebreaker', pick)
+        jsonb_build_object('partner_id', a_id, 'conversation_id', new.id, 'icebreaker', pick)
       );
   end if;
 

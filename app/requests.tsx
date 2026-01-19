@@ -96,17 +96,29 @@ export default function RequestsScreen() {
     if (notification.type === 'forum_reply' && notification.data?.club_id) {
       router.push(`/clubs/${notification.data.club_id}${notification.data.topic_id ? `?tab=forum&topic=${notification.data.topic_id}` : ''}`);
     } else if (notification.type === 'club_event' && notification.data?.club_id) {
-      router.push(`/clubs/${notification.data.club_id}?tab=events${notification.data.event_id ? `&event=${notification.data.event_id}` : ''}`);
+      if (notification.data?.event_id) {
+        router.push(`/events/${notification.data.event_id}`);
+      } else {
+        router.push(`/clubs/${notification.data.club_id}?tab=events`);
+      }
     } else if (notification.type === 'club_member' && notification.data?.club_id) {
       router.push(`/clubs/${notification.data.club_id}?tab=members`);
+    } else if (notification.type === 'connection_accepted') {
+      const convoId = notification.data?.conversation_id ?? notification.data?.connection_id;
+      if (convoId) {
+        router.push(`/chat/${convoId}`);
+      } else if (notification.data?.partner_id) {
+        // Fallback: try to open chat by resolving conversation on the chat screen (if it supports it later).
+        router.push(`/requests`);
+      }
     } else if (notification.type === 'event_rsvp' && notification.data?.club_id && notification.data?.event_id) {
-      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+      router.push(`/events/${notification.data.event_id}`);
     } else if (notification.type === 'event_rsvp_update' && notification.data?.club_id && notification.data?.event_id) {
-      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+      router.push(`/events/${notification.data.event_id}`);
     } else if (notification.type === 'event_update' && notification.data?.club_id && notification.data?.event_id) {
-      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+      router.push(`/events/${notification.data.event_id}`);
     } else if (notification.type === 'event_reminder' && notification.data?.club_id && notification.data?.event_id) {
-      router.push(`/clubs/${notification.data.club_id}?tab=events&event=${notification.data.event_id}`);
+      router.push(`/events/${notification.data.event_id}`);
     } else if (notification.type === 'event_cancelled' && notification.data?.club_id) {
       router.push(`/clubs/${notification.data.club_id}?tab=events`);
     }
