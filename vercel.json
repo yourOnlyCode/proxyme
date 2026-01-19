@@ -1,8 +1,6 @@
 {
-    "rewrites": [
-        {
-            "source": "/(.*)",
-            "destination": "/web-landing/index.html"
-        }
-    ]
+  "installCommand": "cd web && npm ci",
+  "buildCommand": "cd web && npm run build",
+  "devCommand": "cd web && npm run dev",
+  "outputDirectory": "web/.next"
 }
