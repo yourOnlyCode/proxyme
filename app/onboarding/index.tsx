@@ -24,7 +24,6 @@ import Avatar from '../../components/profile/Avatar';
 import { InterestSelector } from '../../components/profile/InterestSelector';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
-import { deleteMyAccount } from '../../lib/accountDeletion';
 import { validateFullName, validateUsername } from '../../lib/nameValidation';
 import { supabase } from '../../lib/supabase';
 
@@ -42,14 +41,13 @@ const STEPS = [
 ];
 
 export default function OnboardingScreen() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [applyingFriendCode, setApplyingFriendCode] = useState(false);
-  const [deletingUnderage, setDeletingUnderage] = useState(false);
   const [step, setStep] = useState(0);
 
   // Age gate
@@ -173,27 +171,6 @@ export default function OnboardingScreen() {
     }
   };
 
-  const deleteUnderageAndExit = () => {
-    if (deletingUnderage) return;
-    setDeletingUnderage(true);
-    // Fire-and-forget via Alert button; keep UI resilient even if deletion fails.
-    void (async () => {
-      try {
-        await deleteMyAccount();
-      } catch {
-        // If deletion fails (network, function not deployed), still sign out so the user can't proceed.
-      } finally {
-        try {
-          await signOut();
-        } catch {
-          // ignore
-        }
-        setDeletingUnderage(false);
-        router.replace('/(auth)/sign-in');
-      }
-    })();
-  };
-
   const nextStep = async () => {
     // Step 0: DOB (required)
     if (step === 0) {
@@ -202,11 +179,8 @@ export default function OnboardingScreen() {
         return;
       }
       if (ageYears !== null && ageYears < 13) {
-        Alert.alert(
-          'Not eligible',
-          'You must be at least 13 years old to use this app. Your account will now be removed.',
-          [{ text: 'OK', onPress: deleteUnderageAndExit }],
-        );
+        // The button is disabled for under-13, but keep a guard in case of future UI changes.
+        Alert.alert('Not eligible', 'Users younger than 13 are not permitted.');
         return;
       }
     }
@@ -348,7 +322,7 @@ export default function OnboardingScreen() {
   if (loading) return <View className="flex-1 justify-center"><ActivityIndicator /></View>;
 
   const canGoNext = (() => {
-    if (saving || applyingFriendCode || deletingUnderage) return false;
+    if (saving || applyingFriendCode) return false;
     if (step === 0) return !!birthdate && !isUnder13;
     if (step === 1) return true;
     if (step === 2) {
@@ -422,7 +396,7 @@ export default function OnboardingScreen() {
                 </Text>
                 {ageYears !== null ? (
                   <Text className={`text-xs mt-2 ${isUnder13 ? 'text-red-600' : 'text-gray-400'}`}>
-                    {isUnder13 ? 'You must be at least 13 to use this app.' : `Age: ${ageYears}`}
+                    {isUnder13 ? 'Please check your DOB — users younger than 13 are not permitted.' : `Age: ${ageYears}`}
                   </Text>
                 ) : (
                   <Text className="text-gray-400 text-xs mt-2">You must be 13+ to continue.</Text>
