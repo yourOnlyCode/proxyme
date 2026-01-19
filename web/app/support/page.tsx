@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export default function SupportPage() {
   // Replace this with your real support inbox once you set up Cloudflare Email Routing.
-  const supportEmail = 'support@proxyme.com';
+  const supportEmail = 'support@proxyme.app';
 
   return (
     <article className="glass rounded-3xl p-7 md:p-10">

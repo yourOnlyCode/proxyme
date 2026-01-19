@@ -24,6 +24,7 @@ import Avatar from '../../components/profile/Avatar';
 import { InterestSelector } from '../../components/profile/InterestSelector';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
+import { deleteMyAccount } from '../../lib/accountDeletion';
 import { validateFullName, validateUsername } from '../../lib/nameValidation';
 import { supabase } from '../../lib/supabase';
 
@@ -41,13 +42,14 @@ const STEPS = [
 ];
 
 export default function OnboardingScreen() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [applyingFriendCode, setApplyingFriendCode] = useState(false);
+  const [deletingUnderage, setDeletingUnderage] = useState(false);
   const [step, setStep] = useState(0);
 
   // Age gate
@@ -80,18 +82,14 @@ export default function OnboardingScreen() {
 
       const { data, error, status } = await supabase
         .from('profiles')
-        .select('username, full_name, bio, avatar_url, relationship_goals, detailed_interests, referred_by, birthdate, romance_min_age, romance_max_age')
+        // Note: birthdate is intentionally not selectable by client roles (privacy hardening).
+        .select('username, full_name, bio, avatar_url, relationship_goals, detailed_interests, referred_by, romance_min_age, romance_max_age')
         .eq('id', user.id)
         .single();
 
       if (error && status !== 406) throw error;
 
       if (data) {
-        if (data.birthdate) {
-          // Supabase date comes back as YYYY-MM-DD
-          const d = new Date(String(data.birthdate) + 'T00:00:00.000Z');
-          if (!Number.isNaN(d.getTime())) setBirthdate(d);
-        }
         setUsername(data.username || '');
         setFullName(data.full_name || '');
         setBio(data.bio || '');
@@ -175,6 +173,27 @@ export default function OnboardingScreen() {
     }
   };
 
+  const deleteUnderageAndExit = () => {
+    if (deletingUnderage) return;
+    setDeletingUnderage(true);
+    // Fire-and-forget via Alert button; keep UI resilient even if deletion fails.
+    void (async () => {
+      try {
+        await deleteMyAccount();
+      } catch {
+        // If deletion fails (network, function not deployed), still sign out so the user can't proceed.
+      } finally {
+        try {
+          await signOut();
+        } catch {
+          // ignore
+        }
+        setDeletingUnderage(false);
+        router.replace('/(auth)/sign-in');
+      }
+    })();
+  };
+
   const nextStep = async () => {
     // Step 0: DOB (required)
     if (step === 0) {
@@ -183,7 +202,11 @@ export default function OnboardingScreen() {
         return;
       }
       if (ageYears !== null && ageYears < 13) {
-        Alert.alert('Not eligible', 'You must be at least 13 years old to use this app.');
+        Alert.alert(
+          'Not eligible',
+          'You must be at least 13 years old to use this app. Your account will now be removed.',
+          [{ text: 'OK', onPress: deleteUnderageAndExit }],
+        );
         return;
       }
     }
@@ -325,7 +348,7 @@ export default function OnboardingScreen() {
   if (loading) return <View className="flex-1 justify-center"><ActivityIndicator /></View>;
 
   const canGoNext = (() => {
-    if (saving || applyingFriendCode) return false;
+    if (saving || applyingFriendCode || deletingUnderage) return false;
     if (step === 0) return !!birthdate && !isUnder13;
     if (step === 1) return true;
     if (step === 2) {

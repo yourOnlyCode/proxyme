@@ -180,6 +180,26 @@ create policy "Users can update own profile."
   on public.profiles for update
   using ( (SELECT auth.uid()) = id );
 
+-- Prevent direct reads of sensitive fields (exact coordinates + DOB).
+-- These are still available to SECURITY DEFINER RPCs (e.g., discovery ranking/distance),
+-- but not selectable by client roles via `.from('profiles').select(...)`.
+revoke select (location, birthdate) on table public.profiles from anon, authenticated;
+
+-- Account deletion (fallback path; full deletion uses Edge Function `delete-account`).
+-- Deletes the profile row which cascades to related app data via FK deletes.
+create or replace function public.delete_own_account()
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  delete from public.profiles where id = auth.uid();
+end;
+$$;
+
+revoke all on function public.delete_own_account() from public;
+grant execute on function public.delete_own_account() to authenticated;
+
 -- Create posts table
 create table if not exists public.posts (
   id uuid default uuid_generate_v4() primary key,
@@ -239,6 +259,61 @@ create policy "Users can send interest"
 create policy "Receiver can update status"
   on public.interests for update
   using ( (SELECT auth.uid()) = receiver_id );
+
+-- Messages (DM chat). Enforce: only participants can read, only accepted connections can message,
+-- and blocking prevents both viewing and sending messages between the two users.
+create table if not exists public.messages (
+  id uuid default uuid_generate_v4() primary key,
+  conversation_id uuid references public.interests(id) not null,
+  sender_id uuid references public.profiles(id) not null,
+  receiver_id uuid references public.profiles(id),
+  content text not null,
+  read boolean default false,
+  read_at timestamptz,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+alter table public.messages enable row level security;
+
+drop policy if exists "Users can view messages in their conversations" on public.messages;
+drop policy if exists "Users can send messages to their conversations" on public.messages;
+
+create policy "Users can view messages in their conversations"
+  on public.messages for select
+  using (
+    exists (
+      select 1
+      from public.interests i
+      where i.id = messages.conversation_id
+        and i.status = 'accepted'
+        and (i.sender_id = auth.uid() or i.receiver_id = auth.uid())
+        and not exists (
+          select 1
+          from public.blocked_users b
+          where (b.blocker_id = i.sender_id and b.blocked_id = i.receiver_id)
+             or (b.blocker_id = i.receiver_id and b.blocked_id = i.sender_id)
+        )
+    )
+  );
+
+create policy "Users can send messages to their conversations"
+  on public.messages for insert
+  with check (
+    auth.uid() = sender_id
+    and exists (
+      select 1
+      from public.interests i
+      where i.id = conversation_id
+        and i.status = 'accepted'
+        and (i.sender_id = auth.uid() or i.receiver_id = auth.uid())
+        and not exists (
+          select 1
+          from public.blocked_users b
+          where (b.blocker_id = i.sender_id and b.blocked_id = i.receiver_id)
+             or (b.blocker_id = i.receiver_id and b.blocked_id = i.sender_id)
+        )
+    )
+  );
 
 -- =========================================================
 -- Connections edge cases: auto-connect + cleanup + notify

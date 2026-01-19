@@ -24,6 +24,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Avatar from '../../components/profile/Avatar';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
+import { deleteMyAccount } from '../../lib/accountDeletion';
 import { validateFullName, validateUsername } from '../../lib/nameValidation';
 import { supabase } from '../../lib/supabase';
 
@@ -64,6 +65,7 @@ export default function EditProfileScreen() {
   const [currentlyInto, setCurrentlyInto] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [relationshipGoals, setRelationshipGoals] = useState<string[]>([]);
+  const [ageGroup, setAgeGroup] = useState<'minor' | 'adult' | null>(null);
   const [socials, setSocials] = useState<SocialLinks>({});
   const [isVerified, setIsVerified] = useState(false);
   const [saveCrossedPaths, setSaveCrossedPaths] = useState(true);
@@ -87,7 +89,8 @@ export default function EditProfileScreen() {
 
       const { data, error, status } = await supabase
         .from('profiles')
-        .select(`username, full_name, bio, currently_into, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths`)
+        // `birthdate` is intentionally not selectable by client roles (privacy hardening).
+        .select(`username, full_name, bio, currently_into, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths, age_group`)
         .eq('id', user.id)
         .single();
 
@@ -101,7 +104,14 @@ export default function EditProfileScreen() {
         setBio(data.bio || '');
         setCurrentlyInto((data as any).currently_into || '');
         setAvatarUrl(data.avatar_url);
-        setRelationshipGoals(data.relationship_goals || []);
+        const ag = ((data as any).age_group as 'minor' | 'adult' | null) ?? null;
+        setAgeGroup(ag);
+        // Minors are friendship-only. Mirror server enforcement in the UI for consistency.
+        if (ag === 'minor') {
+          setRelationshipGoals(['Friendship']);
+        } else {
+          setRelationshipGoals(data.relationship_goals || []);
+        }
         setSocials(data.social_links || {});
         setIsVerified(data.is_verified || false);
         setSaveCrossedPaths(data.save_crossed_paths ?? true);
@@ -145,7 +155,7 @@ export default function EditProfileScreen() {
         bio,
         currently_into: currentlyInto.trim() || null,
         avatar_url: cleanAvatarPath,
-        relationship_goals: relationshipGoals,
+        relationship_goals: ageGroup === 'minor' ? ['Friendship'] : relationshipGoals,
         social_links: socials,
         save_crossed_paths: saveCrossedPaths,
         updated_at: new Date(),
@@ -163,6 +173,7 @@ export default function EditProfileScreen() {
   }
 
   const selectGoal = (goal: string) => {
+    if (ageGroup === 'minor') return;
     setRelationshipGoals([goal]);
   };
 
@@ -252,9 +263,8 @@ export default function EditProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
-            const { error } = await supabase.rpc('delete_own_account');
-            if (error) throw error;
-            signOut();
+            await deleteMyAccount();
+            await signOut();
             router.replace('/(auth)/sign-in');
           } catch (error) {
             Alert.alert('Error', 'Failed to delete account. Please try again.');
@@ -397,20 +407,29 @@ export default function EditProfileScreen() {
 
             <View className="mb-6">
               <Text className="text-gray-500 mb-2 ml-1 font-bold">What’re you looking for?</Text>
-              <View className="flex-row justify-between">
-                {RELATIONSHIP_OPTS.map((opt) => {
-                  const isSelected = relationshipGoals.includes(opt);
-                  return (
-                    <TouchableOpacity
-                      key={opt}
-                      onPress={() => selectGoal(opt)}
-                      className={`w-[32%] py-3 rounded-lg border items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
-                    >
-                      <Text className={`font-bold ${getGoalTextStyle(opt, isSelected)}`}>{opt}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              {ageGroup === 'minor' ? (
+                <View className="bg-friendship/10 border border-friendship/20 rounded-2xl p-4">
+                  <Text className="text-friendship font-bold">Friendship-only mode (13–17)</Text>
+                  <Text className="text-gray-500 text-xs mt-1">
+                    Romantic intent is disabled for minors. You’ll only see people in your age group.
+                  </Text>
+                </View>
+              ) : (
+                <View className="flex-row justify-between">
+                  {RELATIONSHIP_OPTS.map((opt) => {
+                    const isSelected = relationshipGoals.includes(opt);
+                    return (
+                      <TouchableOpacity
+                        key={opt}
+                        onPress={() => selectGoal(opt)}
+                        className={`w-[32%] py-3 rounded-lg border items-center justify-center shadow-sm ${getGoalStyle(opt, isSelected)}`}
+                      >
+                        <Text className={`font-bold ${getGoalTextStyle(opt, isSelected)}`}>{opt}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
             </View>
 
             <View className="mb-6">
