@@ -941,6 +941,40 @@ export default function InboxScreen() {
       const handleNotificationPress = async () => {
         await markNotificationRead();
 
+        // Helper: resolve accepted conversation id for a given partner user id
+        const resolveConversationIdForPartner = async (partnerId: string): Promise<string | null> => {
+          // 1) If we already have the conversation list in state, use it (fast, offline-friendly).
+          for (const it of items) {
+            if (it.type === 'message' && it.conversation?.partner?.id === partnerId) {
+              return it.conversation.id;
+            }
+          }
+
+          // 2) Ask the optimized inbox RPC and match partner_id.
+          try {
+            const { data } = await supabase.rpc('get_my_inbox_conversations');
+            const rows = (data as any[]) || [];
+            const match = rows.find((r) => String(r.partner_id) === String(partnerId));
+            if (match?.id) return String(match.id);
+          } catch {
+            // ignore and fall back
+          }
+
+          // 3) Direct fallback: query interests for accepted row between us and partner.
+          if (!user?.id) return null;
+          const { data: interest } = await supabase
+            .from('interests')
+            .select('id')
+            .eq('status', 'accepted')
+            .or(
+              `and(sender_id.eq.${user.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${user.id})`,
+            )
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          return interest?.id ? String((interest as any).id) : null;
+        };
+
         // Navigate based on notification type
         if (
           (notif.type === 'event_update' ||
@@ -970,7 +1004,12 @@ export default function InboxScreen() {
         } else if (notif.type === 'club_join_accepted' && notif.data?.club_id) {
           router.push(`/clubs/${notif.data.club_id}?tab=forum`);
         } else if (notif.type === 'connection_accepted' && notif.data?.partner_id) {
-          router.push(`/chat/${notif.data.partner_id}`);
+          const convoId = await resolveConversationIdForPartner(notif.data.partner_id);
+          if (convoId) {
+            router.push(`/chat/${convoId}`);
+          } else {
+            Alert.alert('Chat unavailable', 'We couldn’t open this chat yet. Please try again in a moment.');
+          }
         }
 
         fetchData(); // Refresh to update read status

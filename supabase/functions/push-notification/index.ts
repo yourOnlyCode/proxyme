@@ -66,6 +66,25 @@ serve(async (req) => {
     body = record.body;
     
     // Build URL based on notification type
+    if (record.type === "connection_accepted" && record.data?.partner_id) {
+      // Route to the accepted conversation (interests.id), not the partner user id.
+      const me = record.user_id;
+      const partner = record.data.partner_id;
+      const { data: convo } = await supabase
+        .from("interests")
+        .select("id")
+        .eq("status", "accepted")
+        .or(`and(sender_id.eq.${me},receiver_id.eq.${partner}),and(sender_id.eq.${partner},receiver_id.eq.${me})`)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (convo?.id) {
+        data = { url: `/chat/${convo.id}` };
+      } else {
+        data = { url: "/(tabs)/inbox" };
+      }
+    } else
     if (record.type === "forum_reply" && record.data?.club_id && record.data?.topic_id) {
       data = { url: `/clubs/${record.data.club_id}?tab=forum&topic=${record.data.topic_id}` };
     } else if (record.type === "city_milestone") {
