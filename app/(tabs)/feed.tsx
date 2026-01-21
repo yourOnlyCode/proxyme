@@ -1,5 +1,6 @@
 import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { REQUIRED_REFERRALS_FOR_VERIFICATION } from '@/lib/verification';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -814,7 +815,7 @@ export default function CityFeedScreen() {
             </View>
             <View className="p-5">
               <Text className="text-gray-700 mb-4">
-                Verification helps keep Proxyme safe. Get verified by inviting 3 friends using your friend code.
+                Verification helps keep Proxyme safe. Get verified by inviting {REQUIRED_REFERRALS_FOR_VERIFICATION} friend{REQUIRED_REFERRALS_FOR_VERIFICATION === 1 ? '' : 's'} using your friend code.
               </Text>
 
               <View className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4">

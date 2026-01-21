@@ -586,8 +586,8 @@ begin
           where id = referrer_id
           returning referral_count into current_count;
           
-          -- Unlock verification automatically at 3 referrals
-          if current_count >= 3 then
+          -- Unlock verification automatically at 1 referral
+          if current_count >= 1 then
               update public.profiles set is_verified = true where id = referrer_id;
           end if;
       end if;
@@ -652,8 +652,8 @@ begin
   where id = referrer_id
   returning referral_count into current_count;
 
-  -- Unlock verification automatically at 3 referrals
-  if current_count >= 3 then
+  -- Unlock verification automatically at 1 referral
+  if current_count >= 1 then
     update public.profiles set is_verified = true where id = referrer_id;
   end if;
 

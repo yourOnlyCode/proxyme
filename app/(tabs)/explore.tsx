@@ -14,6 +14,7 @@ import { GlassCard } from '../../components/ui/GlassCard';
 import { useAuth } from '../../lib/auth';
 import { getReferralShareContent } from '../../lib/referral';
 import { supabase } from '../../lib/supabase';
+import { REQUIRED_REFERRALS_FOR_SUPER_USER, REQUIRED_REFERRALS_FOR_VERIFICATION, isSuperUserByReferralCount } from '../../lib/verification';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -379,7 +380,7 @@ export default function ProfileScreen() {
                             <IconSymbol
                               name="checkmark.seal.fill"
                               size={24}
-                              color={(profile.referral_count || 0) >= 10 ? '#7C3AED' : '#3B82F6'}
+                              color={isSuperUserByReferralCount(profile.referral_count) ? '#7C3AED' : '#3B82F6'}
                             />
                         )}
                     </View>
@@ -483,26 +484,26 @@ export default function ProfileScreen() {
                         </View>
                         {profile.referral_count !== undefined && profile.referral_count !== null && (
                             <View className="flex-row items-center mt-1">
-                                {profile.referral_count >= 3 ? (
+                                {Number(profile.referral_count || 0) >= REQUIRED_REFERRALS_FOR_VERIFICATION ? (
                                   <>
                                     <View className="bg-purple-100 px-2 py-1 rounded-full">
                                       <Text className="text-purple-700 font-bold text-xs">
-                                        {Math.min(profile.referral_count, 10)} / 10 super user
+                                        {Math.min(Number(profile.referral_count || 0), REQUIRED_REFERRALS_FOR_SUPER_USER)} / {REQUIRED_REFERRALS_FOR_SUPER_USER} super user
                                       </Text>
                                     </View>
                                     <Text className="text-slate-600 text-xs ml-2">
-                                      {profile.referral_count >= 10 ? '✓ Purple check unlocked' : `${10 - profile.referral_count} more to level up!`}
+                                      {isSuperUserByReferralCount(profile.referral_count) ? '✓ Purple check unlocked' : `${Math.max(0, REQUIRED_REFERRALS_FOR_SUPER_USER - Number(profile.referral_count || 0))} more to level up!`}
                                     </Text>
                                   </>
                                 ) : (
                                   <>
                                     <View className="bg-blue-100 px-2 py-1 rounded-full">
                                       <Text className="text-blue-700 font-bold text-xs">
-                                        {profile.referral_count} / 3 referrals
+                                        {Number(profile.referral_count || 0)} / {REQUIRED_REFERRALS_FOR_VERIFICATION} referral{REQUIRED_REFERRALS_FOR_VERIFICATION === 1 ? '' : 's'}
                                       </Text>
                                     </View>
                                     <Text className="text-slate-600 text-xs ml-2">
-                                      {`${3 - profile.referral_count} more for verification`}
+                                      {`${Math.max(0, REQUIRED_REFERRALS_FOR_VERIFICATION - Number(profile.referral_count || 0))} more for verification`}
                                     </Text>
                                   </>
                                 )}

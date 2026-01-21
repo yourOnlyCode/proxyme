@@ -64,6 +64,7 @@
     "autoprefixer": "^10.4.23",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "sharp": "^0.34.5",
     "supabase": "^2.67.2",
     "typescript": "~5.9.2"
   },

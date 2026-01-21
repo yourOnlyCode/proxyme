@@ -6,8 +6,8 @@ import { supabase } from './supabase';
  * - Each friend enters it during onboarding (which increments `referral_count`)
  * - When `referral_count >= REQUIRED_REFERRALS_FOR_VERIFICATION`, the user is considered verified
  */
-export const REQUIRED_REFERRALS_FOR_VERIFICATION = 3;
-export const REQUIRED_REFERRALS_FOR_SUPER_USER = 10;
+export const REQUIRED_REFERRALS_FOR_VERIFICATION = 1;
+export const REQUIRED_REFERRALS_FOR_SUPER_USER = 5;
 
 export async function checkVerificationStatus(userId: string) {
   try {

@@ -18,6 +18,7 @@ import { reviewProxyProfiles } from '../../lib/reviewFixtures';
 import { isReviewUser } from '../../lib/reviewMode';
 import { showSafetyOptions } from '../../lib/safety';
 import { supabase } from '../../lib/supabase';
+import { REQUIRED_REFERRALS_FOR_VERIFICATION } from '../../lib/verification';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -1135,7 +1136,7 @@ export default function HomeScreen() {
                     }}
                   >
                     <Text className="text-white font-bold text-sm">
-                      {referralCount}/3 referrals
+                      {referralCount}/{REQUIRED_REFERRALS_FOR_VERIFICATION} referral{REQUIRED_REFERRALS_FOR_VERIFICATION === 1 ? '' : 's'}
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -1166,7 +1167,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 </View>
                 <Text className="text-xs text-gray-600 text-center mb-2" style={{ fontWeight: '500' }}>
-                  Proxyme is powered by its users! Share to expand {userCity || 'your city'}. {referralCount >= 3 ? '🎉 You\'re verified!' : `Get ${3 - referralCount} more ${referralCount === 2 ? 'referral' : 'referrals'} to unlock verification.`}
+                  Proxyme is powered by its users! Share to expand {userCity || 'your city'}. {referralCount >= REQUIRED_REFERRALS_FOR_VERIFICATION ? '🎉 You\'re verified!' : `Get ${Math.max(0, REQUIRED_REFERRALS_FOR_VERIFICATION - referralCount)} more referral${Math.max(0, REQUIRED_REFERRALS_FOR_VERIFICATION - referralCount) === 1 ? '' : 's'} to unlock verification.`}
                 </Text>
                 {/* Don't show again checkbox */}
                 <TouchableOpacity

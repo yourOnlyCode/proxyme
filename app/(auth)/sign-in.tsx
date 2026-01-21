@@ -1,6 +1,6 @@
+import * as Linking from 'expo-linking';
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
-import * as Linking from 'expo-linking';
 import { ActivityIndicator, Alert, Keyboard, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { SocialAuthButtons } from '../../components/auth/SocialAuthButtons';
@@ -84,7 +84,7 @@ export default function SignIn() {
         </Text>
         <TextInput
           className="bg-white/80 border border-slate-200 rounded-2xl px-4 py-4 text-base mb-4 text-ink"
-          placeholder="youare@beautiful.com"
+          placeholder="youare@amazing.com"
           placeholderTextColor="#94A3B8"
           autoCapitalize="none"
           keyboardType="email-address"
