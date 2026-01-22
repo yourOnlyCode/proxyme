@@ -1,10 +1,10 @@
-import type { Metadata } from 'next';
-import './globals.css';
 import { OrbBackground } from '@/components/OrbBackground';
 import { SiteHeader } from '@/components/SiteHeader';
+import type { Metadata } from 'next';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'proxyme • legal',
+  title: 'proxyme',
   description: 'Privacy Policy, Terms of Service, and Support for proxyme.',
 };
 

@@ -3,6 +3,7 @@ import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { AccountCheckBadge } from '@/components/profile/AccountCheckBadge';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
@@ -13,8 +14,14 @@ import { Dimensions, Image, Linking, PanResponder, Platform, Pressable, RefreshC
 import { GlassCard } from '../../components/ui/GlassCard';
 import { useAuth } from '../../lib/auth';
 import { getReferralShareContent } from '../../lib/referral';
+import { recordAppShare } from '../../lib/sharing';
 import { supabase } from '../../lib/supabase';
-import { REQUIRED_REFERRALS_FOR_SUPER_USER, REQUIRED_REFERRALS_FOR_VERIFICATION, isSuperUserByReferralCount } from '../../lib/verification';
+import {
+  REQUIRED_REFERRALS_FOR_TRENDSETTER,
+  REQUIRED_SHARES_FOR_SUPER_USER,
+  isSuperUserByShareCount,
+  isTrendsetterByReferralCount,
+} from '../../lib/verification';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -51,6 +58,7 @@ type ProfileData = {
     photos: Photo[] | null;
     friend_code?: string | null;
     referral_count?: number | null;
+    share_count?: number | null;
 };
 
 export default function ProfileScreen() {
@@ -115,7 +123,7 @@ export default function ProfileScreen() {
 
     const { data, error } = await supabase
         .from('profiles')
-        .select(`username, full_name, bio, avatar_url, detailed_interests, relationship_goals, social_links, is_verified, friend_code, referral_count`)
+        .select(`username, full_name, bio, avatar_url, detailed_interests, relationship_goals, social_links, is_verified, friend_code, referral_count, share_count`)
         .eq('id', user.id)
         .maybeSingle();
 
@@ -183,6 +191,9 @@ export default function ProfileScreen() {
         title: 'Join me on Proxyme!',
         url: content.appStoreLink, // iOS will use this for better sharing
       });
+      if (user?.id) {
+        void recordAppShare({ userId: user.id });
+      }
     } catch (error) {
       console.error('Error sharing:', error);
     }
@@ -376,13 +387,11 @@ export default function ProfileScreen() {
                         <Text className="text-3xl font-extrabold text-slate-900 mr-2 text-center" style={{ color: isDark ? '#E5E7EB' : undefined }}>
                           {profile?.full_name || 'No Name'}
                         </Text>
-                        {profile?.is_verified && (
-                            <IconSymbol
-                              name="checkmark.seal.fill"
-                              size={24}
-                              color={isSuperUserByReferralCount(profile.referral_count) ? '#7C3AED' : '#3B82F6'}
-                            />
-                        )}
+                        <AccountCheckBadge
+                          shareCount={Number(profile?.share_count ?? 0)}
+                          referralCount={Number(profile?.referral_count ?? 0)}
+                          size={24}
+                        />
                     </View>
                     <View className="flex-row items-center justify-center mt-1 flex-wrap">
                         <Text className={`text-base font-semibold ${theme.text} opacity-80 text-center`}>@{profile?.username || 'username'}</Text>
@@ -482,33 +491,31 @@ export default function ProfileScreen() {
                                 <IconSymbol name="paperplane.fill" size={12} color="white" />
                             </TouchableOpacity>
                         </View>
-                        {profile.referral_count !== undefined && profile.referral_count !== null && (
+                        {(profile.referral_count !== undefined && profile.referral_count !== null) || (profile.share_count !== undefined && profile.share_count !== null) ? (
                             <View className="flex-row items-center mt-1">
-                                {Number(profile.referral_count || 0) >= REQUIRED_REFERRALS_FOR_VERIFICATION ? (
+                                <View className="bg-blue-100 px-2 py-1 rounded-full">
+                                  <Text className="text-blue-700 font-bold text-xs">
+                                    {Math.min(Number(profile.share_count || 0), REQUIRED_SHARES_FOR_SUPER_USER)} / {REQUIRED_SHARES_FOR_SUPER_USER} shares
+                                  </Text>
+                                </View>
+                                <Text className="text-slate-600 text-xs ml-2">
+                                  {isSuperUserByShareCount(profile.share_count) ? '✓ Blue check (Super user)' : `${Math.max(0, REQUIRED_SHARES_FOR_SUPER_USER - Number(profile.share_count || 0))} more to unlock blue check`}
+                                </Text>
+
+                                {isSuperUserByShareCount(profile.share_count) ? (
                                   <>
-                                    <View className="bg-purple-100 px-2 py-1 rounded-full">
-                                      <Text className="text-purple-700 font-bold text-xs">
-                                        {Math.min(Number(profile.referral_count || 0), REQUIRED_REFERRALS_FOR_SUPER_USER)} / {REQUIRED_REFERRALS_FOR_SUPER_USER} super user
+                                    <View className="ml-3 bg-orange-100 px-2 py-1 rounded-full">
+                                      <Text className="text-orange-700 font-bold text-xs">
+                                        {Math.min(Number(profile.referral_count || 0), REQUIRED_REFERRALS_FOR_TRENDSETTER)} / {REQUIRED_REFERRALS_FOR_TRENDSETTER} signups
                                       </Text>
                                     </View>
                                     <Text className="text-slate-600 text-xs ml-2">
-                                      {isSuperUserByReferralCount(profile.referral_count) ? '✓ Purple check unlocked' : `${Math.max(0, REQUIRED_REFERRALS_FOR_SUPER_USER - Number(profile.referral_count || 0))} more to level up!`}
+                                      {isTrendsetterByReferralCount(profile.referral_count) ? '✓ Orange check (Trendsetter)' : `${Math.max(0, REQUIRED_REFERRALS_FOR_TRENDSETTER - Number(profile.referral_count || 0))} more to unlock orange check`}
                                     </Text>
                                   </>
-                                ) : (
-                                  <>
-                                    <View className="bg-blue-100 px-2 py-1 rounded-full">
-                                      <Text className="text-blue-700 font-bold text-xs">
-                                        {Number(profile.referral_count || 0)} / {REQUIRED_REFERRALS_FOR_VERIFICATION} referral{REQUIRED_REFERRALS_FOR_VERIFICATION === 1 ? '' : 's'}
-                                      </Text>
-                                    </View>
-                                    <Text className="text-slate-600 text-xs ml-2">
-                                      {`${Math.max(0, REQUIRED_REFERRALS_FOR_VERIFICATION - Number(profile.referral_count || 0))} more for verification`}
-                                    </Text>
-                                  </>
-                                )}
+                                ) : null}
                             </View>
-                        )}
+                        ) : null}
                     </GlassCard>
                 )}
 
@@ -666,7 +673,7 @@ export default function ProfileScreen() {
 
         <CoachMarks
           enabled={focused}
-          storageKey="tutorial:tab:profile:v1"
+          storageKey={user && String(user.email || '').toLowerCase() === 'review@proxyme.app' ? 'tutorial:tab:profile:v1:review' : 'tutorial:tab:profile:v1'}
           steps={[
             {
               key: 'summary',

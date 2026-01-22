@@ -1019,7 +1019,7 @@ export default function InboxScreen() {
           }
         } else if (notif.type === 'connection_accepted' && notif.data?.partner_id) {
           const convoId =
-            (notif.data?.conversation_id ? String(notif.data.conversation_id) : null) ??
+            ((notif.data as any)?.conversation_id ? String((notif.data as any).conversation_id) : null) ??
             (await resolveConversationIdForPartner(notif.data.partner_id));
           if (convoId) {
             router.push(`/chat/${convoId}`);
@@ -1611,7 +1611,7 @@ export default function InboxScreen() {
 
       <CoachMarks
         enabled={focused}
-        storageKey="tutorial:tab:circle:v1"
+        storageKey={isReviewUser(user as any) ? 'tutorial:tab:circle:v1:review' : 'tutorial:tab:circle:v1'}
         steps={[
           {
             key: 'stories',

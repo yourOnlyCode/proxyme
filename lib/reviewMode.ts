@@ -15,6 +15,9 @@ export const REVIEW_EMAILS = parseCsv(process.env.EXPO_PUBLIC_REVIEW_EMAILS);
 export function isReviewUser(user: User | null | undefined): boolean {
   const email = String(user?.email || '').toLowerCase();
   if (!email) return false;
+  // Safe default so `review@proxyme.app` always enables reviewer fixtures in builds
+  // even if env config isn't set for some reason.
+  if (REVIEW_EMAILS.length === 0) return email === 'review@proxyme.app';
   return REVIEW_EMAILS.includes(email);
 }
 

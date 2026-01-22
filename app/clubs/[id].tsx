@@ -1,6 +1,7 @@
 import EventCard from '@/components/club/EventCard';
 import ReplyItem from '@/components/club/ReplyItem';
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
 import Avatar from '@/components/profile/Avatar';
 import { InterestSelector } from '@/components/profile/InterestSelector';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
@@ -39,6 +40,7 @@ export default function ClubDetailScreen() {
   const [role, setRole] = useState<'owner' | 'admin' | 'member' | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'forum' | 'members' | 'events' | 'settings'>('forum');
+  const [myIsVerified, setMyIsVerified] = useState(false);
   
   // Forum State
   const [topics, setTopics] = useState<ForumTopic[]>([]);
@@ -114,6 +116,19 @@ export default function ClubDetailScreen() {
     if (id && user) {
         fetchClubDetails();
         fetchMembership();
+        // Best-effort: keep local verification state for gating join actions.
+        void (async () => {
+          try {
+            const { data } = await supabase
+              .from('profiles')
+              .select('is_verified')
+              .eq('id', user.id)
+              .maybeSingle();
+            setMyIsVerified(!!(data as any)?.is_verified);
+          } catch {
+            setMyIsVerified(false);
+          }
+        })();
     }
     
     return () => {
@@ -756,6 +771,13 @@ export default function ClubDetailScreen() {
   };
 
   const handleAcceptInvite = async () => {
+      if (!myIsVerified) {
+          Alert.alert('Verification required', 'You need to be verified to join clubs.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Get Verified', onPress: () => router.push('/(settings)/get-verified') },
+          ]);
+          return;
+      }
       const { error } = await supabase
         .from('club_members')
         .update({ status: 'accepted' })
@@ -1381,6 +1403,13 @@ export default function ClubDetailScreen() {
 
   const handleRequestToJoin = async () => {
       if (!user?.id || !id) return;
+      if (!myIsVerified) {
+          Alert.alert('Verification required', 'You need to be verified to join clubs.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Get Verified', onPress: () => router.push('/(settings)/get-verified') },
+          ]);
+          return;
+      }
       try {
           const { error } = await supabase
               .from('club_members')
@@ -1469,9 +1498,7 @@ export default function ClubDetailScreen() {
                               <Text className="text-ink font-bold text-sm" style={textPrimaryStyle}>
                                 {l.profile.full_name || l.profile.username}
                               </Text>
-                              {l.profile.is_verified && (
-                                <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
-                              )}
+                              {/* Verification is not a social badge (no checkmark here). */}
                             </View>
                             <Text className="text-gray-400 text-[10px] font-bold uppercase" style={textSecondaryStyle}>
                               {l.role}
@@ -1493,10 +1520,45 @@ export default function ClubDetailScreen() {
                   <Text className="text-gray-500 text-center mb-8" style={textSecondaryStyle}>Request to join and the owner will review it.</Text>
                 )}
 
+                {!myIsVerified ? (
+                  <View className="w-full mb-6">
+                    <View className="bg-white border border-gray-100 rounded-2xl p-4 mb-3" style={cardStyle}>
+                      <Text className="text-ink font-bold text-base mb-1" style={textPrimaryStyle}>Verification required to join</Text>
+                      <Text className="text-gray-500 text-sm" style={textSecondaryStyle}>
+                        Link Apple or Google to instantly verify your account.
+                      </Text>
+                      <SocialAuthButtons
+                        mode="link"
+                        onComplete={() => {
+                          void (async () => {
+                            try {
+                              const { data } = await supabase
+                                .from('profiles')
+                                .select('is_verified')
+                                .eq('id', user?.id ?? '')
+                                .maybeSingle();
+                              setMyIsVerified(!!(data as any)?.is_verified);
+                            } catch {
+                              // ignore
+                            }
+                          })();
+                        }}
+                      />
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => router.push('/(settings)/get-verified')}
+                      className="bg-black py-4 px-8 rounded-xl shadow-lg w-full items-center"
+                    >
+                      <Text className="text-white font-bold text-lg">Open verification</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
                 {memberStatus === 'invited' && (
                     <View className="w-full">
                         <TouchableOpacity 
                             onPress={handleAcceptInvite}
+                            disabled={!myIsVerified}
                             className="bg-black py-4 px-8 rounded-xl shadow-lg w-full items-center"
                         >
                             <Text className="text-white font-bold text-lg">Accept Invite</Text>
@@ -1610,9 +1672,7 @@ export default function ClubDetailScreen() {
                                                 <Text className="text-sm font-semibold text-ink">
                                                     {selectedTopic.creator.full_name || selectedTopic.creator.username}
                                                 </Text>
-                                                {selectedTopic.creator.is_verified && (
-                                                    <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
-                                                )}
+                                                {/* Verification is not a social badge (no checkmark here). */}
                                             </TouchableOpacity>
                                             <Text className="text-xs text-gray-500">
                                                 {new Date(selectedTopic.created_at).toLocaleDateString('en-US', {
@@ -1798,9 +1858,7 @@ export default function ClubDetailScreen() {
                                                     <Text className="text-xs text-gray-500">
                                                         {item.creator.full_name || item.creator.username}
                                                     </Text>
-                                                    {item.creator.is_verified && (
-                                                        <IconSymbol name="checkmark.seal.fill" size={10} color="#3B82F6" style={{ marginLeft: 4 }} />
-                                                    )}
+                                                    {/* Verification is not a social badge (no checkmark here). */}
                                                 </View>
                                             </TouchableOpacity>
                                             <View className="flex-row items-center">
@@ -1946,9 +2004,7 @@ export default function ClubDetailScreen() {
                                     <View className="flex-1">
                                         <View className="flex-row items-center">
                                             <Text className="font-bold text-ink">{item.profile.full_name || item.profile.username}</Text>
-                                            {item.profile.is_verified && (
-                                                <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
-                                            )}
+                                            {/* Verification is not a social badge (no checkmark here). */}
                                         </View>
                                         <Text className="text-gray-500 text-xs">@{item.profile.username}</Text>
                                     </View>
@@ -2147,9 +2203,7 @@ export default function ClubDetailScreen() {
                                 </View>
                                 <View className="flex-row items-center">
                                     <Text className="font-bold">{item.username}</Text>
-                                    {item.is_verified && (
-                                        <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
-                                    )}
+                                    {/* Verification is not a social badge (no checkmark here). */}
                                 </View>
                             </View>
                             <TouchableOpacity 

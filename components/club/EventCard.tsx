@@ -170,9 +170,7 @@ export default function EventCard({
                             <Text className="text-xs text-gray-400">
                                 {event.creator.full_name || event.creator.username}
                             </Text>
-                            {event.creator.is_verified && (
-                                <IconSymbol name="checkmark.seal.fill" size={10} color="#3B82F6" style={{ marginLeft: 4 }} />
-                            )}
+                            {/* Verification is not a social badge (no checkmark here). */}
                         </TouchableOpacity>
                         {!isPast && (
                             <TouchableOpacity onPress={() => onAddToCalendar(event)} className="flex-row items-center bg-blue-50 px-3 py-1.5 rounded-full">
@@ -339,7 +337,7 @@ function AttendeesModal({
                                     <Text className="text-ink font-semibold">{u.full_name || u.username}</Text>
                                     {u.full_name ? <Text className="text-gray-400 text-xs">@{u.username}</Text> : null}
                                 </View>
-                                {u.is_verified ? <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" /> : null}
+                                {/* Verification is not a social badge (no checkmark here). */}
                             </TouchableOpacity>
                         ))}
                     </View>

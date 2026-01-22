@@ -1,4 +1,5 @@
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/auth';
@@ -88,6 +89,7 @@ export default function CrossedPathsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const isDark = scheme === 'dark';
   const [loading, setLoading] = useState(true);
+  const [myIsVerified, setMyIsVerified] = useState<boolean | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [proxyOn, setProxyOn] = useState(true);
   const [groups, setGroups] = useState<CrossedPathGroup[]>([]);
@@ -132,6 +134,25 @@ export default function CrossedPathsScreen() {
       if (!user) return;
       setLoading(true);
       try {
+        // Enforce: unverified users cannot view crossed paths (unless review account).
+        if (!isReviewUser(user)) {
+          const { data: me } = await supabase
+            .from('profiles')
+            .select('is_verified')
+            .eq('id', user.id)
+            .maybeSingle();
+          const ok = !!(me as any)?.is_verified;
+          if (!mounted) return;
+          setMyIsVerified(ok);
+          if (!ok) {
+            setGroups([]);
+            setGroupStates({});
+            return;
+          }
+        } else {
+          setMyIsVerified(true);
+        }
+
         // App Store Review Mode: deterministic crossed paths without backend dependency.
         if (isReviewUser(user)) {
           if (!mounted) return;
@@ -296,6 +317,24 @@ export default function CrossedPathsScreen() {
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
           <Text className="text-gray-500 mt-3" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Loading…</Text>
+        </View>
+      ) : myIsVerified === false ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <IconSymbol name="lock.fill" size={44} color="#9CA3AF" />
+          <Text className="text-ink font-bold text-lg mt-4" style={{ color: isDark ? '#E5E7EB' : undefined }}>Verification required</Text>
+          <Text className="text-gray-500 text-center mt-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
+            Crossed Paths is only available to verified accounts.
+          </Text>
+          <View className="w-full mt-2">
+            <SocialAuthButtons mode="link" onComplete={() => router.replace('/crossed-paths')} />
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push('/(settings)/get-verified')}
+            className="mt-4 bg-black px-5 py-3 rounded-xl"
+          >
+            <Text className="text-white font-bold">Open verification</Text>
+          </TouchableOpacity>
         </View>
       ) : !enabled ? (
         <View className="flex-1 items-center justify-center px-8">

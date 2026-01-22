@@ -11,14 +11,14 @@ export function getReferralShareContent(friendCode: string | null) {
   const deepLink = `proxybusiness://referral?code=${friendCode}`; // Deep link using app scheme
   
   // Messaging-specific text with paragraph break and app store link
-  const messagingText = `Find me and new friends on Proxyme! The proximity based app for connecting through common interests.\n\nRegister with my friend code: ${friendCode} to get closer to verification!\n\n${appStoreLink}`;
+  const messagingText = `Find me and new friends on Proxyme! The proximity based app for connecting through common interests.\n\nRegister with my friend code: ${friendCode} (it helps me unlock Trendsetter status).\n\n${appStoreLink}`;
   
   return {
     friendCode,
     appStoreLink,
     appStoreLinkPlaceholder,
     deepLink,
-    shareText: `Join me on Proxyme! Use my friend code ${friendCode} to unlock verification when you sign up.\n\nDownload: ${appStoreLink}\n\nOr open in app: ${deepLink}`,
+    shareText: `Join me on Proxyme! Use my friend code ${friendCode} when you sign up (it helps me unlock Trendsetter status).\n\nDownload: ${appStoreLink}\n\nOr open in app: ${deepLink}`,
     messagingText,
   };
 }

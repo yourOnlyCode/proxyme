@@ -125,7 +125,7 @@ export default function UserConnectionsScreen() {
                             <Text className="font-bold text-lg text-ink mr-1" style={{ color: isDark ? '#E5E7EB' : undefined }}>
                               {item.full_name || item.username}
                             </Text>
-                            {!!item.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
+                            {/* Verification is not a social badge (no checkmark here). */}
                         </View>
                         <Text className="text-gray-500 text-sm" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
                           @{item.username}

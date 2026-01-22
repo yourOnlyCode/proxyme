@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { syncVerificationStatusForCurrentUser } from './verification';
 
 type AuthContextType = {
   session: Session | null;
@@ -93,7 +94,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // Whenever a session is established, make sure the profile row exists.
   useEffect(() => {
     if (!session?.user?.id) return;
-    void ensureProfile();
+    void ensureProfile().then(() => {
+      // Best-effort: keep `profiles.is_verified` synced with linked OAuth identities
+      // so RLS policies behave consistently.
+      void syncVerificationStatusForCurrentUser();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 

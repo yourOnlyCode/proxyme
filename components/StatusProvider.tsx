@@ -3,6 +3,7 @@ import { useToast } from '@/components/ui/ToastProvider';
 import { useAuth } from '@/lib/auth';
 import { isReviewUser } from '@/lib/reviewMode';
 import { supabase } from '@/lib/supabase';
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -542,7 +543,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const showVerificationRequiredPopup = () => {
       Alert.alert(
           'Verification required',
-          'To keep Proxyme built on trust and security, posting photo statuses is limited to verified accounts. This helps prevent bots, AI-generated spam, inappropriate content, and low-effort mass posting.\n\nGet verified to unlock photo statuses.',
+          'To keep Proxyme built on trust and security, posting stories is limited to verified accounts. Link Apple or Google to instantly verify.',
           [
               { text: 'Not now', style: 'cancel' },
               {
@@ -557,7 +558,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       );
   };
 
-  const ensureVerifiedForImageStatus = async (): Promise<boolean> => {
+  const ensureVerifiedForStatus = async (): Promise<boolean> => {
       if (!user) throw new Error('You must be signed in.');
       // App Store Review Mode: allow the review account to post statuses even if verification state isn't propagated yet.
       if (isReviewUser(user)) return true;
@@ -623,7 +624,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       if (!user) throw new Error('You must be signed in.');
       setUpdating(true);
       try {
-          const ok = await ensureVerifiedForImageStatus();
+          const ok = await ensureVerifiedForStatus();
           if (!ok) return;
           toast.show('Posting status...', 'info');
           const contentPath = await uploadStatusImage(uri);
@@ -671,17 +672,17 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
           let content = null;
           let type = 'text';
 
+          const ok = await ensureVerifiedForStatus();
+          if (!ok) {
+              // Restore draft and keep modal open.
+              setStatusText(draftText);
+              setStatusImage(draftImage);
+              setModalVisible(true);
+              return;
+          }
+
           if (draftImage) {
               type = 'image';
-
-              const ok = await ensureVerifiedForImageStatus();
-              if (!ok) {
-                  // Restore draft and keep modal open.
-                  setStatusText(draftText);
-                  setStatusImage(draftImage);
-                  setModalVisible(true);
-                  return;
-              }
 
               toast.show('Posting status...', 'info');
               content = await uploadStatusImage(draftImage);
@@ -721,6 +722,34 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
 
   // Render Status Tab Content
   const renderStatusTab = () => {
+    const canPost = !!user && (isReviewUser(user) || !!userProfile?.is_verified);
+    if (!!user && !canPost) {
+      return (
+        <ScrollView ref={statusTabScrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+          <View className="items-center justify-center py-10">
+            <IconSymbol name="lock.fill" size={44} color="#9CA3AF" />
+            <Text className="text-slate-900 font-bold text-lg mt-4">Verification required</Text>
+            <Text className="text-slate-500 text-center mt-2">
+              You need to be verified to post stories. Link Apple or Google to verify instantly.
+            </Text>
+            <View className="w-full">
+              <SocialAuthButtons mode="link" onComplete={() => {
+                // Refresh local profile state used by this provider
+                void fetchUserProfile();
+              }} />
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push('/(settings)/get-verified')}
+              className="mt-4 bg-black px-6 py-3 rounded-xl"
+              activeOpacity={0.9}
+            >
+              <Text className="text-white font-bold">Open verification</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      );
+    }
+
     return (
       <ScrollView ref={statusTabScrollRef} showsVerticalScrollIndicator={false}>
                         {/* Active Statuses List */}
@@ -1499,7 +1528,7 @@ function StatusPreviewModal({
                             <View>
                                 <View className="flex-row items-center">
                                     <Text className="text-white text-base font-bold mr-1 shadow-md">{displayProfile.full_name}</Text>
-                                    {displayProfile.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
+                                    {/* Verification is not a social badge (no checkmark here). */}
                                 </View>
                                 <View className="flex-row items-center">
                                     <Text className="text-gray-300 text-[10px] font-semibold shadow-sm">@{displayProfile.username}</Text>

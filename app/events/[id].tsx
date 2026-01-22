@@ -1,4 +1,5 @@
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -469,6 +470,12 @@ export default function EventDetailScreen() {
                         </Text>
                       </TouchableOpacity>
 
+                      {!myIsVerified ? (
+                        <View className="mt-2">
+                          <SocialAuthButtons mode="link" onComplete={() => fetchAll({ silent: true })} />
+                        </View>
+                      ) : null}
+
                       <View className="flex-row mt-3">
                       <TouchableOpacity
                           onPress={onNotInterested}
@@ -583,11 +590,7 @@ export default function EventDetailScreen() {
                             </Text>
                           </View>
                         ) : null}
-                        {item.user?.is_verified ? (
-                          <View className="ml-2">
-                            <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />
-                          </View>
-                        ) : null}
+                        {/* Verification is not a social badge (no checkmark here). */}
                         <Text className="text-gray-400 text-xs ml-auto">
                           {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </Text>

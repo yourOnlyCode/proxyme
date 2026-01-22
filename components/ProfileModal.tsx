@@ -1,4 +1,5 @@
 import { ProfileActionButtons } from '@/components/ProfileActionButtons';
+import { AccountCheckBadge } from '@/components/profile/AccountCheckBadge';
 import { useConnectionState } from '@/hooks/useConnectionState';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -25,6 +26,8 @@ export type ProfileData = {
   detailed_interests: Record<string, string[]> | null;
   relationship_goals: string[] | null;
   is_verified: boolean;
+  referral_count?: number | null;
+  share_count?: number | null;
   shared_interests_count?: number;
   city?: string;
   state?: string;
@@ -150,7 +153,7 @@ export function ProfileModal({
             // is consistent even when upstream screens pass a "thin" profile object.
             supabase
                 .from('profiles')
-                .select('id, username, full_name, bio, avatar_url, detailed_interests, relationship_goals, is_verified, city, state, social_links, status_text, status_image_url, status_created_at')
+                .select('id, username, full_name, bio, avatar_url, detailed_interests, relationship_goals, is_verified, referral_count, share_count, city, state, social_links, status_text, status_image_url, status_created_at')
                 .eq('id', profile.id)
                 .single()
                 .then(({ data }) => {
@@ -181,6 +184,8 @@ export function ProfileModal({
         full_name: (fetchedProfile as any)?.full_name ?? profile.full_name,
         username: (fetchedProfile as any)?.username ?? profile.username,
         is_verified: (fetchedProfile as any)?.is_verified ?? profile.is_verified,
+        referral_count: (fetchedProfile as any)?.referral_count ?? (profile as any).referral_count,
+        share_count: (fetchedProfile as any)?.share_count ?? (profile as any).share_count,
         city: (fetchedProfile as any)?.city ?? profile.city,
         state: (fetchedProfile as any)?.state ?? profile.state,
         status_text: (fetchedProfile as any)?.status_text ?? profile.status_text,
@@ -352,11 +357,13 @@ export function ProfileModal({
                             >
                               {mergedProfile.full_name}
                             </Text>
-                            {mergedProfile.is_verified ? (
-                              <View className="ml-2">
-                                <IconSymbol name="checkmark.seal.fill" size={18} color="#3B82F6" />
-                              </View>
-                            ) : null}
+                        <View className="ml-2">
+                          <AccountCheckBadge
+                            shareCount={mergedProfile.share_count}
+                            referralCount={mergedProfile.referral_count}
+                            size={18}
+                          />
+                        </View>
                           </View>
                           <Text className="text-gray-500 font-medium text-[13px] mt-1">@{mergedProfile.username}</Text>
                           <View className="mt-2">

@@ -70,7 +70,7 @@ export default function SettingsScreen() {
           <Text className="text-gray-500 font-bold text-xs mb-3 mt-2">ACCOUNT</Text>
           <Row icon="person.crop.circle" title="Edit Profile" subtitle="Photos, bio, intent, social links" onPress={() => router.push('/(settings)/profile')} />
           <Row icon="star.fill" title="Edit Interests" subtitle="Update your interests" onPress={() => router.push('/(settings)/edit-interests')} />
-          <Row icon="checkmark.seal.fill" title="Get Verified" subtitle="Invite friends to unlock features" onPress={() => router.push('/(settings)/get-verified')} />
+          <Row icon="checkmark.seal.fill" title="Get Verified" subtitle="Link Apple/Google to unlock features" onPress={() => router.push('/(settings)/get-verified')} />
 
           <Text className="text-gray-500 font-bold text-xs mb-3 mt-6">LEGAL</Text>
           <Row icon="doc.text" title="Privacy Policy" subtitle="How we use and protect your data" onPress={() => router.push('/(settings)/privacy-policy')} />

@@ -2,6 +2,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useAuth } from '@/lib/auth';
 import { getReferralShareContent } from '@/lib/referral';
+import { recordAppShare } from '@/lib/sharing';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Modal, Share, Text, TouchableOpacity, View } from 'react-native';
@@ -27,6 +28,9 @@ export function ReferralPopup({ visible, onClose, friendCode, onNeverShowAgain }
         message: shareContent.shareText,
         title: 'Join me on Proxyme!',
       });
+      if (user?.id) {
+        void recordAppShare({ userId: user.id });
+      }
     } catch (error) {
       console.error('Error sharing:', error);
     }
@@ -78,13 +82,13 @@ export function ReferralPopup({ visible, onClose, friendCode, onNeverShowAgain }
               Proxyme is powered by users like you!
             </Text>
             <Text className="text-sm text-gray-600 text-center">
-              Share with your friends to unlock verification.
+              Share the app to unlock the blue check (Super user).
             </Text>
           </View>
 
           {/* Subtext */}
           <Text className="text-xs text-gray-500 text-center mb-6">
-            When 3 friends use your code verification will automatically unlock.
+            Friend code is optional — if 3 friends sign up with your code, you unlock the orange check (Trendsetter).
           </Text>
 
           {/* Friend Code Display */}

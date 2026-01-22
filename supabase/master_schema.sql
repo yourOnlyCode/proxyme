@@ -27,8 +27,11 @@ create table if not exists public.profiles (
   -- Age & romance preferences
   birthdate date,
   age_group text,
+  gender text,
+  romance_preference text,
   romance_min_age integer default 18,
   romance_max_age integer default 99,
+  professional_title text,
   detailed_interests jsonb,
   currently_into text,
   is_verified boolean DEFAULT false,
@@ -37,6 +40,8 @@ create table if not exists public.profiles (
   status_text text,
   status_image_url text,
   status_created_at timestamptz,
+  -- Social status counters (not verification)
+  share_count int DEFAULT 0,
 
   constraint username_length check (char_length(username) >= 3)
 );
@@ -56,11 +61,20 @@ begin
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'age_group') then
         alter table public.profiles add column age_group text;
     end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'gender') then
+        alter table public.profiles add column gender text;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'romance_preference') then
+        alter table public.profiles add column romance_preference text;
+    end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'romance_min_age') then
         alter table public.profiles add column romance_min_age integer default 18;
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'romance_max_age') then
         alter table public.profiles add column romance_max_age integer default 99;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'professional_title') then
+        alter table public.profiles add column professional_title text;
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'detailed_interests') then
         alter table public.profiles add column detailed_interests jsonb;
@@ -92,6 +106,9 @@ begin
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'referral_count') then
         alter table public.profiles add column referral_count int DEFAULT 0;
+    end if;
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'share_count') then
+        alter table public.profiles add column share_count int DEFAULT 0;
     end if;
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'referred_by') then
         alter table public.profiles add column referred_by uuid REFERENCES public.profiles(id);
@@ -586,10 +603,7 @@ begin
           where id = referrer_id
           returning referral_count into current_count;
           
-          -- Unlock verification automatically at 1 referral
-          if current_count >= 1 then
-              update public.profiles set is_verified = true where id = referrer_id;
-          end if;
+          -- NOTE: referrals no longer grant verification; they are used for Trendsetter status.
       end if;
   end if;
 
@@ -652,10 +666,7 @@ begin
   where id = referrer_id
   returning referral_count into current_count;
 
-  -- Unlock verification automatically at 1 referral
-  if current_count >= 1 then
-    update public.profiles set is_verified = true where id = referrer_id;
-  end if;
+  -- NOTE: referrals no longer grant verification; they are used for Trendsetter status.
 
   return json_build_object(
     'referrer_id', referrer_id,
@@ -1072,6 +1083,12 @@ CREATE POLICY "Users can join/leave clubs"
       (
         (SELECT auth.uid()) = user_id
         AND status = 'pending'
+        AND EXISTS (
+          SELECT 1
+          FROM public.profiles p
+          WHERE p.id = auth.uid()
+            AND p.is_verified = true
+        )
         AND EXISTS (
           SELECT 1 FROM public.clubs c
           WHERE c.id = club_id
@@ -2248,6 +2265,8 @@ returns table (
   city text,
   state text,
   is_verified boolean,
+  referral_count int,
+  share_count int,
   has_sent_interest boolean,
   has_received_interest boolean,
   statuses jsonb,
@@ -2264,6 +2283,8 @@ declare
   my_romance_max int;
   my_currently_into text;
   my_primary_goal_norm text;
+  my_gender text;
+  my_romance_pref text;
 begin
   select p.detailed_interests into my_details 
   from public.profiles p 
@@ -2274,8 +2295,10 @@ begin
     p.relationship_goals[1],
     coalesce(p.romance_min_age, 18),
     coalesce(p.romance_max_age, 99),
-    p.currently_into
-  into my_age_group, my_primary_goal, my_romance_min, my_romance_max, my_currently_into
+    p.currently_into,
+    p.gender,
+    p.romance_preference
+  into my_age_group, my_primary_goal, my_romance_min, my_romance_max, my_currently_into, my_gender, my_romance_pref
   from public.profiles p
   where p.id = auth.uid();
 
@@ -2326,6 +2349,8 @@ begin
     p.city,
     p.state,
     p.is_verified,
+    p.referral_count,
+    p.share_count,
     -- Check if I have sent an interest to them
     exists (
         select 1 from public.interests i 
@@ -2384,6 +2409,25 @@ begin
     )
   order by
     intent_match desc,
+    (
+      case
+        when my_primary_goal_norm = 'Romance'
+         and coalesce(p.relationship_goals[1], case when coalesce(p.age_group, case when p.birthdate is not null and date_part('year', age(p.birthdate))::int < 18 then 'minor' else 'adult' end) = 'minor' then 'Friendship' else null end) = 'Romance'
+         and my_gender is not null and my_romance_pref is not null
+         and p.gender is not null and p.romance_preference is not null
+         and (
+           (my_romance_pref = 'both' and p.gender in ('male','female'))
+           or (my_romance_pref = p.gender)
+           or (my_romance_pref = 'other' and p.gender = 'other')
+         )
+         and (
+           (p.romance_preference = 'both' and my_gender in ('male','female'))
+           or (p.romance_preference = my_gender)
+           or (p.romance_preference = 'other' and my_gender = 'other')
+         )
+        then 1 else 0
+      end
+    ) desc,
     interest_match_percent desc,
     currently_into_match desc,
     dist_meters asc,
@@ -2409,7 +2453,9 @@ returns table (
   interests text[], -- Note: using text[] for simple interests if detailed_interests not used here
   photos jsonb,
   dist_meters float,
-  shared_interests_count int
+  shared_interests_count int,
+  referral_count int,
+  share_count int
 )
 language plpgsql
 security definer
@@ -2435,7 +2481,9 @@ begin
       p.location,
       st_point(long, lat)::geography
     ) as dist_meters,
-    0 as shared_interests_count -- Placeholder logic
+    0 as shared_interests_count, -- Placeholder logic
+    p.referral_count,
+    p.share_count
   from
     public.profiles p
   where

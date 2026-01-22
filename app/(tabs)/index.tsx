@@ -1,3 +1,4 @@
+import { AccountCheckBadge } from '@/components/profile/AccountCheckBadge';
 import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { useStatus } from '@/components/StatusProvider';
 import { CoachMarks } from '@/components/ui/CoachMarks';
@@ -17,8 +18,9 @@ import { getReferralShareContent } from '../../lib/referral';
 import { reviewProxyProfiles } from '../../lib/reviewFixtures';
 import { isReviewUser } from '../../lib/reviewMode';
 import { showSafetyOptions } from '../../lib/safety';
+import { recordAppShare } from '../../lib/sharing';
 import { supabase } from '../../lib/supabase';
-import { REQUIRED_REFERRALS_FOR_VERIFICATION } from '../../lib/verification';
+import { REQUIRED_REFERRALS_FOR_TRENDSETTER, REQUIRED_SHARES_FOR_SUPER_USER } from '../../lib/verification';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -85,6 +87,7 @@ export default function HomeScreen() {
   const [friendCode, setFriendCode] = useState<string | null>(null);
   const [userCity, setUserCity] = useState<string | null>(null);
   const [referralCount, setReferralCount] = useState<number>(0);
+  const [shareCount, setShareCount] = useState<number>(0);
   const [saveCrossedPaths, setSaveCrossedPaths] = useState(true);
   const [crossedPathsBadgeCount, setCrossedPathsBadgeCount] = useState(0);
   const [showFriendCodeToast, setShowFriendCodeToast] = useState(false);
@@ -137,7 +140,7 @@ export default function HomeScreen() {
     // Fetch detailed interests & goals
     const { data } = await supabase
       .from('profiles')
-      .select('detailed_interests, relationship_goals, friend_code, city, referral_count, save_crossed_paths')
+      .select('detailed_interests, relationship_goals, friend_code, city, referral_count, share_count, save_crossed_paths')
       .eq('id', user.id)
       .single();
     
@@ -147,6 +150,7 @@ export default function HomeScreen() {
       setFriendCode(data.friend_code);
       setUserCity(data.city);
       setReferralCount(data.referral_count || 0);
+      setShareCount(data.share_count || 0);
       setSaveCrossedPaths(data.save_crossed_paths ?? true);
       // Show friend code toast if user has a friend code and hasn't opted out
       if (data.friend_code) {
@@ -207,6 +211,9 @@ export default function HomeScreen() {
         if (payload.new.referral_count !== undefined) {
           setReferralCount(payload.new.referral_count || 0);
         }
+        if (payload.new.share_count !== undefined) {
+          setShareCount(payload.new.share_count || 0);
+        }
       })
       .subscribe();
 
@@ -223,7 +230,7 @@ export default function HomeScreen() {
         },
         () => {
           fetchPendingRequests();
-          if (isProxyActive && location) fetchProxyFeed();
+          if ((isProxyActive && location) || isReviewUser(user as any)) fetchProxyFeed();
         },
       )
       .subscribe();
@@ -239,7 +246,7 @@ export default function HomeScreen() {
           filter: `sender_id=eq.${user.id}`,
         },
         () => {
-          if (isProxyActive && location) fetchProxyFeed();
+          if ((isProxyActive && location) || isReviewUser(user as any)) fetchProxyFeed();
         },
       )
       .subscribe();
@@ -267,7 +274,7 @@ export default function HomeScreen() {
   };
 
   const fetchProxyFeed = async () => {
-    if (!user || !location || !isProxyActive) return;
+    if (!user) return;
 
     // App Store Review Mode: show deterministic content without depending on real location matching.
     if (isReviewUser(user)) {
@@ -285,6 +292,8 @@ export default function HomeScreen() {
       setLoading(false);
       return;
     }
+
+    if (!location || !isProxyActive) return;
 
     setLoading(true);
     // fetchMyStatus(); // Refresh status too - handled globally now
@@ -640,7 +649,12 @@ export default function HomeScreen() {
                     <TouchableOpacity onPress={() => openProfile(item)}>
                         <Text className="text-lg font-bold text-ink mr-1" numberOfLines={1} style={textPrimaryStyle}>{item.full_name || item.username}</Text>
                     </TouchableOpacity>
-                    {item.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
+                    <AccountCheckBadge
+                      shareCount={Number((item as any).share_count ?? 0)}
+                      referralCount={Number((item as any).referral_count ?? 0)}
+                      size={14}
+                      style={{ marginLeft: 6 } as any}
+                    />
                     {(!(item as any).connection_id && (item as any).previously_declined) ? (
                       <View className="ml-2 px-2 py-0.5 rounded-full bg-orange-50 border border-orange-200">
                         <Text className="text-[10px] font-bold text-orange-700">Previously declined your interest</Text>
@@ -707,30 +721,7 @@ export default function HomeScreen() {
                             <View style={{ width: '100%', height: '100%', position: 'relative' }}>
                                 <FeedImage path={imgPath} resizeMode="cover" />
                                 {/* Show verified badge only on avatar (first image) */}
-                                {isAvatar && item.is_verified && (
-                                    <View
-                                        style={{
-                                            position: 'absolute',
-                                            bottom: 12,
-                                            right: 12,
-                                            backgroundColor: '#3B82F6',
-                                            borderRadius: 12,
-                                            width: 24,
-                                            height: 24,
-                                            justifyContent: 'center',
-                                            alignItems: 'center',
-                                            shadowColor: '#000',
-                                            shadowOffset: { width: 0, height: 2 },
-                                            shadowOpacity: 0.3,
-                                            shadowRadius: 4,
-                                            elevation: 5,
-                                            borderWidth: 2,
-                                            borderColor: '#fff',
-                                        }}
-                                    >
-                                        <IconSymbol name="checkmark.seal.fill" size={14} color="#fff" />
-                                    </View>
-                                )}
+                                {/* Verification is not a social badge (no checkmark here). */}
                             </View>
                         </TouchableOpacity>
                     );
@@ -901,8 +892,14 @@ export default function HomeScreen() {
               <ProxymeLogo />
             </View>
             
-            {/* Empty space for balance (Inbox moved to nav bar) */}
-            <View className="w-10 h-10 ml-auto" />
+            {/* App Logo (Right) */}
+            <View className="w-10 h-10 ml-auto items-center justify-center">
+              <Image
+                source={require('../../assets/images/reference_logo.png')}
+                style={{ width: 30, height: 30 }}
+                resizeMode="contain"
+              />
+            </View>
           </View>
       </View>
 
@@ -964,7 +961,7 @@ export default function HomeScreen() {
       </Animated.View>
 
       <Animated.FlatList
-          data={isProxyActive ? feed : []}
+          data={isProxyActive || isReviewUser(user as any) ? feed : []}
           keyExtractor={(item) => item.id}
           // Prevent iOS inset adjustment jitter on tab switch (can show "past the top" until first scroll)
           contentInsetAdjustmentBehavior="never"
@@ -1006,7 +1003,7 @@ export default function HomeScreen() {
 
       <CoachMarks
         enabled={focused}
-        storageKey="tutorial:tab:proxy:v1"
+        storageKey={isReviewUser(user as any) ? 'tutorial:tab:proxy:v1:review' : 'tutorial:tab:proxy:v1'}
         steps={[
           {
             key: 'toggle',
@@ -1136,7 +1133,7 @@ export default function HomeScreen() {
                     }}
                   >
                     <Text className="text-white font-bold text-sm">
-                      {referralCount}/{REQUIRED_REFERRALS_FOR_VERIFICATION} referral{REQUIRED_REFERRALS_FOR_VERIFICATION === 1 ? '' : 's'}
+                      {Math.min(shareCount, REQUIRED_SHARES_FOR_SUPER_USER)}/{REQUIRED_SHARES_FOR_SUPER_USER} shares
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -1148,6 +1145,9 @@ export default function HomeScreen() {
                           message: shareContent.shareText,
                           title: 'Join me on Proxyme!',
                         });
+                        if (user?.id) {
+                          void recordAppShare({ userId: user.id });
+                        }
                         // Popup stays open - only X button closes it
                       } catch (error) {
                         console.error('Error sharing:', error);
@@ -1167,7 +1167,15 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 </View>
                 <Text className="text-xs text-gray-600 text-center mb-2" style={{ fontWeight: '500' }}>
-                  Proxyme is powered by its users! Share to expand {userCity || 'your city'}. {referralCount >= REQUIRED_REFERRALS_FOR_VERIFICATION ? '🎉 You\'re verified!' : `Get ${Math.max(0, REQUIRED_REFERRALS_FOR_VERIFICATION - referralCount)} more referral${Math.max(0, REQUIRED_REFERRALS_FOR_VERIFICATION - referralCount) === 1 ? '' : 's'} to unlock verification.`}
+                  Proxyme is powered by its users! Share to unlock the blue check, and invite friends to earn Trendsetter status.
+                  {' '}
+                  {shareCount >= REQUIRED_SHARES_FOR_SUPER_USER
+                    ? '✓ Blue check unlocked.'
+                    : `${Math.max(0, REQUIRED_SHARES_FOR_SUPER_USER - shareCount)} more share${Math.max(0, REQUIRED_SHARES_FOR_SUPER_USER - shareCount) === 1 ? '' : 's'} for the blue check.`}
+                  {' '}
+                  {referralCount >= REQUIRED_REFERRALS_FOR_TRENDSETTER
+                    ? '✓ Orange check unlocked.'
+                    : `${Math.max(0, REQUIRED_REFERRALS_FOR_TRENDSETTER - referralCount)} more signup${Math.max(0, REQUIRED_REFERRALS_FOR_TRENDSETTER - referralCount) === 1 ? '' : 's'} with your code for the orange check.`}
                 </Text>
                 {/* Don't show again checkbox */}
                 <TouchableOpacity
@@ -1333,7 +1341,7 @@ function StatusPreviewModal({ visible, profile, onClose }: { visible: boolean, p
                        <View className="p-4 bg-gray-50 border-t border-gray-100 items-center">
                            <View className="flex-row items-center justify-center mb-1">
                                <Text className="text-xs font-bold text-gray-400 uppercase tracking-widest">Posted by {profile.full_name || profile.username}</Text>
-                               {profile.is_verified && <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />}
+                               {/* Verification is not a social badge (no checkmark here). */}
                            </View>
                            {expiryText ? <Text className="text-[10px] text-gray-400 font-medium">{expiryText}</Text> : null}
                        </View>

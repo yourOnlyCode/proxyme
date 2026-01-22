@@ -1,6 +1,7 @@
 import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { REQUIRED_REFERRALS_FOR_VERIFICATION } from '@/lib/verification';
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
+import { AccountCheckBadge } from '@/components/profile/AccountCheckBadge';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -174,12 +175,6 @@ export default function CityFeedScreen() {
       return;
     }
 
-    if (!location) {
-      setLoading(false);
-      setFeed([]);
-      return;
-    }
-
     setLoading(true);
 
     try {
@@ -194,6 +189,13 @@ export default function CityFeedScreen() {
         });
         mixed.push(...events);
         setFeed(mixed);
+        setLoading(false);
+        return;
+      }
+
+      if (!location) {
+        setLoading(false);
+        setFeed([]);
         return;
       }
 
@@ -707,7 +709,7 @@ export default function CityFeedScreen() {
 
       <CoachMarks
         enabled={focused}
-        storageKey="tutorial:tab:city:v1"
+        storageKey={isReviewUser(user as any) ? 'tutorial:tab:city:v1:review' : 'tutorial:tab:city:v1'}
         steps={[
           {
             key: 'about',
@@ -781,11 +783,7 @@ export default function CityFeedScreen() {
                           </Text>
                           <Text className="text-gray-400 text-xs">{String(u.status).toUpperCase()}</Text>
                         </View>
-                        {u.is_verified ? (
-                          <View className="ml-2">
-                            <IconSymbol name="checkmark.seal.fill" size={16} color="#3B82F6" />
-                          </View>
-                        ) : null}
+                        {/* Verification is not a social badge (no checkmark here). */}
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
@@ -815,8 +813,25 @@ export default function CityFeedScreen() {
             </View>
             <View className="p-5">
               <Text className="text-gray-700 mb-4">
-                Verification helps keep Proxyme safe. Get verified by inviting {REQUIRED_REFERRALS_FOR_VERIFICATION} friend{REQUIRED_REFERRALS_FOR_VERIFICATION === 1 ? '' : 's'} using your friend code.
+                Verification helps keep Proxyme safe. Connect Apple or Google to instantly verify your account.
               </Text>
+
+              <SocialAuthButtons
+                mode="link"
+                onComplete={() => {
+                  // Refresh local verification state used by this screen.
+                  if (!user?.id) return;
+                  void supabase
+                    .from('profiles')
+                    .select('is_verified')
+                    .eq('id', user.id)
+                    .maybeSingle()
+                    .then(({ data }) => {
+                      setMyIsVerified(!!(data as any)?.is_verified);
+                      setVerifyModalVisible(false);
+                    });
+                }}
+              />
 
               <View className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4">
                 <Text className="text-gray-500 font-bold mb-2">Your Friend Code</Text>
@@ -824,7 +839,7 @@ export default function CityFeedScreen() {
                   {myFriendCode || '—'}
                 </Text>
                 <Text className="text-gray-400 text-xs mt-2">
-                  Share this code with friends so they can enter it during onboarding.
+                  Optional: friends can use this during onboarding. If 3 friends sign up with your code, you unlock the orange check (Trendsetter).
                 </Text>
               </View>
 
@@ -1265,7 +1280,12 @@ function CityFeedCard({
                     <View>
                         <View className="flex-row items-center">
                             <Text className="text-white text-base font-bold mr-1 shadow-md">{item.full_name}</Text>
-                            {item.is_verified && <IconSymbol name="checkmark.seal.fill" size={14} color="#3B82F6" />}
+                            <AccountCheckBadge
+                              shareCount={Number((item as any).share_count ?? 0)}
+                              referralCount={Number((item as any).referral_count ?? 0)}
+                              size={14}
+                              style={{ marginLeft: 6 } as any}
+                            />
                         </View>
                         <View className="flex-row items-center">
                             <Text className="text-gray-300 text-[10px] font-semibold shadow-sm">@{item.username}</Text>

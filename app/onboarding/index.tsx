@@ -2,6 +2,7 @@ import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { OrbBackground } from '@/components/ui/OrbBackground';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import Slider from '@react-native-community/slider';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -10,7 +11,9 @@ import {
   Alert,
   Keyboard,
   LayoutAnimation,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   Text,
   TextInput,
@@ -18,7 +21,6 @@ import {
   UIManager,
   View,
 } from 'react-native';
-import DatePicker from 'react-native-date-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/profile/Avatar';
 import { InterestSelector } from '../../components/profile/InterestSelector';
@@ -32,10 +34,12 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const RELATIONSHIP_OPTS = ['Romance', 'Friendship', 'Professional'];
+const GENDER_OPTS = ['male', 'female', 'other'] as const;
+const ROMANCE_PREF_OPTS = ['male', 'female', 'both', 'other'] as const;
 
 const STEPS = [
   { title: 'Age', subtitle: 'Enter your date of birth. This determines the experience you’ll get.' },
-  { title: 'Verification', subtitle: 'Use a friend code to keep Proxyme safe and move closer to verification.' },
+  { title: 'Friend code', subtitle: 'Optional. Friend codes help people earn Trendsetter status (orange check).' },
   { title: 'Your Profile', subtitle: 'Add photos, your intent, and a short bio.' },
   { title: 'Interests', subtitle: 'Pick interests so Proxyme can match you with the right people.' },
 ];
@@ -53,6 +57,7 @@ export default function OnboardingScreen() {
   // Age gate
   const [birthdate, setBirthdate] = useState<Date | null>(null);
   const [birthdatePickerOpen, setBirthdatePickerOpen] = useState(false);
+  const [birthdateDraft, setBirthdateDraft] = useState<Date>(new Date(2000, 0, 1));
 
   // Referral
   const [friendCode, setFriendCode] = useState('');
@@ -65,6 +70,9 @@ export default function OnboardingScreen() {
   const [relationshipGoals, setRelationshipGoals] = useState<string[]>([]);
   const [romanceMinAge, setRomanceMinAge] = useState(18);
   const [romanceMaxAge, setRomanceMaxAge] = useState(35);
+  const [gender, setGender] = useState<(typeof GENDER_OPTS)[number] | null>(null);
+  const [romancePreference, setRomancePreference] = useState<(typeof ROMANCE_PREF_OPTS)[number] | null>(null);
+  const [professionalTitle, setProfessionalTitle] = useState('');
 
   // Interests
   const [detailedInterests, setDetailedInterests] = useState<Record<string, string[]>>({});
@@ -96,6 +104,9 @@ export default function OnboardingScreen() {
         setDetailedInterests(data.detailed_interests || {});
         setRomanceMinAge(Math.max(18, Number(data.romance_min_age ?? 18)));
         setRomanceMaxAge(Math.max(18, Number(data.romance_max_age ?? 35)));
+        setGender(((data as any).gender as any) ?? null);
+        setRomancePreference(((data as any).romance_preference as any) ?? null);
+        setProfessionalTitle(((data as any).professional_title as string) ?? '');
         // If already referred, keep input blank (and RPC will reject re-applying anyway).
       }
     } catch (error) {
@@ -222,7 +233,21 @@ export default function OnboardingScreen() {
         Alert.alert('Required', 'Please select what you are looking for.');
         return;
       }
+      if (!isMinor && relationshipGoals[0] === 'Professional') {
+        if (!professionalTitle.trim()) {
+          Alert.alert('Required', 'Please add your professional title.');
+          return;
+        }
+      }
       if (!isMinor && relationshipGoals[0] === 'Romance') {
+        if (!gender) {
+          Alert.alert('Required', 'Please select your gender.');
+          return;
+        }
+        if (!romancePreference) {
+          Alert.alert('Required', 'Please select your romance preference.');
+          return;
+        }
         const min = Math.max(18, Math.floor(romanceMinAge));
         const max = Math.max(min, Math.floor(romanceMaxAge));
         if (min < 18) {
@@ -282,6 +307,9 @@ export default function OnboardingScreen() {
         relationship_goals: isMinor ? ['Friendship'] : relationshipGoals,
         romance_min_age: !isMinor ? Math.max(18, Math.floor(romanceMinAge)) : 18,
         romance_max_age: !isMinor ? Math.max(Math.max(18, Math.floor(romanceMinAge)), Math.floor(romanceMaxAge)) : 99,
+        gender: !isMinor && relationshipGoals[0] === 'Romance' ? gender : null,
+        romance_preference: !isMinor && relationshipGoals[0] === 'Romance' ? romancePreference : null,
+        professional_title: !isMinor && relationshipGoals[0] === 'Professional' ? professionalTitle.trim() : null,
         detailed_interests: detailedInterests,
         is_onboarded: true,
         updated_at: new Date(),
@@ -331,7 +359,9 @@ export default function OnboardingScreen() {
       const n = validateFullName(fullName);
       if (!u.ok || !n.ok) return false;
       if (!isMinor && relationshipGoals.length === 0) return false; // intent required for adults only
+      if (!isMinor && relationshipGoals[0] === 'Professional' && !professionalTitle.trim()) return false;
       if (!isMinor && relationshipGoals[0] === 'Romance') {
+        if (!gender || !romancePreference) return false;
         const min = Math.max(18, Math.floor(romanceMinAge));
         const max = Math.max(min, Math.floor(romanceMaxAge));
         if (min < 18) return false;
@@ -353,8 +383,8 @@ export default function OnboardingScreen() {
         className="px-6 pb-3 border-b border-gray-100"
         style={{ paddingTop: insets.top + 10, backgroundColor: 'rgba(255,255,255,0.85)' }}
       >
-        <Text className="text-xl text-ink" style={{ fontFamily: 'LibertinusSans-Regular' }}>
-          On Boarding
+        <Text className="text-xl text-ink text-center" style={{ fontFamily: 'LibertinusSans-Regular' }}>
+          onboarding
         </Text>
         <View className="mt-2">
           <Text className="text-[18px] font-bold text-ink">{STEPS[step].title}</Text>
@@ -387,7 +417,10 @@ export default function OnboardingScreen() {
 
               <TouchableOpacity
                 activeOpacity={0.85}
-                onPress={() => setBirthdatePickerOpen(true)}
+                onPress={() => {
+                  setBirthdateDraft(birthdate ?? new Date(2000, 0, 1));
+                  setBirthdatePickerOpen(true);
+                }}
                 className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 mt-3"
               >
                 <Text className="text-gray-500 font-bold mb-1 ml-1">Birthday</Text>
@@ -403,18 +436,65 @@ export default function OnboardingScreen() {
                 )}
               </TouchableOpacity>
 
-              <DatePicker
-                modal
-                open={birthdatePickerOpen}
-                date={birthdate ?? new Date(2000, 0, 1)}
-                mode="date"
-                maximumDate={new Date()}
-                onConfirm={(d) => {
-                  setBirthdatePickerOpen(false);
-                  setBirthdate(d);
-                }}
-                onCancel={() => setBirthdatePickerOpen(false)}
-              />
+              <Modal
+                transparent
+                animationType="fade"
+                visible={birthdatePickerOpen}
+                onRequestClose={() => setBirthdatePickerOpen(false)}
+              >
+                <Pressable
+                  style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
+                  onPress={() => setBirthdatePickerOpen(false)}
+                >
+                  <Pressable
+                    onPress={() => {}}
+                    style={{
+                      backgroundColor: 'white',
+                      borderTopLeftRadius: 22,
+                      borderTopRightRadius: 22,
+                      padding: 16,
+                      borderWidth: 1,
+                      borderColor: 'rgba(148,163,184,0.20)',
+                    }}
+                  >
+                    <DateTimePicker
+                      value={birthdateDraft}
+                      mode="date"
+                      maximumDate={new Date()}
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      // Fix iOS dark-mode spinner being invisible on light sheet.
+                      themeVariant="light"
+                      textColor="#111827"
+                      onChange={(event: DateTimePickerEvent, date?: Date) => {
+                        // Android: the picker closes after select/cancel.
+                        if (Platform.OS === 'android') {
+                          setBirthdatePickerOpen(false);
+                          if (event.type === 'set' && date) setBirthdate(date);
+                          return;
+                        }
+                        // iOS: keep it open and update draft
+                        if (date) setBirthdateDraft(date);
+                      }}
+                    />
+                    {Platform.OS === 'ios' ? (
+                      <View className="flex-row justify-between mt-3">
+                        <TouchableOpacity onPress={() => setBirthdatePickerOpen(false)} className="px-4 py-3 rounded-xl bg-gray-100">
+                          <Text className="text-gray-700 font-bold">Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setBirthdate(birthdateDraft);
+                            setBirthdatePickerOpen(false);
+                          }}
+                          className="px-4 py-3 rounded-xl bg-black"
+                        >
+                          <Text className="text-white font-bold">Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </Pressable>
+                </Pressable>
+              </Modal>
 
               {isMinor ? (
                 <View className="mt-4 px-4 py-3 rounded-2xl bg-friendship/10 border border-friendship/20">
@@ -436,9 +516,9 @@ export default function OnboardingScreen() {
                   <IconSymbol name="checkmark.seal.fill" size={18} color="white" />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-ink font-bold text-lg">How verification works</Text>
+                  <Text className="text-ink font-bold text-lg">Friend code (optional)</Text>
                   <Text className="text-gray-500 text-sm mt-0.5">
-                    Friend codes help reduce fake accounts. Referrals also move people closer to verification.
+                    Friend codes are optional. If 3 friends sign up with your code, you unlock Trendsetter status (orange check).
                   </Text>
                 </View>
               </View>
@@ -495,7 +575,7 @@ export default function OnboardingScreen() {
                   value={username}
                   onChangeText={setUsername}
                   className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
-                  placeholder="Unique username"
+                  placeholder="username"
                   autoCapitalize="none"
                   returnKeyType="next"
                   blurOnSubmit={false}
@@ -557,6 +637,40 @@ export default function OnboardingScreen() {
 
                   {relationshipGoals[0] === 'Romance' ? (
                     <View className="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                      <Text className="text-gray-500 font-bold mb-2">Your gender</Text>
+                      <View className="flex-row flex-wrap mb-4">
+                        {GENDER_OPTS.map((g) => {
+                          const selected = gender === g;
+                          return (
+                            <TouchableOpacity
+                              key={g}
+                              onPress={() => setGender(g)}
+                              className={`px-4 py-2 rounded-full mr-2 mb-2 border ${selected ? 'bg-black border-black' : 'bg-white border-gray-200'}`}
+                              activeOpacity={0.9}
+                            >
+                              <Text className={`font-bold ${selected ? 'text-white' : 'text-gray-700'}`}>{g}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
+                      <Text className="text-gray-500 font-bold mb-2">Preference</Text>
+                      <View className="flex-row flex-wrap mb-4">
+                        {ROMANCE_PREF_OPTS.map((p) => {
+                          const selected = romancePreference === p;
+                          return (
+                            <TouchableOpacity
+                              key={p}
+                              onPress={() => setRomancePreference(p)}
+                              className={`px-4 py-2 rounded-full mr-2 mb-2 border ${selected ? 'bg-black border-black' : 'bg-white border-gray-200'}`}
+                              activeOpacity={0.9}
+                            >
+                              <Text className={`font-bold ${selected ? 'text-white' : 'text-gray-700'}`}>{p}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
                       <Text className="text-gray-500 font-bold mb-2">Romance age range</Text>
                       <View className="flex-row items-center justify-between mb-2">
                         <Text className="text-ink font-extrabold">{Math.max(18, Math.floor(romanceMinAge))}</Text>
@@ -585,6 +699,20 @@ export default function OnboardingScreen() {
                         onValueChange={(v) => setRomanceMaxAge(v)}
                         minimumTrackTintColor="#111827"
                         maximumTrackTintColor="#E5E7EB"
+                      />
+                    </View>
+                  ) : relationshipGoals[0] === 'Professional' ? (
+                    <View className="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                      <Text className="text-gray-500 font-bold mb-2">Title</Text>
+                      <TextInput
+                        value={professionalTitle}
+                        onChangeText={setProfessionalTitle}
+                        placeholder="what do you do?"
+                        placeholderTextColor="#9CA3AF"
+                        className="bg-white border border-gray-200 rounded-xl p-3 text-base text-ink"
+                        returnKeyType="done"
+                        blurOnSubmit
+                        onSubmitEditing={() => Keyboard.dismiss()}
                       />
                     </View>
                   ) : null}

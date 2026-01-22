@@ -1,6 +1,7 @@
 import { CoachMarks } from '@/components/ui/CoachMarks';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -42,6 +43,7 @@ export default function ClubsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [tab, setTab] = useState<'my' | 'discover'>('my');
+  const [myIsVerified, setMyIsVerified] = useState<boolean>(false);
 
   // Only show coach marks when this tab is focused (prevents background tabs from popping a tour).
   useFocusEffect(
@@ -63,6 +65,22 @@ export default function ClubsScreen() {
         fetchClubs();
     }
   }, [user, address?.city, tab]);
+
+  useEffect(() => {
+    if (!user) return;
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_verified')
+          .eq('id', user.id)
+          .maybeSingle();
+        setMyIsVerified(!!(data as any)?.is_verified);
+      } catch {
+        setMyIsVerified(false);
+      }
+    })();
+  }, [user?.id]);
 
   // If we mounted with empty memory-cache (e.g., app cold start), try local storage hydrate.
   useEffect(() => {
@@ -470,7 +488,7 @@ export default function ClubsScreen() {
 
         <CoachMarks
           enabled={focused}
-          storageKey="tutorial:tab:clubs:v1"
+          storageKey={isReviewUser(user as any) ? 'tutorial:tab:clubs:v1:review' : 'tutorial:tab:clubs:v1'}
           steps={[
             {
               key: 'tabs',
@@ -508,6 +526,45 @@ export default function ClubsScreen() {
                     </TouchableOpacity>
                 </View>
 
+                {!myIsVerified && !isReviewUser(user as any) ? (
+                  <View className="flex-1 justify-center">
+                    <View
+                      className="bg-white border border-gray-100 rounded-2xl p-5 mb-4"
+                      style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
+                    >
+                      <Text className="text-ink font-bold text-lg mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>
+                        Verification required
+                      </Text>
+                      <Text className="text-gray-500" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
+                        You need to be verified to create clubs. Link Apple or Google to instantly verify.
+                      </Text>
+                      <SocialAuthButtons
+                        mode="link"
+                        onComplete={() => {
+                          void (async () => {
+                            try {
+                              const { data } = await supabase
+                                .from('profiles')
+                                .select('is_verified')
+                                .eq('id', user?.id ?? '')
+                                .maybeSingle();
+                              setMyIsVerified(!!(data as any)?.is_verified);
+                            } catch {
+                              // ignore
+                            }
+                          })();
+                        }}
+                      />
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => router.push('/(settings)/get-verified')}
+                      className="bg-black py-4 rounded-xl items-center shadow-lg"
+                    >
+                      <Text className="text-white font-bold text-lg">Open verification</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                <>
                 <TouchableOpacity 
                     onPress={pickImage}
                     className="h-48 bg-gray-100 rounded-2xl items-center justify-center mb-6 overflow-hidden border border-gray-200"
@@ -605,6 +662,8 @@ export default function ClubsScreen() {
                 <Text className="text-center text-gray-400 text-xs mt-4">
                     Verification required to create clubs.
                 </Text>
+                </>
+                )}
             </View>
         </Modal>
     </View>

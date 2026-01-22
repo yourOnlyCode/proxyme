@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { useAuth } from './auth';
+import { isReviewUser } from './reviewMode';
 import { supabase } from './supabase';
 
 type LocationContextType = {
@@ -29,6 +30,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProxyStatus = async () => {
     if (!user) return;
+    // Review accounts should never broadcast their location or be visible to real users.
+    if (isReviewUser(user)) {
+      setIsProxyActive(false);
+      setLocation(null);
+      setAddress(null);
+      return;
+    }
     const { data, error } = await supabase
       .from('profiles')
       .select('is_proxy_active')
@@ -60,6 +68,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const updateLocation = async (loc: Location.LocationObject) => {
     if (!user) return;
+    // Review accounts should never write their location to the backend.
+    if (isReviewUser(user)) return;
     
     const point = `POINT(${loc.coords.longitude} ${loc.coords.latitude})`;
     
@@ -98,6 +108,20 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const toggleProxy = async (value: boolean) => {
     if (!user) return;
+    // Review accounts should never become visible.
+    if (isReviewUser(user)) {
+      setIsProxyActive(false);
+      setLocation(null);
+      setAddress(null);
+      // Best-effort: force server-side off too, in case it was ever enabled.
+      try {
+        await supabase.from('profiles').update({ is_proxy_active: false, location: null }).eq('id', user.id);
+      } catch {
+        // ignore
+      }
+      Alert.alert('Proxy disabled', 'This review account can’t appear to real users.');
+      return;
+    }
 
     if (value) {
       let { status } = await Location.requestForegroundPermissionsAsync();

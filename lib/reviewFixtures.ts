@@ -19,6 +19,10 @@ export const reviewProxyProfiles = [
     bio: 'Ask me about coffee shops.',
     avatar_url: avatarA,
     is_verified: true,
+    // Blue check (Super user)
+    share_count: 3,
+    // Orange check (Trendsetter)
+    referral_count: 0,
     city: 'Charlotte',
     state: 'NC',
     relationship_goals: ['Friendship'],
@@ -32,6 +36,8 @@ export const reviewProxyProfiles = [
     bio: 'Building things. Always down to collaborate.',
     avatar_url: avatarB,
     is_verified: true,
+    share_count: 1,
+    referral_count: 3,
     city: 'Charlotte',
     state: 'NC',
     relationship_goals: ['Professional'],
@@ -45,6 +51,8 @@ export const reviewProxyProfiles = [
     bio: 'Looking for good vibes and a good playlist.',
     avatar_url: avatarC,
     is_verified: true,
+    share_count: 0,
+    referral_count: 0,
     city: 'Charlotte',
     state: 'NC',
     relationship_goals: ['Romance'],

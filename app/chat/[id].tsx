@@ -809,7 +809,7 @@ export default function ChatScreen() {
                             <Text className={`font-bold ${isMe ? 'text-white' : 'text-ink'}`} numberOfLines={2}>
                               {label}
                             </Text>
-                            {verified && <IconSymbol name="checkmark.seal.fill" size={14} color={isMe ? '#93C5FD' : '#3B82F6'} style={{ marginLeft: 6 }} />}
+                            {/* Verification is not a social badge (no checkmark here). */}
                           </View>
                           <Text className={`text-xs mt-0.5 ${isMe ? 'text-white/90' : 'text-gray-500'}`} numberOfLines={2}>
                             Tap to view profile

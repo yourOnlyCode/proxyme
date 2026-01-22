@@ -49,9 +49,7 @@ export default function ReplyItem({
                             <Text className="text-sm font-semibold text-ink" style={{ color: isDark ? '#E5E7EB' : undefined }}>
                                 {reply.creator.full_name || reply.creator.username}
                             </Text>
-                            {reply.creator.is_verified && (
-                                <IconSymbol name="checkmark.seal.fill" size={12} color="#3B82F6" style={{ marginLeft: 4 }} />
-                            )}
+                            {/* Verification is not a social badge (no checkmark here). */}
                         </TouchableOpacity>
                         <Text className="text-xs text-gray-500" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
                             {new Date(reply.created_at).toLocaleDateString('en-US', {

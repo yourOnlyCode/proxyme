@@ -1,11 +1,19 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import * as Clipboard from 'expo-clipboard';
+import { useRouter } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
-import { REQUIRED_REFERRALS_FOR_SUPER_USER, REQUIRED_REFERRALS_FOR_VERIFICATION, checkVerificationStatus, isSuperUserByReferralCount } from '../../lib/verification';
 import { supabase } from '../../lib/supabase';
+import {
+  REQUIRED_REFERRALS_FOR_TRENDSETTER,
+  REQUIRED_SHARES_FOR_SUPER_USER,
+  isSuperUserByShareCount,
+  isTrendsetterByReferralCount,
+  syncVerificationStatusForCurrentUser,
+} from '../../lib/verification';
 
 export default function GetVerifiedScreen() {
   const { user } = useAuth();
@@ -16,7 +24,23 @@ export default function GetVerifiedScreen() {
   const [isVerified, setIsVerified] = useState(false);
   const [friendCode, setFriendCode] = useState<string | null>(null);
   const [referralCount, setReferralCount] = useState<number>(0);
-  const isSuperUser = isSuperUserByReferralCount(referralCount);
+  const [shareCount, setShareCount] = useState<number>(0);
+  const isSuperUser = isSuperUserByShareCount(shareCount);
+  const isTrendsetter = isTrendsetterByReferralCount(referralCount);
+
+  const closePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_evt, gestureState) =>
+          gestureState.dy > 8 && Math.abs(gestureState.dx) < 30,
+        onPanResponderRelease: (_evt, gestureState) => {
+          if (gestureState.dy > 90) {
+            router.back();
+          }
+        },
+      }),
+    [router]
+  );
 
   useEffect(() => {
     if (user) {
@@ -27,12 +51,12 @@ export default function GetVerifiedScreen() {
   const initialize = async () => {
       if (!user) return;
       try {
-        const verified = await checkVerificationStatus(user.id);
+        const verified = await syncVerificationStatusForCurrentUser();
         setIsVerified(verified);
 
         const { data, error } = await supabase
           .from('profiles')
-          .select('friend_code, referral_count')
+          .select('friend_code, referral_count, share_count, is_verified')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -40,6 +64,9 @@ export default function GetVerifiedScreen() {
 
         setFriendCode((data as any)?.friend_code ?? null);
         setReferralCount(Number((data as any)?.referral_count ?? 0));
+        setShareCount(Number((data as any)?.share_count ?? 0));
+        // trust server value if it's already set (but we still sync in the background)
+        if ((data as any)?.is_verified !== undefined) setIsVerified(!!(data as any)?.is_verified);
       } catch (e: any) {
         Alert.alert('Error', e?.message || 'Failed to load verification details.');
       } finally {
@@ -57,8 +84,20 @@ export default function GetVerifiedScreen() {
 
   return (
       <View className="flex-1 bg-white" style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF' }}>
-        <View className="items-center pt-2 pb-2 bg-white z-10" style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF' }}>
-            <View className="w-12 h-1.5 bg-gray-300 rounded-full" />
+        <View
+          {...closePanResponder.panHandlers}
+          className="pt-2 pb-2 bg-white z-10 px-4 flex-row items-center"
+          style={{ backgroundColor: isDark ? '#0B1220' : '#FFFFFF' }}
+        >
+          <View className="flex-1" />
+          <TouchableOpacity
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            className="w-10 h-10 items-center justify-center ml-auto"
+          >
+            <IconSymbol name="xmark" size={20} color={isDark ? '#E5E7EB' : '#111827'} />
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -67,23 +106,20 @@ export default function GetVerifiedScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text className="text-3xl font-extrabold mb-3 text-ink text-center" style={{ color: isDark ? '#E5E7EB' : undefined }}>
-            {isSuperUser ? 'You’re a Super User' : isVerified ? 'You’re Verified' : 'Get Verified'}
+            {isVerified ? 'You’re Verified' : 'Verify your account'}
           </Text>
           <Text className="text-gray-500 mb-6 text-center text-base leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
-            Verification is earned by inviting friends — it helps Proxyme build real trust and reduce fake accounts.
+            Verification is proof you’re real enough to safely interact on Proxyme. It’s used for access, not social status.
           </Text>
 
           <View
             className="bg-gray-50 border border-gray-100 rounded-2xl p-5 mb-4"
             style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
           >
-            <Text className="text-ink font-bold mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>How it works</Text>
+            <Text className="text-ink font-bold mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>How to get verified</Text>
             <Text className="text-gray-600 leading-6" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
-              1) Share your friend code{'\n'}
-              2) Your friends enter it during onboarding{'\n'}
-              3) Each successful referral counts toward verification{'\n'}
-              4) Invite {REQUIRED_REFERRALS_FOR_VERIFICATION} friends to get verified{'\n'}
-              5) Invite {REQUIRED_REFERRALS_FOR_SUPER_USER} friends to unlock a purple check (Super User)
+              - Sign in with Apple or Google (OAuth), or link Apple/Google to your email account.{'\n'}
+              - (Optional / coming soon) Face / biometric verification to prove you’re a real person.
             </Text>
           </View>
 
@@ -91,38 +127,45 @@ export default function GetVerifiedScreen() {
             className="bg-white border border-gray-100 rounded-2xl p-5 mb-4 shadow-sm"
             style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
           >
-            <Text className="text-gray-500 font-bold mb-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Your progress</Text>
+            <Text className="text-gray-500 font-bold mb-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Verification status</Text>
             <Text className="text-ink text-2xl font-extrabold mb-1" style={{ color: isDark ? '#E5E7EB' : undefined }}>
-              {isVerified
-                ? `${Math.min(referralCount, REQUIRED_REFERRALS_FOR_SUPER_USER)}/${REQUIRED_REFERRALS_FOR_SUPER_USER}`
-                : `${Math.min(referralCount, REQUIRED_REFERRALS_FOR_VERIFICATION)}/${REQUIRED_REFERRALS_FOR_VERIFICATION}`}
+              {isVerified ? 'Verified' : 'Not verified'}
             </Text>
             <Text className="text-gray-500 text-sm" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
-              {isVerified
-                ? 'You’re verified. Next goal: Super User (purple check).'
-                : 'Referrals are counted when someone enters your code in onboarding.'}
+              {isVerified ? 'You can post stories, join clubs, attend events, and view Crossed Paths.' : 'Link Apple or Google to instantly verify.'}
             </Text>
 
-            <View className="h-2 bg-gray-100 rounded-full w-full overflow-hidden mt-4" style={{ backgroundColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
-              <View
-                className={`h-full rounded-full ${isVerified ? 'bg-purple-600' : 'bg-business'}`}
-                style={{
-                  width: `${
-                    Math.min(
-                      1,
-                      referralCount / (isVerified ? REQUIRED_REFERRALS_FOR_SUPER_USER : REQUIRED_REFERRALS_FOR_VERIFICATION),
-                    ) * 100
-                  }%`,
-                }}
-              />
-            </View>
+            {!isVerified ? (
+              <View className="mt-2">
+                <SocialAuthButtons mode="link" onComplete={() => initialize()} />
+              </View>
+            ) : null}
           </View>
 
           <View
             className="bg-white border border-gray-100 rounded-2xl p-5 mb-6 shadow-sm"
             style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}
           >
-            <Text className="text-gray-500 font-bold mb-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Your friend code</Text>
+            <Text className="text-gray-500 font-bold mb-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Social status (optional)</Text>
+            <Text className="text-gray-600 leading-6 mb-3" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>
+              - Blue check (Super user): share the app {REQUIRED_SHARES_FOR_SUPER_USER} times.{'\n'}
+              - Orange check (Trendsetter): {REQUIRED_REFERRALS_FOR_TRENDSETTER} friends sign up with your friend code.
+            </Text>
+
+            <View className="flex-row flex-wrap">
+              <View className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 mr-2 mb-2">
+                <Text className="text-blue-700 font-bold text-xs">
+                  {Math.min(shareCount, REQUIRED_SHARES_FOR_SUPER_USER)}/{REQUIRED_SHARES_FOR_SUPER_USER} shares 
+                </Text>
+              </View>
+              <View className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2 mr-2 mb-2">
+                <Text className="text-orange-700 font-bold text-xs">
+                  {Math.min(referralCount, REQUIRED_REFERRALS_FOR_TRENDSETTER)}/{REQUIRED_REFERRALS_FOR_TRENDSETTER} signups 
+                </Text>
+              </View>
+            </View>
+
+            <Text className="text-gray-500 font-bold mb-2 mt-2" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>Your friend code</Text>
             <Text className="text-ink text-3xl font-extrabold tracking-widest" style={{ color: isDark ? '#E5E7EB' : undefined }}>
               {friendCode || '—'}
             </Text>

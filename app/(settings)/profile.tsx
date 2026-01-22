@@ -33,6 +33,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const RELATIONSHIP_OPTS = ['Romance', 'Friendship', 'Professional'];
+const GENDER_OPTS = ['male', 'female', 'other'] as const;
+const ROMANCE_PREF_OPTS = ['male', 'female', 'both', 'other'] as const;
 
 type SocialLinks = {
   instagram?: string;
@@ -66,6 +68,11 @@ export default function EditProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [relationshipGoals, setRelationshipGoals] = useState<string[]>([]);
   const [ageGroup, setAgeGroup] = useState<'minor' | 'adult' | null>(null);
+  const [gender, setGender] = useState<(typeof GENDER_OPTS)[number] | null>(null);
+  const [romancePreference, setRomancePreference] = useState<(typeof ROMANCE_PREF_OPTS)[number] | null>(null);
+  const [romanceMinAge, setRomanceMinAge] = useState(18);
+  const [romanceMaxAge, setRomanceMaxAge] = useState(35);
+  const [professionalTitle, setProfessionalTitle] = useState('');
   const [socials, setSocials] = useState<SocialLinks>({});
   const [isVerified, setIsVerified] = useState(false);
   const [saveCrossedPaths, setSaveCrossedPaths] = useState(true);
@@ -90,13 +97,49 @@ export default function EditProfileScreen() {
       const { data, error, status } = await supabase
         .from('profiles')
         // `birthdate` is intentionally not selectable by client roles (privacy hardening).
-        .select(`username, full_name, bio, currently_into, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths, age_group`)
+        .select(`username, full_name, bio, currently_into, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths, age_group, gender, romance_preference, romance_min_age, romance_max_age, professional_title`)
         .eq('id', user.id)
         .single();
 
-      if (error && status !== 406) {
-        throw error;
+      // If the local DB schema hasn't been migrated yet (missing columns), fall back to the
+      // legacy select so the screen still reflects the user's real data.
+      if (error && (error as any)?.code === '42703') {
+        const legacy = await supabase
+          .from('profiles')
+          // `birthdate` is intentionally not selectable by client roles (privacy hardening).
+          .select(`username, full_name, bio, currently_into, avatar_url, relationship_goals, social_links, is_verified, save_crossed_paths, age_group, romance_min_age, romance_max_age`)
+          .eq('id', user.id)
+          .single();
+
+        if (legacy.error && (legacy as any).status !== 406) throw legacy.error;
+        const legacyData = legacy.data as any;
+        if (legacyData) {
+          setUsername(legacyData.username || '');
+          setFullName(legacyData.full_name || '');
+          setBio(legacyData.bio || '');
+          setCurrentlyInto(legacyData.currently_into || '');
+          setAvatarUrl(legacyData.avatar_url);
+          const ag = (legacyData.age_group as 'minor' | 'adult' | null) ?? null;
+          setAgeGroup(ag);
+          if (ag === 'minor') {
+            setRelationshipGoals(['Friendship']);
+          } else {
+            setRelationshipGoals(legacyData.relationship_goals || []);
+          }
+          setSocials(legacyData.social_links || {});
+          setIsVerified(legacyData.is_verified || false);
+          setSaveCrossedPaths(legacyData.save_crossed_paths ?? true);
+          setRomanceMinAge(Math.max(18, Number(legacyData.romance_min_age ?? 18)));
+          setRomanceMaxAge(Math.max(18, Number(legacyData.romance_max_age ?? 35)));
+          // New fields not available yet:
+          setGender(null);
+          setRomancePreference(null);
+          setProfessionalTitle('');
+        }
+        return;
       }
+
+      if (error && status !== 406) throw error;
 
       if (data) {
         setUsername(data.username || '');
@@ -115,6 +158,11 @@ export default function EditProfileScreen() {
         setSocials(data.social_links || {});
         setIsVerified(data.is_verified || false);
         setSaveCrossedPaths(data.save_crossed_paths ?? true);
+        setGender(((data as any).gender as any) ?? null);
+        setRomancePreference(((data as any).romance_preference as any) ?? null);
+        setRomanceMinAge(Math.max(18, Number((data as any).romance_min_age ?? 18)));
+        setRomanceMaxAge(Math.max(18, Number((data as any).romance_max_age ?? 35)));
+        setProfessionalTitle(((data as any).professional_title as string) ?? '');
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -156,6 +204,14 @@ export default function EditProfileScreen() {
         currently_into: currentlyInto.trim() || null,
         avatar_url: cleanAvatarPath,
         relationship_goals: ageGroup === 'minor' ? ['Friendship'] : relationshipGoals,
+        gender: ageGroup !== 'minor' && relationshipGoals[0] === 'Romance' ? gender : null,
+        romance_preference: ageGroup !== 'minor' && relationshipGoals[0] === 'Romance' ? romancePreference : null,
+        romance_min_age: ageGroup !== 'minor' && relationshipGoals[0] === 'Romance' ? Math.max(18, Math.floor(romanceMinAge)) : 18,
+        romance_max_age:
+          ageGroup !== 'minor' && relationshipGoals[0] === 'Romance'
+            ? Math.max(Math.max(18, Math.floor(romanceMinAge)), Math.floor(romanceMaxAge))
+            : 99,
+        professional_title: ageGroup !== 'minor' && relationshipGoals[0] === 'Professional' ? professionalTitle.trim() : null,
         social_links: socials,
         save_crossed_paths: saveCrossedPaths,
         updated_at: new Date(),
@@ -312,13 +368,15 @@ export default function EditProfileScreen() {
               onPress={() => router.push('/(settings)/get-verified')}
               className={`mb-6 p-4 rounded-2xl flex-row items-center justify-between ${isVerified ? 'bg-business/10 border border-business/20' : 'bg-gray-50 border border-gray-100 shadow-sm'}`}
             >
-              <View className="flex-row items-center">
+              <View className="flex-row items-center flex-1 pr-3">
                 <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${isVerified ? 'bg-business' : 'bg-gray-200'}`}>
                   <IconSymbol name="checkmark.seal.fill" size={20} color="white" />
                 </View>
-                <View>
+                <View className="flex-1">
                   <Text className="font-bold text-base text-ink">{isVerified ? 'You are Verified' : 'Get Verified'}</Text>
-                  <Text className="text-gray-500 text-xs">{isVerified ? 'Badge active on your profile' : 'Stand out with a blue checkmark'}</Text>
+                  <Text className="text-gray-500 text-xs" numberOfLines={2}>
+                    {isVerified ? 'Account verified for access' : 'Verify to unlock stories, clubs, events, and crossed paths'}
+                  </Text>
                 </View>
               </View>
               {!isVerified && <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />}
@@ -431,6 +489,88 @@ export default function EditProfileScreen() {
                 </View>
               )}
             </View>
+
+            {ageGroup !== 'minor' && relationshipGoals[0] === 'Romance' ? (
+              <View className="mb-6 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+                <Text className="text-gray-500 mb-2 ml-1 font-bold">Your gender</Text>
+                <View className="flex-row flex-wrap mb-4">
+                  {GENDER_OPTS.map((g) => {
+                    const selected = gender === g;
+                    return (
+                      <TouchableOpacity
+                        key={g}
+                        onPress={() => setGender(g)}
+                        className={`px-4 py-2 rounded-full mr-2 mb-2 border ${selected ? 'bg-black border-black' : 'bg-white border-gray-200'}`}
+                        activeOpacity={0.9}
+                      >
+                        <Text className={`font-bold ${selected ? 'text-white' : 'text-gray-700'}`}>{g}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text className="text-gray-500 mb-2 ml-1 font-bold">Preference</Text>
+                <View className="flex-row flex-wrap mb-4">
+                  {ROMANCE_PREF_OPTS.map((p) => {
+                    const selected = romancePreference === p;
+                    return (
+                      <TouchableOpacity
+                        key={p}
+                        onPress={() => setRomancePreference(p)}
+                        className={`px-4 py-2 rounded-full mr-2 mb-2 border ${selected ? 'bg-black border-black' : 'bg-white border-gray-200'}`}
+                        activeOpacity={0.9}
+                      >
+                        <Text className={`font-bold ${selected ? 'text-white' : 'text-gray-700'}`}>{p}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <Text className="text-gray-500 mb-2 ml-1 font-bold">Romance age range</Text>
+                <View className="flex-row">
+                  <View className="flex-1 mr-2">
+                    <Text className="text-gray-400 text-xs mb-2 ml-1">Minimum (18+)</Text>
+                    <TextInput
+                      value={String(Math.max(18, Math.floor(romanceMinAge)))}
+                      editable={false}
+                      className="bg-white border border-gray-200 rounded-xl p-3 text-base text-ink"
+                    />
+                  </View>
+                  <View className="flex-1 ml-2">
+                    <Text className="text-gray-400 text-xs mb-2 ml-1">Maximum</Text>
+                    <TextInput
+                      value={String(Math.max(Math.max(18, Math.floor(romanceMinAge)), Math.floor(romanceMaxAge)))}
+                      editable={false}
+                      className="bg-white border border-gray-200 rounded-xl p-3 text-base text-ink"
+                    />
+                  </View>
+                </View>
+                <Text className="text-gray-400 text-xs mt-2 ml-1">
+                  Edit your romance age range during onboarding (for now).
+                </Text>
+              </View>
+            ) : null}
+
+            {ageGroup !== 'minor' && relationshipGoals[0] === 'Professional' ? (
+              <View className="mb-6">
+                <Text className="text-gray-500 mb-1 ml-1 font-medium">Title</Text>
+                <TextInput
+                  value={professionalTitle}
+                  onChangeText={setProfessionalTitle}
+                  placeholder="what do you do?"
+                  placeholderTextColor="#9CA3AF"
+                  className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-base text-ink"
+                  returnKeyType="done"
+                  blurOnSubmit
+                  onSubmitEditing={() => {
+                    if (Platform.OS !== 'web') Keyboard.dismiss();
+                  }}
+                  onFocus={(e) => {
+                    if (Platform.OS === 'web') e.stopPropagation();
+                  }}
+                />
+              </View>
+            ) : null}
 
             <View className="mb-6">
               <Text className="text-gray-500 mb-2 ml-1 font-bold">Interests</Text>

@@ -54,10 +54,7 @@ begin
   where id = referrer_id
   returning referral_count into current_count;
 
-  -- Unlock verification automatically at 1 referral
-  if current_count >= 1 then
-    update public.profiles set is_verified = true where id = referrer_id;
-  end if;
+  -- NOTE: referrals no longer grant verification; they are used for Trendsetter status.
 
   return json_build_object(
     'referrer_id', referrer_id,
