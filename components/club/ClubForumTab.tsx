@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, ScrollView, TextInput, Keyboard, ActivityIndicator } from 'react-native';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
+import { View, Text, FlatList, TouchableOpacity, TextInput, Keyboard, ActivityIndicator } from 'react-native';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import Avatar from '@/components/profile/Avatar';
 import ReplyItem from './ReplyItem';
@@ -71,12 +72,13 @@ export default function ClubForumTab({
                     </TouchableOpacity>
                     <Text className="text-lg font-bold text-ink flex-1" numberOfLines={1} style={textPrimary}>{selectedTopic.title}</Text>
                 </View>
-                <ScrollView 
+                <KeyboardAwareScrollView
                     className="flex-1 px-4" 
                     keyboardShouldPersistTaps="handled"
                     contentContainerStyle={{ paddingBottom: 20 }}
                     showsVerticalScrollIndicator={true}
                     keyboardDismissMode="interactive"
+                    basePaddingBottom={24}
                     style={{ backgroundColor: isDark ? '#0B1220' : undefined }}
                 >
                     {/* Topic Header */}
@@ -181,7 +183,7 @@ export default function ClubForumTab({
                             />
                         ))}
                     </View>
-                </ScrollView>
+                </KeyboardAwareScrollView>
                 {!selectedTopic.is_locked && (
                     <View className="bg-white border-t border-gray-100" style={{ paddingBottom: insets.bottom, backgroundColor: isDark ? '#0B1220' : undefined, borderTopColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
                         {replyingToReplyId && (

@@ -4,6 +4,7 @@ import { CoachMarks } from '@/components/ui/CoachMarks';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getUserConnectionsList } from '@/lib/connections';
+import { formatMessagePreview } from '@/lib/messagePreview';
 import { BlurView } from 'expo-blur';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -89,9 +90,12 @@ type InboxItem = {
 
 type UpcomingEvent = {
   id: string;
-  club_id: string;
+  source: 'club' | 'user';
+  club_id: string | null;
   title: string;
   event_date: string;
+  duration_minutes?: number | null;
+  ends_at?: string | null;
   location: string | null;
   club?: { id: string; name: string; image_url: string | null } | null;
   kind: 'rsvp' | 'interested' | 'hosting';
@@ -122,12 +126,13 @@ type StoryUser = {
 export default function InboxScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const { activeStatuses, currentProfile, openMyStatusViewer, openStatusViewer, seenStatusIds } = useStatus();
+  const { activeStatuses, currentProfile, openMyStatusViewer, openStatusViewer, seenStatusIds, myUpcomingUserEvents, fetchMyUserEvents } = useStatus();
   const scheme = useColorScheme() ?? 'light';
   const isDark = scheme === 'dark';
   const [focused, setFocused] = useState(true);
   const [items, setItems] = useState<InboxItem[]>(() => getUiCache<InboxItem[]>('inbox.items') ?? []);
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>(() => getUiCache<UpcomingEvent[]>('inbox.upcoming') ?? []);
+  const [notifActors, setNotifActors] = useState<Record<string, { id: string; avatar_url: string | null; username: string | null; full_name: string | null }>>({});
   const [loading, setLoading] = useState(items.length === 0); // initial-only loader
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -137,6 +142,7 @@ export default function InboxScreen() {
   const [composeVisible, setComposeVisible] = useState(false);
   const [composeLoading, setComposeLoading] = useState(false);
   const [composeConnections, setComposeConnections] = useState<Array<{ conversationId: string; partner: { id: string; username: string; full_name: string | null; avatar_url: string | null } }>>([]);
+  const [createVisible, setCreateVisible] = useState(false);
   const [storyUsers, setStoryUsers] = useState<StoryUser[]>([]);
   const [storiesLoading, setStoriesLoading] = useState(false);
   const router = useRouter();
@@ -230,11 +236,14 @@ export default function InboxScreen() {
     useCallback(() => {
       if (user) {
         fetchData({ silent: true });
+        fetchMyUserEvents();
       }
     }, [user])
   );
 
   const seenSet = useMemo(() => new Set(seenStatusIds), [seenStatusIds]);
+  const notificationItems = useMemo(() => items.filter((i) => i.type === 'notification' && i.notification) as InboxItem[], [items]);
+  const requestItems = useMemo(() => items.filter((i) => i.type === 'request' && i.request) as InboxItem[], [items]);
 
   const fetchStories = async () => {
     if (!user) return;
@@ -428,7 +437,15 @@ export default function InboxScreen() {
       }
 
       // Fetch pending requests + optimized conversations + notifications in parallel
-      const [requestsResult, conversationsResult, notificationsResult, rsvpsResult, interestsResult] = await Promise.all([
+      const [
+        requestsResult,
+        conversationsResult,
+        notificationsResult,
+        clubRsvpsResult,
+        clubInterestsResult,
+        userRsvpsResult,
+        userInterestsResult,
+      ] = await Promise.all([
         supabase
           .from('interests')
           .select(`
@@ -459,81 +476,200 @@ export default function InboxScreen() {
           .select('event_id, status')
           .eq('user_id', user.id)
           .eq('status', 'interested'),
+        // User event RSVP/interest tables (created by supabase/user_events_table.sql). Backwards compatible if missing.
+        supabase
+          .from('user_event_rsvps')
+          .select('event_id, status')
+          .eq('user_id', user.id),
+        supabase
+          .from('user_event_interests')
+          .select('event_id, status')
+          .eq('user_id', user.id)
+          .eq('status', 'interested'),
       ]);
 
       let requestsData = requestsResult.data as any[] | null;
       const conversationsRows = (conversationsResult as any).data as any[] | null;
       const notificationsData = notificationsResult.data;
 
+      // Prefetch actor profiles for notifications that should use avatars (connection notifications).
+      try {
+        const rows = ((notificationsData as any[]) || []) as any[];
+        const actorIds = Array.from(
+          new Set<string>(
+            rows
+              .filter((n) => n?.type === 'connection_request' || n?.type === 'connection_accepted')
+              .map((n) => String(n?.data?.requester_id ?? n?.data?.partner_id ?? ''))
+              .filter((id) => !!id),
+          ),
+        );
+
+        if (actorIds.length === 0) {
+          setNotifActors({});
+        } else {
+          const { data: profiles, error: profErr } = await supabase
+            .from('profiles')
+            .select('id, avatar_url, username, full_name')
+            .in('id', actorIds);
+          if (!profErr) {
+            const map: Record<string, { id: string; avatar_url: string | null; username: string | null; full_name: string | null }> = {};
+            for (const p of ((profiles as any[]) || []) as any[]) {
+              if (!p?.id) continue;
+              map[String(p.id)] = {
+                id: String(p.id),
+                avatar_url: (p.avatar_url as string | null) ?? null,
+                username: (p.username as string | null) ?? null,
+                full_name: (p.full_name as string | null) ?? null,
+              };
+            }
+            setNotifActors(map);
+          }
+        }
+      } catch {
+        // ignore
+      }
+
       // Upcoming events: union of RSVP'd + Interested events (future only)
       try {
-        const rsvps = ((rsvpsResult as any)?.data || []) as Array<{ event_id: string; status: 'going' | 'maybe' | 'cant' }>;
-        const interestsErr = (interestsResult as any)?.error;
-        const interests =
-          interestsErr && interestsErr.code === '42P01'
+        const clubRsvps = ((clubRsvpsResult as any)?.data || []) as Array<{ event_id: string; status: 'going' | 'maybe' | 'cant' }>;
+        const clubInterestsErr = (clubInterestsResult as any)?.error;
+        const clubInterests =
+          clubInterestsErr && clubInterestsErr.code === '42P01'
             ? []
-            : (((interestsResult as any)?.data || []) as Array<{ event_id: string; status: 'interested' }>);
+            : (((clubInterestsResult as any)?.data || []) as Array<{ event_id: string; status: 'interested' }>);
+
+        const userRsvpsErr = (userRsvpsResult as any)?.error;
+        const userRsvps =
+          userRsvpsErr && userRsvpsErr.code === '42P01'
+            ? []
+            : (((userRsvpsResult as any)?.data || []) as Array<{ event_id: string; status: 'going' | 'maybe' | 'cant' }>);
+
+        const userInterestsErr = (userInterestsResult as any)?.error;
+        const userInterests =
+          userInterestsErr && userInterestsErr.code === '42P01'
+            ? []
+            : (((userInterestsResult as any)?.data || []) as Array<{ event_id: string; status: 'interested' }>);
 
         const nowIso = new Date().toISOString();
 
         // Host-created future events should always appear here too (even if RSVP row is missing).
-        const { data: hostingEvents } = await supabase
+        const { data: hostingClubEvents } = await supabase
           .from('club_events')
           .select('id, club_id, title, event_date, location, club:clubs(id, name, image_url), is_cancelled')
           .eq('created_by', user.id)
           .eq('is_cancelled', false as any)
-          .gt('event_date', nowIso)
+          .gt('ends_at', nowIso)
           .order('event_date', { ascending: true });
 
-        const ids = Array.from(
+        const { data: hostingUserEvents, error: hostingUserErr } = await supabase
+          .from('user_events')
+          .select('id, title, event_date, location, is_cancelled')
+          .eq('created_by', user.id)
+          .eq('is_cancelled', false as any)
+          .gt('ends_at', nowIso)
+          .order('event_date', { ascending: true });
+
+        const clubIds = Array.from(
           new Set<string>(
             [
-              ...rsvps.map((r) => r.event_id),
-              ...interests.map((i) => i.event_id),
-              ...(((hostingEvents as any[]) || []).map((e: any) => e.id) as string[]),
+              ...clubRsvps.map((r) => r.event_id),
+              ...clubInterests.map((i) => i.event_id),
+              ...(((hostingClubEvents as any[]) || []).map((e: any) => e.id) as string[]),
             ].filter(Boolean),
           ),
         );
+        const userIds =
+          hostingUserErr && (hostingUserErr as any).code === '42P01'
+            ? []
+            : Array.from(
+                new Set<string>(
+                  [
+                    ...userRsvps.map((r) => r.event_id),
+                    ...userInterests.map((i) => i.event_id),
+                    ...(((hostingUserEvents as any[]) || []).map((e: any) => e.id) as string[]),
+                  ].filter(Boolean),
+                ),
+              );
 
-        if (ids.length === 0) {
+        if (clubIds.length === 0 && userIds.length === 0) {
           setUpcomingEvents([]);
         } else {
-          const { data: eventsData } = await supabase
-            .from('club_events')
-            .select('id, club_id, title, event_date, location, created_by, club:clubs(id, name, image_url), is_cancelled')
-            .in('id', ids)
-            .eq('is_cancelled', false as any)
-            .gt('event_date', nowIso)
-            .order('event_date', { ascending: true });
+          const [{ data: clubEventsData }, { data: userEventsData }] = await Promise.all([
+            clubIds.length === 0
+              ? Promise.resolve({ data: [] } as any)
+              : supabase
+                  .from('club_events')
+                  .select('id, club_id, title, event_date, duration_minutes, ends_at, location, created_by, club:clubs(id, name, image_url), is_cancelled')
+                  .in('id', clubIds)
+                  .eq('is_cancelled', false as any)
+                  .gt('ends_at', nowIso)
+                  .order('event_date', { ascending: true }),
+            userIds.length === 0
+              ? Promise.resolve({ data: [] } as any)
+              : supabase
+                  .from('user_events')
+                  .select('id, title, event_date, duration_minutes, ends_at, location, created_by, is_cancelled')
+                  .in('id', userIds)
+                  .eq('is_cancelled', false as any)
+                  .gt('ends_at', nowIso)
+                  .order('event_date', { ascending: true }),
+          ]);
 
-          const rsvpMap = new Map(rsvps.map((r) => [r.event_id, r.status]));
-          const interestedSet = new Set(interests.map((i) => i.event_id));
-          const hostingSet = new Set((((hostingEvents as any[]) || []).map((e: any) => e.id) as string[]));
+          const clubRsvpMap = new Map(clubRsvps.map((r) => [r.event_id, r.status] as const));
+          const clubInterestedSet = new Set(clubInterests.map((i) => i.event_id));
+          const hostingClubSet = new Set((((hostingClubEvents as any[]) || []).map((e: any) => e.id) as string[]));
+          for (const hid of hostingClubSet) if (!clubRsvpMap.has(hid)) clubRsvpMap.set(hid, 'going');
 
-          // Treat hosting events as "going" for display purposes if RSVP row hasn't been created yet.
-          for (const hid of hostingSet) {
-            if (!rsvpMap.has(hid)) rsvpMap.set(hid, 'going');
-          }
+          const userRsvpMap = new Map(userRsvps.map((r) => [r.event_id, r.status] as const));
+          const userInterestedSet = new Set(userInterests.map((i) => i.event_id));
+          const hostingUserSet = new Set((((hostingUserEvents as any[]) || []).map((e: any) => e.id) as string[]));
+          for (const hid of hostingUserSet) if (!userRsvpMap.has(hid)) userRsvpMap.set(hid, 'going');
 
-          const upcoming: UpcomingEvent[] = ((eventsData as any[]) || [])
+          const clubUpcoming: UpcomingEvent[] = (((clubEventsData as any[]) || []) as any[])
             .map((e: any) => {
-              const isHosting = e.created_by === user.id || hostingSet.has(e.id);
-              const hasRsvp = rsvpMap.has(e.id);
-              const isInterested = interestedSet.has(e.id);
+              const isHosting = e.created_by === user.id || hostingClubSet.has(e.id);
+              const hasRsvp = clubRsvpMap.has(e.id);
+              const isInterested = clubInterestedSet.has(e.id);
               const kind: UpcomingEvent['kind'] = isHosting ? 'hosting' : hasRsvp ? 'rsvp' : 'interested';
               return {
+                source: 'club' as const,
                 id: e.id,
                 club_id: e.club_id,
                 title: e.title,
                 event_date: e.event_date,
+                duration_minutes: e.duration_minutes ?? null,
+                ends_at: e.ends_at ?? null,
                 location: e.location,
                 club: e.club || null,
                 kind,
-                rsvp_status: rsvpMap.get(e.id) || null,
+                rsvp_status: clubRsvpMap.get(e.id) || null,
               };
             })
-            // If event_interests table isn't installed, keep RSVP + Hosting only.
-            .filter((e) => e.kind !== 'interested' || interestedSet.size > 0);
+            .filter((e) => e.kind !== 'interested' || clubInterestedSet.size > 0);
+
+          const userUpcoming: UpcomingEvent[] = (((userEventsData as any[]) || []) as any[])
+            .map((e: any) => {
+              const isHosting = e.created_by === user.id || hostingUserSet.has(e.id);
+              const hasRsvp = userRsvpMap.has(e.id);
+              const isInterested = userInterestedSet.has(e.id);
+              const kind: UpcomingEvent['kind'] = isHosting ? 'hosting' : hasRsvp ? 'rsvp' : 'interested';
+              return {
+                source: 'user' as const,
+                id: e.id,
+                club_id: null,
+                title: e.title,
+                event_date: e.event_date,
+                duration_minutes: e.duration_minutes ?? null,
+                ends_at: e.ends_at ?? null,
+                location: e.location,
+                club: null,
+                kind,
+                rsvp_status: userRsvpMap.get(e.id) || null,
+              };
+            })
+            .filter((e) => e.kind !== 'interested' || userInterestedSet.size > 0);
+
+          const upcoming: UpcomingEvent[] = [...clubUpcoming, ...userUpcoming];
 
           // Order: Hosting first, then RSVP'd, then Interested
           const kindRank: Record<UpcomingEvent['kind'], number> = { hosting: 0, rsvp: 1, interested: 2 };
@@ -546,18 +682,26 @@ export default function InboxScreen() {
           setUiCache('inbox.upcoming', upcoming);
 
           // Best-effort backfill RSVP rows for hosted events (covers DBs that haven't applied the trigger yet).
-          const missingHosted = upcoming
-            .filter((e) => e.kind === 'hosting')
-            .filter((e) => !rsvps.find((r) => r.event_id === e.id))
+          const missingHostedClub = upcoming
+            .filter((e) => e.source === 'club' && e.kind === 'hosting')
+            .filter((e) => !clubRsvps.find((r) => r.event_id === e.id))
             .map((e) => e.id);
+          if (missingHostedClub.length > 0) {
+            void supabase.from('club_event_rsvps').upsert(
+              missingHostedClub.map((eventId) => ({ event_id: eventId, user_id: user.id, status: 'going' })),
+              { onConflict: 'event_id,user_id' },
+            );
+          }
 
-          if (missingHosted.length > 0) {
-            void supabase
-              .from('club_event_rsvps')
-              .upsert(
-                missingHosted.map((eventId) => ({ event_id: eventId, user_id: user.id, status: 'going' })),
-                { onConflict: 'event_id,user_id' },
-              );
+          const missingHostedUser = upcoming
+            .filter((e) => e.source === 'user' && e.kind === 'hosting')
+            .filter((e) => !userRsvps.find((r) => r.event_id === e.id))
+            .map((e) => e.id);
+          if (missingHostedUser.length > 0) {
+            void supabase.from('user_event_rsvps').upsert(
+              missingHostedUser.map((eventId) => ({ event_id: eventId, user_id: user.id, status: 'going' })),
+              { onConflict: 'event_id,user_id' },
+            );
           }
         }
       } catch {
@@ -830,6 +974,11 @@ export default function InboxScreen() {
 
     if (item.type === 'notification' && item.notification) {
       const notif = item.notification;
+      const actorId =
+        notif.type === 'connection_request' || notif.type === 'connection_accepted'
+          ? (notif.data?.requester_id ?? notif.data?.partner_id ?? null)
+          : null;
+      const actor = actorId ? notifActors[String(actorId)] : null;
       const getNotificationIcon = () => {
         switch (notif.type) {
           case 'forum_reply':
@@ -1038,13 +1187,19 @@ export default function InboxScreen() {
           }`}
         >
           <TouchableOpacity className="flex-row items-center" onPress={handleNotificationPress} activeOpacity={0.8}>
-            <View
-              className={`w-10 h-10 rounded-full items-center justify-center ${
-                notif.read ? 'bg-gray-100' : 'bg-blue-100'
-              }`}
-            >
-              <IconSymbol name={icon.name} size={20} color={icon.color} />
-            </View>
+            {actor ? (
+              <View className="w-10 h-10 rounded-full overflow-hidden">
+                <Avatar path={actor.avatar_url} />
+              </View>
+            ) : (
+              <View
+                className={`w-10 h-10 rounded-full items-center justify-center ${
+                  notif.read ? 'bg-gray-100' : 'bg-blue-100'
+                }`}
+              >
+                <IconSymbol name={icon.name} size={20} color={icon.color} />
+              </View>
+            )}
             <View className="ml-3 flex-1 pr-2">
               <Text className={`font-bold text-base mb-1 ${notif.read ? 'text-gray-700' : 'text-gray-900'}`}>
                 {notif.title}
@@ -1119,6 +1274,57 @@ export default function InboxScreen() {
             fetchData();
         }}
       />
+
+      <Modal transparent animationType="fade" visible={createVisible} onRequestClose={() => setCreateVisible(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setCreateVisible(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' }}>
+          <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={{ backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 18, paddingBottom: 18 + insets.bottom }}>
+              <View className="flex-row items-center justify-between mb-3">
+                <Text className="text-ink font-bold text-lg">Create</Text>
+                <TouchableOpacity onPress={() => setCreateVisible(false)} className="p-2">
+                  <IconSymbol name="xmark" size={18} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => {
+                  setCreateVisible(false);
+                  openCompose();
+                }}
+                className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 flex-row items-center mb-3"
+              >
+                <View className="w-10 h-10 rounded-full bg-white border border-gray-200 items-center justify-center mr-3">
+                  <IconSymbol name="square.and.pencil" size={18} color="#111827" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-ink font-bold">New message</Text>
+                  <Text className="text-gray-500 text-xs mt-0.5">Start a chat with a connection.</Text>
+                </View>
+                <IconSymbol name="chevron.right" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => {
+                  setCreateVisible(false);
+                  router.push('/events/create');
+                }}
+                className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4 flex-row items-center"
+              >
+                <View className="w-10 h-10 rounded-full bg-white border border-gray-200 items-center justify-center mr-3">
+                  <IconSymbol name="calendar.badge.plus" size={18} color="#111827" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-ink font-bold">New event</Text>
+                  <Text className="text-gray-500 text-xs mt-0.5">Create a user event for your connections (or public).</Text>
+                </View>
+                <IconSymbol name="chevron.right" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
       
       <View
         className="flex-row justify-between items-center mb-4 px-4"
@@ -1134,7 +1340,7 @@ export default function InboxScreen() {
         <View ref={composeRef} collapsable={false}>
           <TouchableOpacity
             onPress={() => {
-              openCompose();
+              setCreateVisible(true);
             }}
             activeOpacity={0.85}
           >
@@ -1187,12 +1393,17 @@ export default function InboxScreen() {
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => {
-                if (activeStatuses.length > 0) openMyStatusViewer(0);
+                const hasStoryOrEvent = activeStatuses.length > 0 || (myUpcomingUserEvents?.length ?? 0) > 0;
+                if (hasStoryOrEvent) openMyStatusViewer(0);
                 else router.push('/(tabs)/explore');
               }}
               style={{ marginRight: 12, alignItems: 'center', width: 76 }}
             >
-              <StoryAvatar path={currentProfile?.avatar_url || null} hasStory={activeStatuses.length > 0} />
+              <StoryAvatar
+                path={currentProfile?.avatar_url || null}
+                hasStory={activeStatuses.length > 0 || (myUpcomingUserEvents?.length ?? 0) > 0}
+                showEventBadge={(myUpcomingUserEvents?.length ?? 0) > 0}
+              />
               <Text className="text-[11px] text-gray-700 mt-1" numberOfLines={1}>
                 You
               </Text>
@@ -1300,9 +1511,9 @@ export default function InboxScreen() {
             <IconSymbol name="calendar" size={18} color="#2563EB" />
           </View>
         <View className="flex-1">
-          <Text className="text-ink font-bold text-base" style={titleStyle}>Upcoming Events</Text>
+          <Text className="text-ink font-bold text-base" style={titleStyle}>My events</Text>
           <Text className="text-gray-500 text-xs" numberOfLines={1} style={subStyle}>
-            RSVP’d + Interested events
+            created + attending events
           </Text>
         </View>
         <View className="bg-gray-100 px-3 py-1 rounded-full">
@@ -1347,7 +1558,10 @@ export default function InboxScreen() {
                 {unreadMessageItems[0]!.conversation!.partner.username}
               </Text>
               <Text className="text-gray-500 text-xs" numberOfLines={1} style={subStyle}>
-                {unreadMessageItems[0]!.conversation!.last_message?.content || 'New message'}
+                {formatMessagePreview({
+                  content: unreadMessageItems[0]!.conversation!.last_message?.content,
+                  senderIsMe: String(unreadMessageItems[0]!.conversation!.last_message?.sender_id) === String(user?.id),
+                }) || 'New message'}
               </Text>
             </View>
             <View className="bg-gray-100 border border-gray-200 rounded-full w-9 h-9 items-center justify-center">
@@ -1385,7 +1599,10 @@ export default function InboxScreen() {
                     </Text>
                     {isFront ? (
                       <Text className="text-gray-500 text-xs" numberOfLines={1}>
-                        {it.conversation.last_message?.content || 'New message'}
+                        {formatMessagePreview({
+                          content: it.conversation.last_message?.content,
+                          senderIsMe: String(it.conversation.last_message?.sender_id) === String(user?.id),
+                        }) || 'New message'}
                       </Text>
                     ) : (
                       <Text className="text-gray-400 text-xs" numberOfLines={1}>
@@ -1436,7 +1653,47 @@ export default function InboxScreen() {
         </BlurView>
       </View>
 
+      {/* Small thin Clear all button just below the notifications divider (only when there are notifications) */}
+      {notificationItems.length > 0 && (
+        <View style={{ paddingHorizontal: 16, marginBottom: 6 }}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={async () => {
+              if (!user?.id) return;
+              try {
+                const now = new Date().toISOString();
+                await supabase
+                  .from('notifications')
+                  .update({ read: true, read_at: now })
+                  .eq('user_id', user.id)
+                  .or('read.is.null,read.eq.false');
+                fetchData({ silent: true });
+              } catch {
+                // ignore
+              }
+            }}
+            className="py-1.5 items-center"
+          >
+            <Text className="text-gray-500 text-xs font-medium">Clear all</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
+      {/* New notifications list (when any); no card when empty */}
+      {notificationItems.length > 0 && (
+        <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
+          {notificationItems.map((n) => (
+            <View key={n.id}>{renderItem({ item: n } as any)}</View>
+          ))}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push('/notifications/history')}
+            className="py-2 items-center mt-1"
+          >
+            <Text className="text-gray-500 text-sm font-medium">History</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {loading && items.length === 0 ? (
         <View className="flex-1 items-center justify-center">
@@ -1444,7 +1701,7 @@ export default function InboxScreen() {
         </View>
       ) : (
         <FlatList
-          data={items.filter((i) => i.type !== 'message')}
+          data={requestItems}
           keyExtractor={(item) => item.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchData()} />}
           renderItem={renderItem}
@@ -1452,7 +1709,14 @@ export default function InboxScreen() {
           ListEmptyComponent={
             <View className="items-center mt-10">
               <IconSymbol name="tray" size={48} color="#CBD5E0" />
-              <Text className="text-gray-400 text-lg mt-4">Your inbox is empty.</Text>
+              <Text className="text-gray-400 text-lg mt-4">No new requests.</Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => router.push('/notifications/history')}
+                className="mt-4 py-2 px-4"
+              >
+                <Text className="text-gray-400 text-sm underline">Notification history</Text>
+              </TouchableOpacity>
             </View>
           }
         />
@@ -1467,7 +1731,7 @@ export default function InboxScreen() {
         >
           <TouchableOpacity activeOpacity={1} className="w-full max-w-[420px] bg-white rounded-3xl overflow-hidden max-h-[84%]">
             <View className="p-5 border-b border-gray-100 flex-row items-center">
-              <Text className="text-ink font-bold text-xl flex-1">Upcoming Events</Text>
+              <Text className="text-ink font-bold text-xl flex-1">My events</Text>
               <TouchableOpacity onPress={() => setUpcomingVisible(false)} className="p-2">
                 <IconSymbol name="xmark" size={18} color="#6B7280" />
               </TouchableOpacity>
@@ -1477,15 +1741,36 @@ export default function InboxScreen() {
                 <View className="items-center py-8">
                   <IconSymbol name="calendar.badge.exclamationmark" size={32} color="#9CA3AF" />
                   <Text className="text-gray-500 mt-3 font-semibold">No upcoming events yet.</Text>
-                  <Text className="text-gray-400 mt-1 text-xs text-center">
+                  <Text className="text-gray-400 mt-1 text-xs text-center px-4">
                     Tap “Interested” on events in the City tab to save them here.
                   </Text>
+                  <View className="items-center mt-6">
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        setUpcomingVisible(false);
+                        router.push('/events/create');
+                      }}
+                    >
+                      <Text className="text-business font-bold text-base">Create Event</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        setUpcomingVisible(false);
+                        router.push('/events/past');
+                      }}
+                      className="mt-3"
+                    >
+                      <Text className="text-gray-500 text-sm underline">Events history</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ) : (
                 <View>
                   {upcomingEvents.map((ev) => (
                     <TouchableOpacity
-                      key={ev.id}
+                      key={`${ev.source}:${ev.id}`}
                       className="bg-gray-50 border border-gray-100 rounded-2xl p-4 mb-3"
                       activeOpacity={0.85}
                       onPress={() => {
@@ -1511,11 +1796,28 @@ export default function InboxScreen() {
                           </Text>
                         </View>
                       </View>
+                      {(() => {
+                        const start = new Date(ev.event_date);
+                        const end = ev.ends_at
+                          ? new Date(ev.ends_at)
+                          : new Date(start.getTime() + (Number(ev.duration_minutes ?? 120) * 60_000));
+                        const now = new Date();
+                        const happening = start <= now && end >= now;
+                        return happening ? (
+                          <View className="mt-2 self-start bg-red-50 border border-red-200 px-2 py-1 rounded-full">
+                            <Text className="text-[10px] text-red-700 font-bold">HAPPENING NOW!</Text>
+                          </View>
+                        ) : null;
+                      })()}
                       <Text className="text-gray-500 mt-1 text-xs">
                         {new Date(ev.event_date).toLocaleString()}
                       </Text>
                       {ev.location ? <Text className="text-gray-400 mt-1 text-xs">📍 {ev.location}</Text> : null}
-                      {ev.club?.name ? <Text className="text-gray-400 mt-1 text-xs">From {ev.club.name}</Text> : null}
+                      {ev.source === 'club' && ev.club?.name ? (
+                        <Text className="text-gray-400 mt-1 text-xs">From {ev.club.name}</Text>
+                      ) : ev.source === 'user' ? (
+                        <Text className="text-gray-400 mt-1 text-xs">Personal event</Text>
+                      ) : null}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -1597,7 +1899,7 @@ export default function InboxScreen() {
                     <View className="items-center py-10">
                       <IconSymbol name="person.2" size={36} color="#9CA3AF" />
                       <Text className="text-gray-500 mt-4 font-semibold">No connections yet</Text>
-                      <Text className="text-gray-400 mt-1 text-xs text-center">
+                      <Text className="text-gray-400 mt-1 text-xs text-center px-4">
                         Connect with people to start messaging.
                       </Text>
                     </View>
@@ -1627,14 +1929,14 @@ export default function InboxScreen() {
           },
           {
             key: 'upcoming',
-            title: 'Upcoming events',
+            title: 'My events',
             body: 'Your saved events live here so you don’t miss anything.',
             targetRef: upcomingRef,
           },
           {
             key: 'compose',
-            title: 'Quick message',
-            body: 'Tap this to quickly message a connection from a 3‑column grid.',
+            title: 'Create',
+            body: 'Start a new message — or create a new user event (public or members‑only).',
             targetRef: composeRef,
           },
         ]}
@@ -1700,7 +2002,17 @@ function AvatarImage({ path, size }: { path: string | null; size: number }) {
   );
 }
 
-function StoryAvatar({ path, hasStory, dimmed = false }: { path: string | null; hasStory: boolean; dimmed?: boolean }) {
+function StoryAvatar({
+  path,
+  hasStory,
+  dimmed = false,
+  showEventBadge = false,
+}: {
+  path: string | null;
+  hasStory: boolean;
+  dimmed?: boolean;
+  showEventBadge?: boolean;
+}) {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1710,41 +2022,62 @@ function StoryAvatar({ path, hasStory, dimmed = false }: { path: string | null; 
   }, [path]);
 
   return (
-    <View
-      style={{
-        width: 68,
-        height: 68,
-        borderRadius: 34,
-        padding: hasStory ? 3 : 0,
-        backgroundColor: hasStory ? 'rgba(59,130,246,0.9)' : 'transparent',
-        shadowColor: hasStory ? '#3B82F6' : 'transparent',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: hasStory ? 0.25 : 0,
-        shadowRadius: 14,
-        elevation: hasStory ? 8 : 0,
-      }}
-    >
+    <View style={{ position: 'relative' }}>
       <View
-        className="w-full h-full bg-gray-300 rounded-full overflow-hidden"
         style={{
-          // Subtle shadow on the avatar itself (carousel polish)
-          shadowColor: '#0F172A',
-          shadowOffset: { width: 0, height: 12 },
-          shadowOpacity: 0.22,
-          shadowRadius: 18,
-          elevation: 7,
+          width: 68,
+          height: 68,
+          borderRadius: 34,
+          padding: hasStory ? 3 : 0,
+          backgroundColor: hasStory ? 'rgba(59,130,246,0.9)' : 'transparent',
+          shadowColor: hasStory ? '#3B82F6' : 'transparent',
+          shadowOffset: { width: 0, height: 6 },
+          shadowOpacity: hasStory ? 0.25 : 0,
+          shadowRadius: 14,
+          elevation: hasStory ? 8 : 0,
         }}
       >
-        {url ? (
-          <Image source={{ uri: url }} className="w-full h-full" resizeMode="cover" style={{ opacity: dimmed ? 0.45 : 1 }} />
-        ) : (
-          <View className="w-full h-full items-center justify-center bg-gray-200">
-            <Text className="text-gray-400 font-bold" style={{ opacity: dimmed ? 0.55 : 1 }}>
-              ?
-            </Text>
-          </View>
-        )}
+        <View
+          className="w-full h-full bg-gray-300 rounded-full overflow-hidden"
+          style={{
+            // Subtle shadow on the avatar itself (carousel polish)
+            shadowColor: '#0F172A',
+            shadowOffset: { width: 0, height: 12 },
+            shadowOpacity: 0.22,
+            shadowRadius: 18,
+            elevation: 7,
+          }}
+        >
+          {url ? (
+            <Image source={{ uri: url }} className="w-full h-full" resizeMode="cover" style={{ opacity: dimmed ? 0.45 : 1 }} />
+          ) : (
+            <View className="w-full h-full items-center justify-center bg-gray-200">
+              <Text className="text-gray-400 font-bold" style={{ opacity: dimmed ? 0.55 : 1 }}>
+                ?
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
+      {showEventBadge && (
+        <View
+          style={{
+            position: 'absolute',
+            right: -2,
+            bottom: -2,
+            width: 24,
+            height: 24,
+            borderRadius: 12,
+            backgroundColor: '#0F172A',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 2,
+            borderColor: '#fff',
+          }}
+        >
+          <IconSymbol name="calendar.badge.plus" size={14} color="#fff" />
+        </View>
+      )}
     </View>
   );
 }

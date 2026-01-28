@@ -1,4 +1,5 @@
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { OrbBackground } from '@/components/ui/OrbBackground';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,7 +15,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -399,7 +399,11 @@ export default function OnboardingScreen() {
         </View>
       </View>
 
-      <ScrollView className="flex-1 px-6" contentContainerStyle={{ paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView
+        className="flex-1 px-6"
+        basePaddingBottom={110}
+        contentContainerStyle={{ paddingBottom: 0 }}
+      >
         {step === 0 && (
           <View className="mt-6">
             <View className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -737,7 +741,7 @@ export default function OnboardingScreen() {
             <InterestSelector interests={detailedInterests} onChange={setDetailedInterests} />
           </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <View className="px-6 py-4 bg-white border-t border-gray-100">
         <View className="flex-row space-x-4">

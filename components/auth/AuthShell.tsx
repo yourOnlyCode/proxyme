@@ -1,8 +1,9 @@
+import { KeyboardAwareLayout } from '@/components/KeyboardAwareLayout';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
+import { Animated, Platform, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 type AuthShellProps = {
@@ -241,11 +242,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
       )}
 
       <SafeAreaView className="flex-1">
-        <KeyboardAvoidingView
-          className="flex-1"
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-        >
+        <KeyboardAwareLayout headerOffset={12} style={{ flex: 1 }}>
           <ScrollView
             className="flex-1"
             contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingVertical: 18, justifyContent: 'center' }}
@@ -289,7 +286,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
               </BlurView>
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
+        </KeyboardAwareLayout>
       </SafeAreaView>
     </View>
   );

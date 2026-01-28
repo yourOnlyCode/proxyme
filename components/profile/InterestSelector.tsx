@@ -16,6 +16,7 @@ export function InterestSelector({ interests, onChange }: Props) {
     const [showAll, setShowAll] = useState(false);
     const [addingCustom, setAddingCustom] = useState(false);
     const [customCategoryName, setCustomCategoryName] = useState('');
+    const [draftByCategory, setDraftByCategory] = useState<Record<string, string>>({});
     
     const displayedInterests = showAll 
         ? AVAILABLE_INTERESTS 
@@ -26,12 +27,17 @@ export function InterestSelector({ interests, onChange }: Props) {
         const next = { ...interests };
         if (next[category]) {
             delete next[category];
+            setDraftByCategory((prev) => {
+              const copy = { ...prev };
+              delete copy[category];
+              return copy;
+            });
         } else {
             if (Object.keys(next).length >= 3) {
                 Alert.alert('Limit Reached', 'You can select up to 3 categories.');
                 return;
             }
-            next[category] = ['', '', ''];
+            next[category] = [];
         }
         onChange(next);
     };
@@ -57,7 +63,7 @@ export function InterestSelector({ interests, onChange }: Props) {
         
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         const next = { ...interests };
-        next[trimmed] = ['', '', ''];
+        next[trimmed] = [];
         onChange(next);
         setCustomCategoryName('');
         setAddingCustom(false);
@@ -68,13 +74,33 @@ export function InterestSelector({ interests, onChange }: Props) {
         setAddingCustom(false);
     };
 
-    const updateSubInterest = (category: string, index: number, text: string) => {
+    const addDetail = (category: string) => {
+        const raw = (draftByCategory[category] || '').trim();
+        if (!raw) return;
+        const next = { ...interests };
+        const current = Array.isArray(next[category]) ? [...next[category]] : [];
+        const normalized = raw.toLowerCase();
+        if (current.some((v) => String(v).toLowerCase().trim() === normalized)) {
+            Alert.alert('Already added', 'That detail is already in your list.');
+            return;
+        }
+        if (current.length >= 10) {
+            Alert.alert('Limit reached', 'Keep it to 10 specifics per category for now.');
+            return;
+        }
+        current.push(raw);
+        next[category] = current;
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        onChange(next);
+        setDraftByCategory((prev) => ({ ...prev, [category]: '' }));
+    };
+
+    const removeDetail = (category: string, value: string) => {
         const next = { ...interests };
         if (!next[category]) return;
-        
-        const newItems = [...next[category]];
-        newItems[index] = text;
-        next[category] = newItems;
+        const current = Array.isArray(next[category]) ? next[category] : [];
+        next[category] = current.filter((v) => String(v) !== String(value));
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         onChange(next);
     };
 
@@ -96,19 +122,42 @@ export function InterestSelector({ interests, onChange }: Props) {
                                     <IconSymbol name="xmark" size={14} color="#EF4444" />
                                 </TouchableOpacity>
                             </View>
-                            {[0, 1, 2].map((idx) => (
-                                <TextInput
-                                    key={idx}
-                                    placeholder={`Favorite ${category} #${idx + 1}`}
-                                    placeholderTextColor="#9CA3AF"
-                                    value={interests[category][idx] || ''}
-                                    onChangeText={(text) => updateSubInterest(category, idx, text)}
-                                    className="bg-white border border-gray-200 rounded-xl px-4 py-3 mb-2 text-base text-ink"
-                                    returnKeyType="done"
-                                    blurOnSubmit={false}
-                                    enablesReturnKeyAutomatically
-                                />
-                            ))}
+                            <View className="flex-row flex-wrap">
+                              {(interests[category] || [])
+                                .map((v) => String(v).trim())
+                                .filter(Boolean)
+                                .map((v) => (
+                                  <View
+                                    key={v}
+                                    className="flex-row items-center bg-white border border-gray-200 rounded-full px-3 py-2 mr-2 mb-2"
+                                  >
+                                    <Text className="text-ink font-semibold text-xs">{v}</Text>
+                                    <TouchableOpacity onPress={() => removeDetail(category, v)} className="ml-2">
+                                      <IconSymbol name="xmark.circle.fill" size={16} color="#9CA3AF" />
+                                    </TouchableOpacity>
+                                  </View>
+                                ))}
+                            </View>
+
+                            <View className="flex-row items-center mt-1">
+                              <TextInput
+                                placeholder={`Add a ${category} favorite…`}
+                                placeholderTextColor="#9CA3AF"
+                                value={draftByCategory[category] || ''}
+                                onChangeText={(t) => setDraftByCategory((prev) => ({ ...prev, [category]: t }))}
+                                className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-3 text-base text-ink"
+                                returnKeyType="done"
+                                blurOnSubmit={false}
+                                onSubmitEditing={() => addDetail(category)}
+                              />
+                              <TouchableOpacity
+                                onPress={() => addDetail(category)}
+                                className="ml-2 bg-black rounded-xl px-4 py-3 items-center justify-center"
+                                activeOpacity={0.85}
+                              >
+                                <Text className="text-white font-bold">Add</Text>
+                              </TouchableOpacity>
+                            </View>
                         </View>
                     ))}
                 </View>

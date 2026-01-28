@@ -1,12 +1,13 @@
 import { ProfileActionButtons } from '@/components/ProfileActionButtons';
 import { AccountCheckBadge } from '@/components/profile/AccountCheckBadge';
+import { AttendedEvents } from '@/components/profile/AttendedEvents';
 import { useConnectionState } from '@/hooks/useConnectionState';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, Image, Linking, Modal, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, Image, Linking, Modal, PanResponder, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../lib/auth';
 import { showSafetyOptions } from '../lib/safety';
 import { supabase } from '../lib/supabase';
@@ -159,7 +160,10 @@ export function ProfileModal({
                 .then(({ data }) => {
                     if (data) setFetchedProfile(data);
                 })
-                .finally(() => setLoadingProfile(false));
+                .then(
+                  () => setLoadingProfile(false),
+                  () => setLoadingProfile(false),
+                );
         } else {
             setFetchedPhotos(null);
             setFetchedProfile(null);
@@ -217,8 +221,12 @@ export function ProfileModal({
                 sharedScore += 1;
             }
 
-            if (values && values.length > 0) {
-                 values.forEach(val => {
+            const cleanValues = Array.from(
+              new Set((values || []).map((v: any) => String(v || '').trim()).filter(Boolean)),
+            );
+
+            if (cleanValues.length > 0) {
+                 cleanValues.forEach(val => {
                      let isShared = false;
                      // Check if I have this exact interest
                      if (myInterests && myInterests[cat]) {
@@ -430,9 +438,19 @@ export function ProfileModal({
                         <View className="flex-row items-center justify-center mb-6">
                             <IconSymbol name="location.fill" size={16} color="#9CA3AF" />
                             <Text className="text-gray-500 ml-1">
-                                {mergedProfile.dist_meters ? `${Math.round(mergedProfile.dist_meters)}m away` : 'Nearby'}
-                                {mergedProfile.city && ` • ${mergedProfile.city}`}
-                                {mergedProfile.state && `, ${mergedProfile.state}`}
+                                {(() => {
+                                  const d = Number(mergedProfile.dist_meters || 0);
+                                  // If it's truly nearby (Proxy-like), show meters.
+                                  if (Number.isFinite(d) && d > 0 && d < 1000) return `${Math.round(d)}m away`;
+
+                                  // City feed is city-wide; distance can be misleading/noisy. Prefer city label.
+                                  if (mergedProfile.city) return `${mergedProfile.city}${mergedProfile.state ? `, ${mergedProfile.state}` : ''}`;
+
+                                  // Fallback to a coarse km distance.
+                                  if (Number.isFinite(d) && d > 0) return `${Math.max(1, Math.round(d / 1000))}km away`;
+
+                                  return 'Nearby';
+                                })()}
                             </Text>
                         </View>
 
@@ -462,6 +480,11 @@ export function ProfileModal({
                                 </Text>
                             </View>
                         )}
+
+                        {/* Attended events (below photos) */}
+                        <View className="-mx-6">
+                          <AttendedEvents userId={mergedProfile.id} />
+                        </View>
 
                         {/* Interests */}
                         <View className="mb-8">

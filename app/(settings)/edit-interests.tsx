@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Button, LayoutAnimation, Platform, ScrollView, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
+import { ActivityIndicator, Alert, Button, LayoutAnimation, Platform, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { InterestSelector } from '../../components/profile/InterestSelector'; // Import component
 import { KeyboardDismissWrapper } from '../../components/KeyboardDismissButton';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
@@ -88,12 +89,12 @@ export default function EditInterestsScreen() {
   return (
     <KeyboardDismissWrapper>
       <View className="flex-1 bg-white" style={{ backgroundColor: isDark ? '#0B1220' : undefined }}>
-        <ScrollView className="flex-1 p-4" keyboardShouldPersistTaps="handled">
+        <KeyboardAwareScrollView className="flex-1 p-4" basePaddingBottom={80}>
           <View className="mb-6">
             <Text className="text-2xl font-bold mb-2" style={{ color: isDark ? '#E5E7EB' : undefined }}>Detailed Interests</Text>
             <Text className="text-gray-500 mb-6 text-base leading-5" style={{ color: isDark ? 'rgba(226,232,240,0.65)' : undefined }}>
                 Select up to <Text className="font-bold text-black" style={{ color: isDark ? '#E5E7EB' : undefined }}>3 categories</Text>. 
-                For each, list your top 3 specific favorites.
+                Add as many specific favorites as you want (you can edit/remove anytime).
                 {'\n\n'}
                 <Text className="italic text-gray-400">
                     Example: For <Text className="font-bold text-gray-500">Coffee</Text>, list your favorite local cafe like “Blue Bottle” or “Joe’s Coffee”.
@@ -108,7 +109,7 @@ export default function EditInterestsScreen() {
             <Button title={saving ? 'Saving...' : 'Save Interests'} onPress={saveInterests} disabled={saving} color="#000" />
             <View className="h-20" />
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </View>
     </KeyboardDismissWrapper>
   );

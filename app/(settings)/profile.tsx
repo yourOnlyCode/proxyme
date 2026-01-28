@@ -1,3 +1,5 @@
+import { KeyboardAwareLayout } from '@/components/KeyboardAwareLayout';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
 import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -8,7 +10,6 @@ import {
   ActivityIndicator,
   Alert,
   Keyboard,
-  KeyboardAvoidingView,
   LayoutAnimation,
   Modal,
   Platform,
@@ -22,6 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Avatar from '../../components/profile/Avatar';
+import { AttendedEvents } from '../../components/profile/AttendedEvents';
 import ProfileGallery from '../../components/profile/ProfileGallery';
 import { useAuth } from '../../lib/auth';
 import { deleteMyAccount } from '../../lib/accountDeletion';
@@ -357,11 +359,12 @@ export default function EditProfileScreen() {
             <View className="w-10" />
           </View>
 
-          <ScrollView
+          <KeyboardAwareScrollView
             className="flex-1 px-4 pt-4"
             contentInsetAdjustmentBehavior="never"
             automaticallyAdjustContentInsets={false}
             automaticallyAdjustsScrollIndicatorInsets={false}
+            basePaddingBottom={28}
           >
             {/* Verification Banner */}
             <TouchableOpacity
@@ -618,6 +621,7 @@ export default function EditProfileScreen() {
             </View>
 
             {user && <ProfileGallery userId={user.id} onSetAvatar={handleSetCover} />}
+            {user && <AttendedEvents userId={user.id} />}
 
             <View className="mt-8 bg-gray-50 p-4 rounded-xl border border-gray-200">
               <Text className="text-gray-500 mb-2 ml-1 font-bold">Privacy</Text>
@@ -653,11 +657,12 @@ export default function EditProfileScreen() {
             <TouchableOpacity onPress={handleDeleteAccount} className="items-center py-4 mb-10">
               <Text className="text-romance font-bold">Delete Account</Text>
             </TouchableOpacity>
-          </ScrollView>
+          </KeyboardAwareScrollView>
 
           {/* Social Modal - Full Height Keyboard Avoiding */}
-          <Modal visible={showSocialModal} animationType="slide" transparent>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 justify-end bg-black/50">
+          {/* Backdrop fades in (not sliding with sheet) */}
+          <Modal visible={showSocialModal} animationType="fade" transparent>
+            <KeyboardAwareLayout noDismissWrapper headerOffset={0} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
               <View className="bg-white rounded-t-3xl p-6 h-[85%] pb-10">
                 {/* Modal Grabber */}
                 <View className="items-center mb-6">
@@ -739,7 +744,7 @@ export default function EditProfileScreen() {
                   )}
                 </ScrollView>
               </View>
-            </KeyboardAvoidingView>
+            </KeyboardAwareLayout>
           </Modal>
         </View>
       </SafeAreaView>

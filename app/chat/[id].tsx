@@ -1,11 +1,12 @@
-import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
+import { StickyInputLayout } from '@/components/KeyboardAwareLayout';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FontAwesome, FontAwesome5 } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Linking, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProfileData, ProfileModal } from '../../components/ProfileModal';
 import { useAuth } from '../../lib/auth';
 import { getUserConnectionsList } from '../../lib/connections';
@@ -299,7 +300,7 @@ export default function ChatScreen() {
         .select('id, title, event_date, club_id, is_public, image_url, club:clubs(id, name, join_policy), is_cancelled')
         .in('club_id', clubIds)
         .eq('is_cancelled', false as any)
-        .gt('event_date', nowIso)
+        .gt('ends_at', nowIso)
         .order('event_date', { ascending: true })
         .limit(50);
       if (evErr) throw evErr;
@@ -408,22 +409,53 @@ export default function ChatScreen() {
     }
   };
 
+  const insets = useSafeAreaInsets();
+
   return (
-    <KeyboardDismissWrapper>
-      <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          className="flex-1 bg-white"
-      >
-      <ProfileModal 
-         visible={modalVisible}
-         profile={selectedProfile}
-         onClose={() => {
-           setModalVisible(false);
-           setSelectedProfile(null);
-         }}
-         onStateChange={() => {
-             // Refresh if needed
-         }}
+    <StickyInputLayout
+      headerOffset={insets.top + 88}
+      style={{ backgroundColor: '#fff' }}
+      inputRowBackgroundColor="#fff"
+      renderInput={() => (
+        <View className="p-4 border-t border-gray-100 bg-white">
+          <View className="flex-row items-center bg-gray-50 rounded-full px-4 border border-gray-200">
+            <TouchableOpacity
+              onPress={() => {
+                setShareMode('root');
+                setShareSheetVisible(true);
+              }}
+              className="mr-2"
+            >
+              <IconSymbol name="plus.circle.fill" size={24} color="#2962FF" />
+            </TouchableOpacity>
+            <TextInput
+              value={newMessage}
+              onChangeText={setNewMessage}
+              placeholder="Type a message..."
+              placeholderTextColor="#6b7280"
+              className="flex-1 py-3 text-base text-ink"
+              returnKeyType="send"
+              onSubmitEditing={sendMessage}
+              blurOnSubmit={false}
+              onFocus={(e) => {
+                if (Platform.OS === 'web') e.stopPropagation();
+              }}
+            />
+            <TouchableOpacity onPress={sendMessage} disabled={!newMessage.trim()}>
+              <Text className={`font-bold ${newMessage.trim() ? 'text-business' : 'text-gray-400'}`}>Send</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    >
+      <ProfileModal
+        visible={modalVisible}
+        profile={selectedProfile}
+        onClose={() => {
+          setModalVisible(false);
+          setSelectedProfile(null);
+        }}
+        onStateChange={() => {}}
       />
 
       {/* Header */}
@@ -836,42 +868,6 @@ export default function ChatScreen() {
         })}
       </ScrollView>
 
-      <View className="p-4 border-t border-gray-100 pb-8 bg-white">
-          <View className="flex-row items-center bg-gray-50 rounded-full px-4 border border-gray-200">
-              <TouchableOpacity 
-                onPress={() => {
-                  setShareMode('root');
-                  setShareSheetVisible(true);
-                }}
-                className="mr-2"
-              >
-                  <IconSymbol 
-                    name="plus.circle.fill" 
-                    size={24} 
-                    color="#2962FF"
-                  />
-              </TouchableOpacity>
-              <TextInput
-                  value={newMessage}
-                  onChangeText={setNewMessage}
-                  placeholder="Type a message..."
-                  placeholderTextColor="#6b7280"
-                  className="flex-1 py-3 text-base text-ink"
-                  returnKeyType="send"
-                  onSubmitEditing={sendMessage}
-                  blurOnSubmit={false}
-                  onFocus={(e) => {
-                    if (Platform.OS === 'web') {
-                      e.stopPropagation();
-                    }
-                  }}
-              />
-              <TouchableOpacity onPress={sendMessage} disabled={!newMessage.trim()}>
-                  <Text className={`font-bold ${newMessage.trim() ? 'text-business' : 'text-gray-400'}`}>Send</Text>
-              </TouchableOpacity>
-          </View>
-      </View>
-
       {/* Share Sheet (+) */}
       <Modal
         visible={shareSheetVisible}
@@ -1178,8 +1174,7 @@ export default function ChatScreen() {
           </Animated.View>
         </TouchableOpacity>
       </Modal>
-      </KeyboardAvoidingView>
-    </KeyboardDismissWrapper>
+    </StickyInputLayout>
   );
 }
 

@@ -1,3 +1,4 @@
+import { KeyboardAwareLayout } from '@/components/KeyboardAwareLayout';
 import { useStatus } from '@/components/StatusProvider';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/lib/auth';
@@ -8,7 +9,6 @@ import {
     ActivityIndicator,
     Alert,
     Image,
-    KeyboardAvoidingView,
     Modal,
     Platform,
     Text,
@@ -149,9 +149,10 @@ function PenpalModal({ visible, onClose }: { visible: boolean, onClose: () => vo
 
     return (
         <Modal visible={visible} animationType="slide" transparent>
-            <KeyboardAvoidingView 
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                className="flex-1 justify-end bg-black/60"
+            <KeyboardAwareLayout 
+                noDismissWrapper 
+                headerOffset={0} 
+                style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}
             >
                 <View className="bg-white rounded-t-3xl p-6 pb-12">
                     <View className="flex-row justify-between items-center mb-6">
@@ -193,7 +194,7 @@ function PenpalModal({ visible, onClose }: { visible: boolean, onClose: () => vo
                         )}
                     </TouchableOpacity>
                 </View>
-            </KeyboardAvoidingView>
+            </KeyboardAwareLayout>
         </Modal>
     );
 }

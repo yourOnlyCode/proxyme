@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity, Keyboard, ActivityIndicator, Alert } from 'react-native';
+import { KeyboardAwareScrollView } from '@/components/KeyboardAwareScrollView';
+import { View, Text, TextInput, TouchableOpacity, Keyboard, ActivityIndicator, Alert } from 'react-native';
 import { ClubDetail } from '@/lib/types';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -35,7 +36,7 @@ export default function ClubSettingsTab({
     const scheme = useColorScheme() ?? 'light';
     const isDark = scheme === 'dark';
     return (
-        <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16 }} style={{ backgroundColor: isDark ? '#0B1220' : undefined }}>
+        <KeyboardAwareScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16 }} basePaddingBottom={24} style={{ backgroundColor: isDark ? '#0B1220' : undefined }}>
             <View className="bg-white rounded-2xl p-6 mb-4 shadow-sm" style={{ backgroundColor: isDark ? 'rgba(2,6,23,0.55)' : undefined, borderWidth: isDark ? 1 : 0, borderColor: isDark ? 'rgba(148,163,184,0.18)' : undefined }}>
                 <Text className="text-2xl font-bold text-ink mb-6" style={{ color: isDark ? '#E5E7EB' : undefined }}>Club Settings</Text>
                 
@@ -120,6 +121,6 @@ export default function ClubSettingsTab({
                     </TouchableOpacity>
                 </View>
             )}
-        </ScrollView>
+        </KeyboardAwareScrollView>
     );
 }

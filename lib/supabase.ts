@@ -34,11 +34,14 @@ const ExpoSecureStoreAdapter = {
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
+const isTestEnv = !!process.env.JEST_WORKER_ID;
+
 export const supabase = createClient(url, key, {
   auth: {
     storage: ExpoSecureStoreAdapter,
-    autoRefreshToken: true,
-    persistSession: true,
+    // Avoid background timers in Jest.
+    autoRefreshToken: !isTestEnv,
+    persistSession: !isTestEnv,
     // On web, Supabase completes OAuth by parsing the redirect URL and exchanging the code.
     // On native, we handle the exchange manually in lib/socialAuth.ts (via openAuthSessionAsync).
     detectSessionInUrl: Platform.OS === 'web',

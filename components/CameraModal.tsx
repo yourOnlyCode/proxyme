@@ -1,9 +1,10 @@
+import { KeyboardAwareLayout } from '@/components/KeyboardAwareLayout';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Dimensions, Easing, Image, Keyboard, KeyboardAvoidingView, Modal, PanResponder, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Easing, Image, Keyboard, Modal, PanResponder, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { State, TapGestureHandler } from 'react-native-gesture-handler';
 
 const getScreenDimensions = () => {
@@ -373,7 +374,7 @@ export function CameraModal({
                         className="flex-1 bg-black"
                         style={{ transform: [{ translateX: slideAnim }] }}
                     >
-                        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                        <KeyboardAwareLayout noDismissWrapper headerOffset={0} style={{ flex: 1 }}>
                             <View style={{ flex: 1 }}>
                                 {/* Tap off to dismiss keyboard */}
                                 <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
@@ -420,7 +421,7 @@ export function CameraModal({
                                     </View>
                                 </View>
                             </View>
-                        </KeyboardAvoidingView>
+                        </KeyboardAwareLayout>
                     </Animated.View>
                 </Modal>
             );
@@ -428,7 +429,7 @@ export function CameraModal({
         return (
             <Modal visible={visible} animationType="none" transparent>
                 <View className="flex-1 bg-black">
-                    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                    <KeyboardAwareLayout noDismissWrapper headerOffset={0} style={{ flex: 1 }}>
                         <View style={{ flex: 1 }}>
                             {/* Tap off to dismiss keyboard */}
                             <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
@@ -475,7 +476,7 @@ export function CameraModal({
                                 </View>
                             </View>
                         </View>
-                    </KeyboardAvoidingView>
+                    </KeyboardAwareLayout>
                 </View>
             </Modal>
         );

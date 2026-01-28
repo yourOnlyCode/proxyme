@@ -73,6 +73,8 @@ export type ClubEvent = {
     title: string;
     description: string | null;
     event_date: string;
+    duration_minutes?: number;
+    ends_at?: string;
     location: string | null;
     is_public?: boolean;
     detailed_interests?: Record<string, string[]> | null;

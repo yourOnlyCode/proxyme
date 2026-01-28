@@ -1,12 +1,13 @@
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
 import EventCard from '@/components/club/EventCard';
 import ReplyItem from '@/components/club/ReplyItem';
-import { KeyboardDismissWrapper } from '@/components/KeyboardDismissButton';
-import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
+import { KeyboardAwareLayout } from '@/components/KeyboardAwareLayout';
 import Avatar from '@/components/profile/Avatar';
 import { InterestSelector } from '@/components/profile/InterestSelector';
 import { ProfileData, ProfileModal } from '@/components/ProfileModal';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { DurationWheelPicker } from '@/components/ui/DurationWheelPicker';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { ClubDetail, ClubEvent, ClubMember, ForumReply, ForumTopic } from '@/lib/types';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -14,13 +15,12 @@ import * as Calendar from 'expo-calendar';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { getUserConnectionsList } from '../../lib/connections';
 import { supabase } from '../../lib/supabase';
-
 
 export default function ClubDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -39,7 +39,7 @@ export default function ClubDetailScreen() {
   const [memberStatus, setMemberStatus] = useState<'accepted' | 'invited' | 'pending' | null>(null);
   const [role, setRole] = useState<'owner' | 'admin' | 'member' | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'forum' | 'members' | 'events' | 'settings'>('forum');
+  const [activeTab, setActiveTab] = useState<'about' | 'forum' | 'members' | 'events' | 'settings'>('about');
   const [myIsVerified, setMyIsVerified] = useState(false);
   
   // Forum State
@@ -58,12 +58,20 @@ export default function ClubDetailScreen() {
   const [editTopicTitle, setEditTopicTitle] = useState('');
   const [editTopicContent, setEditTopicContent] = useState('');
   const [editReplyContent, setEditReplyContent] = useState('');
+  const [forumTopicSearch, setForumTopicSearch] = useState('');
 
   // Members State
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [leaders, setLeaders] = useState<Array<{ user_id: string; role: 'owner' | 'admin'; profile: { id: string; username: string; full_name: string | null; avatar_url: string | null; is_verified?: boolean } }>>([]);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+
+  // Share Club -> Messages
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [shareConnections, setShareConnections] = useState<any[]>([]);
+  const [shareSearch, setShareSearch] = useState('');
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareSendingTo, setShareSendingTo] = useState<string | null>(null);
   const [eventMenuVisible, setEventMenuVisible] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [eventMenuPosition, setEventMenuPosition] = useState({ x: 0, y: 0 });
@@ -95,7 +103,18 @@ export default function ClubDetailScreen() {
   const [newEventDate, setNewEventDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showDurationModal, setShowDurationModal] = useState(false);
+  const [durationWheelKey, setDurationWheelKey] = useState(0);
   const [newEventLocation, setNewEventLocation] = useState('');
+  const [newEventDurationDays, setNewEventDurationDays] = useState(0);
+  const [newEventDurationHours, setNewEventDurationHours] = useState(2);
+  const [newEventDurationMinutes, setNewEventDurationMinutes] = useState(0);
+
+  // Convert days/hours/minutes to total minutes
+  const newEventDurationMinutesTotal = useMemo(
+    () => newEventDurationDays * 24 * 60 + newEventDurationHours * 60 + newEventDurationMinutes,
+    [newEventDurationDays, newEventDurationHours, newEventDurationMinutes]
+  );
   const [newEventIsPublic, setNewEventIsPublic] = useState(false);
   const [newEventImage, setNewEventImage] = useState<string | null>(null);
   const [newEventInterests, setNewEventInterests] = useState<Record<string, string[]>>({});
@@ -106,7 +125,94 @@ export default function ClubDetailScreen() {
   const [settingsDescription, setSettingsDescription] = useState('');
   const [settingsMaxMembers, setSettingsMaxMembers] = useState<string>('');
   const [settingsJoinPolicy, setSettingsJoinPolicy] = useState<'invite_only' | 'request_to_join'>('invite_only');
+  const [settingsInterests, setSettingsInterests] = useState<Record<string, string[]>>({});
   const [savingSettings, setSavingSettings] = useState(false);
+  function normalizeText(s: string) {
+    return (s || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  const displayedForumTopics = useMemo(() => {
+    const q = normalizeText(forumTopicSearch);
+    if (!q) return topics;
+    return topics.filter(t => {
+      const c = (t as any).creator;
+      return normalizeText(t.title).includes(q) || normalizeText(c?.full_name || c?.username || '').includes(q);
+    });
+  }, [topics, forumTopicSearch]);
+
+  function flattenInterestDetails(details?: Record<string, string[]> | null): string[] {
+    if (!details) return [];
+    const out: string[] = [];
+    for (const [k, arr] of Object.entries(details)) {
+      if (k) out.push(k);
+      for (const v of arr || []) if (v) out.push(v);
+    }
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const v of out) {
+      const key = normalizeText(v);
+      if (!key) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(v);
+    }
+    return deduped;
+  }
+
+  const safePart = (v: any) => String(v ?? '').replaceAll('|', ' ').replaceAll('\n', ' ').trim();
+
+  const openShareModal = async () => {
+    if (!user) return;
+    setShareModalVisible(true);
+    setShareSearch('');
+    setShareLoading(true);
+    try {
+      const list = await getUserConnectionsList({ targetUserId: user.id });
+      setShareConnections(list as any);
+    } catch {
+      setShareConnections([]);
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const sendClubToConnection = async (partnerId: string) => {
+    if (!user || !club) return;
+    setShareSendingTo(partnerId);
+    try {
+      const { data: convo, error: convoError } = await supabase
+        .from('interests')
+        .select('id')
+        .eq('status', 'accepted')
+        .or(`and(sender_id.eq.${user.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${user.id})`)
+        .maybeSingle();
+      if (convoError) throw convoError;
+      const conversationId = (convo as any)?.id;
+      if (!conversationId) throw new Error('No conversation found for this connection.');
+
+      const content = `SHARE_CLUB|${safePart(club.id)}|${safePart(club.name)}|${safePart(club.city)}|${safePart((club as any).image_url)}`;
+      const { error: msgError } = await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        content,
+      });
+      if (msgError) throw msgError;
+
+      setShareModalVisible(false);
+      setShareSendingTo(null);
+      // Jump to the chat so the user sees it landed.
+      router.push(`/chat/${conversationId}`);
+    } catch (e: any) {
+      Alert.alert('Could not share', e?.message || 'Please try again.');
+    } finally {
+      setShareSendingTo(null);
+    }
+  };
+
 
   // Store subscription references for cleanup
   const forumSubscriptionRef = useRef<any>(null);
@@ -147,22 +253,32 @@ export default function ClubDetailScreen() {
   const fetchClubDetails = async () => {
       const primary = await supabase
         .from('clubs')
-        .select('id, name, description, image_url, city, owner_id, max_member_count, join_policy')
+        .select('id, name, description, image_url, city, owner_id, max_member_count, join_policy, detailed_interests')
         .eq('id', id)
         .single();
 
       let data: any = primary.data;
       let error: any = primary.error;
 
-      // join_policy is newer; fallback if DB hasn't been migrated yet.
+      // join_policy / detailed_interests are newer; fallback if DB hasn't been migrated yet.
       if (error?.code === '42703') {
         const fallback = await supabase
           .from('clubs')
-          .select('id, name, description, image_url, city, owner_id, max_member_count')
+          .select('id, name, description, image_url, city, owner_id, max_member_count, detailed_interests')
           .eq('id', id)
           .single();
         data = fallback.data;
         error = fallback.error;
+      }
+
+      if (error?.code === '42703') {
+        const fallback2 = await supabase
+          .from('clubs')
+          .select('id, name, description, image_url, city, owner_id, max_member_count')
+          .eq('id', id)
+          .single();
+        data = fallback2.data;
+        error = fallback2.error;
       }
 
       if (data) {
@@ -172,6 +288,7 @@ export default function ClubDetailScreen() {
         setSettingsDescription(data.description || '');
         setSettingsMaxMembers(data.max_member_count?.toString() || '');
           setSettingsJoinPolicy((data as any).join_policy || 'invite_only');
+        setSettingsInterests(((data as any).detailed_interests as any) || {});
 
         // Fetch leadership (owner/admins) for both members and non-members (for the access-control view)
         fetchLeaders(data.id, data.owner_id);
@@ -238,6 +355,7 @@ export default function ClubDetailScreen() {
           const updates: any = {
               name: settingsName.trim(),
               description: settingsDescription.trim() || null,
+              detailed_interests: settingsInterests || {},
           };
 
           if (isAdmin) {
@@ -599,6 +717,26 @@ export default function ClubDetailScreen() {
       }
   };
 
+  const togglePinTopic = async (topic: ForumTopic) => {
+      if (!isAdmin) return;
+      try {
+          const { error } = await supabase
+            .from('club_forum_topics')
+            .update({ is_pinned: !topic.is_pinned })
+            .eq('id', topic.id);
+
+          if (error) throw error;
+
+          const nextPinned = !topic.is_pinned;
+          if (selectedTopic?.id === topic.id) {
+              setSelectedTopic({ ...selectedTopic, is_pinned: nextPinned });
+          }
+          await fetchTopics();
+      } catch (error: any) {
+          Alert.alert('Error', error.message);
+      }
+  };
+
   const editReply = async () => {
       if (!editReplyContent.trim() || !editingReply || !user) {
           Alert.alert('Error', 'Reply cannot be empty');
@@ -872,12 +1010,14 @@ export default function ClubDetailScreen() {
 
   const fetchEvents = async () => {
       try {
+          const nowIso = new Date().toISOString();
           // `is_public` / `is_cancelled` are newer columns; fall back if DB hasn't been migrated yet.
           const primary = await supabase
             .from('club_events')
-            .select('id, club_id, title, description, event_date, location, created_by, created_at, is_public, image_url, is_cancelled')
+            .select('id, club_id, title, description, event_date, duration_minutes, ends_at, location, created_by, created_at, is_public, image_url, is_cancelled')
             .eq('club_id', id)
             .eq('is_cancelled', false as any)
+            .gt('ends_at', nowIso)
             .order('event_date', { ascending: true });
 
           let eventsData: any[] | null = primary.data as any[] | null;
@@ -888,6 +1028,7 @@ export default function ClubDetailScreen() {
                 .from('club_events')
                 .select('id, club_id, title, description, event_date, location, created_by, created_at')
                 .eq('club_id', id)
+                .gte('event_date', nowIso)
                 .order('event_date', { ascending: true });
               eventsData = fallback.data as any[] | null;
               error = fallback.error;
@@ -1070,6 +1211,7 @@ export default function ClubDetailScreen() {
                 title: newEventTitle.trim(),
                 description: newEventDesc.trim() || null,
                 event_date: eventDateISO,
+                duration_minutes: newEventDurationMinutesTotal,
                 location: newEventLocation.trim() || null,
                 is_public: newEventIsPublic,
                 detailed_interests: eventInterestsPayload,
@@ -1112,6 +1254,9 @@ export default function ClubDetailScreen() {
           setNewEventDesc('');
           setNewEventDate(new Date());
           setNewEventLocation('');
+          setNewEventDurationDays(0);
+          setNewEventDurationHours(2);
+          setNewEventDurationMinutes(0);
           setNewEventIsPublic(false);
           setNewEventImage(null);
           setNewEventInterests({});
@@ -1444,14 +1589,11 @@ export default function ClubDetailScreen() {
   };
 
   return (
-    <KeyboardDismissWrapper>
-      <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-          className="flex-1 bg-gray-50"
-          style={{ backgroundColor: isDark ? '#0B1220' : undefined }}
-      >
-        {/* Custom Header */}
+    <KeyboardAwareLayout
+      headerOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
+      style={[{ flex: 1 }, { backgroundColor: isDark ? '#0B1220' : '#F9FAFB' }]}
+    >
+      {/* Custom Header */}
         <View
           className="bg-white border-b border-gray-200 px-4 pb-4 flex-row items-center"
           style={{
@@ -1464,20 +1606,85 @@ export default function ClubDetailScreen() {
                 <IconSymbol name="chevron.left" size={24} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
             </TouchableOpacity>
             <Text className="text-xl font-bold text-ink flex-1" style={textPrimaryStyle}>{club.name}</Text>
-            {isAdmin && (
-                <TouchableOpacity 
-                    onPress={() => setActiveTab('settings')}
-                    className="ml-4"
-                >
-                    <IconSymbol name="gearshape.fill" size={24} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
-                </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              onPress={() => void openShareModal()}
+              className="ml-3 w-10 h-10 items-center justify-center"
+              accessibilityRole="button"
+              accessibilityLabel="Share club"
+            >
+              <IconSymbol name="paperplane.fill" size={20} color={isDark ? '#E5E7EB' : '#1A1A1A'} />
+            </TouchableOpacity>
         </View>
 
         {/* Access Control View */}
         {!isMember ? (
             <View className="flex-1 p-6 items-center">
-                <Text className="text-gray-600 text-center mb-6 text-lg" style={textSecondaryStyle}>{club.description || 'No description provided.'}</Text>
+                <View className="w-full bg-white border border-gray-100 rounded-2xl p-5 mb-6" style={cardStyle}>
+                  <Text className="text-ink font-bold text-lg mb-3" style={textPrimaryStyle}>About</Text>
+
+                  <View className="mb-4">
+                    <Text className="text-gray-500 font-bold text-xs mb-1" style={textSecondaryStyle}>Description</Text>
+                    <Text className="text-gray-600" style={textSecondaryStyle}>{club.description || 'No description provided.'}</Text>
+                  </View>
+
+                  <View className="mb-4">
+                    <Text className="text-gray-500 font-bold text-xs mb-2" style={textSecondaryStyle}>Join policy</Text>
+                    <View className="flex-row flex-wrap">
+                      <View
+                        className="mr-2 mb-2 px-3 py-2 rounded-full border"
+                        style={{
+                          backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                          borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)',
+                        }}
+                      >
+                        <Text style={{ color: isDark ? 'rgba(226,232,240,0.78)' : '#334155', fontWeight: '700', fontSize: 12 }}>
+                          {joinPolicy === 'invite_only' ? 'Invite only' : 'Request to join'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {club.max_member_count ? (
+                    <View className="mb-4">
+                      <Text className="text-gray-500 font-bold text-xs mb-2" style={textSecondaryStyle}>Max members</Text>
+                      <View className="flex-row flex-wrap">
+                        <View
+                          className="mr-2 mb-2 px-3 py-2 rounded-full border"
+                          style={{
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                            borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)',
+                          }}
+                        >
+                          <Text style={{ color: isDark ? 'rgba(226,232,240,0.78)' : '#334155', fontWeight: '700', fontSize: 12 }}>
+                            {club.max_member_count}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {flattenInterestDetails((club as any)?.detailed_interests ?? null).length > 0 ? (
+                    <View className="mt-0">
+                      <Text className="text-gray-500 font-bold text-xs mb-2" style={textSecondaryStyle}>Club interests</Text>
+                      <View className="flex-row flex-wrap">
+                        {flattenInterestDetails((club as any)?.detailed_interests ?? null).slice(0, 18).map((t) => (
+                          <View
+                            key={t}
+                            className="mr-2 mb-2 px-3 py-2 rounded-full border"
+                            style={{
+                              backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                              borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)',
+                            }}
+                          >
+                            <Text style={{ color: isDark ? 'rgba(226,232,240,0.78)' : '#334155', fontWeight: '700', fontSize: 12 }}>
+                              {t}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
 
                 {leaders.length > 0 && (
                   <View className="w-full bg-white border border-gray-100 rounded-2xl p-4 mb-6" style={cardStyle}>
@@ -1594,32 +1801,84 @@ export default function ClubDetailScreen() {
             </View>
         ) : (
             <>
-                {/* Tabs */}
-                <View className="flex-row bg-white border-b border-gray-200">
-                    <TouchableOpacity 
-                        onPress={() => {
-                            setActiveTab('forum');
-                            backToTopics();
-                        }}
-                        className={`flex-1 py-3 items-center border-b-2 ${activeTab === 'forum' ? 'border-black' : 'border-transparent'}`}
-                    >
-                        <Text className={`font-bold ${activeTab === 'forum' ? 'text-black' : 'text-gray-400'}`}>Forum</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                        onPress={() => setActiveTab('events')}
-                        className={`flex-1 py-3 items-center border-b-2 ${activeTab === 'events' ? 'border-black' : 'border-transparent'}`}
-                    >
-                        <Text className={`font-bold ${activeTab === 'events' ? 'text-black' : 'text-gray-400'}`}>Events</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                        onPress={() => setActiveTab('members')}
-                        className={`flex-1 py-3 items-center border-b-2 ${activeTab === 'members' ? 'border-black' : 'border-transparent'}`}
-                    >
-                        <Text className={`font-bold ${activeTab === 'members' ? 'text-black' : 'text-gray-400'}`}>Members</Text>
-                    </TouchableOpacity>
-                </View>
+                <View style={{ flex: 1 }}>
+                  {activeTab === 'about' ? (
+                    <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16 }}>
+                    <View style={{ marginHorizontal: -16, marginTop: -16, marginBottom: 16 }}>
+                      <ClubBanner imagePath={club.image_url} city={club.city} />
+                    </View>
 
-                {activeTab === 'forum' ? (
+                    <GlassCard className="mb-4" contentClassName="p-5" tint={isDark ? 'dark' : 'light'} intensity={18}>
+                      <Text className="text-ink font-bold text-base mb-3" style={textPrimaryStyle}>About</Text>
+
+                      <View className="mb-4">
+                        <Text className="text-gray-500 font-bold text-xs mb-1" style={textSecondaryStyle}>Description</Text>
+                        <Text className="text-gray-600" style={textSecondaryStyle}>
+                          {club.description || 'No description provided.'}
+                        </Text>
+                      </View>
+
+                      <View className="mb-4">
+                        <Text className="text-gray-500 font-bold text-xs mb-2" style={textSecondaryStyle}>Join policy</Text>
+                        <View className="flex-row flex-wrap">
+                          <View
+                            className="mr-2 mb-2 px-3 py-2 rounded-full border"
+                            style={{
+                              backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                              borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)',
+                            }}
+                          >
+                            <Text style={{ color: isDark ? 'rgba(226,232,240,0.78)' : '#334155', fontWeight: '700', fontSize: 12 }}>
+                              {joinPolicy === 'invite_only' ? 'Invite only' : 'Request to join'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {club.max_member_count ? (
+                        <View className="mb-4">
+                          <Text className="text-gray-500 font-bold text-xs mb-2" style={textSecondaryStyle}>Max members</Text>
+                          <View className="flex-row flex-wrap">
+                            <View
+                              className="mr-2 mb-2 px-3 py-2 rounded-full border"
+                              style={{
+                                backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                                borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)',
+                              }}
+                            >
+                              <Text style={{ color: isDark ? 'rgba(226,232,240,0.78)' : '#334155', fontWeight: '700', fontSize: 12 }}>
+                                {club.max_member_count}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      ) : null}
+
+                      {flattenInterestDetails((club as any)?.detailed_interests ?? null).length > 0 ? (
+                        <View className="mt-0">
+                          <Text className="text-gray-500 font-bold text-xs mb-2" style={textSecondaryStyle}>Club interests</Text>
+                          <View className="flex-row flex-wrap">
+                            {flattenInterestDetails((club as any)?.detailed_interests ?? null).slice(0, 24).map((t) => (
+                              <View
+                                key={t}
+                                className="mr-2 mb-2 px-3 py-2 rounded-full border"
+                                style={{
+                                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.04)',
+                                  borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)',
+                                }}
+                              >
+                                <Text style={{ color: isDark ? 'rgba(226,232,240,0.78)' : '#334155', fontWeight: '700', fontSize: 12 }}>
+                                  {t}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      ) : null}
+                    </GlassCard>
+                    <View style={{ height: 24 }} />
+                    </ScrollView>
+                  ) : activeTab === 'forum' ? (
                     selectedTopic ? (
                         // Topic Detail View
                         <>
@@ -1647,18 +1906,29 @@ export default function ClubDetailScreen() {
                                                 <IconSymbol name="lock.fill" size={16} color="#EF4444" style={{ marginRight: 4 }} />
                                             )}
                                         </View>
-                                        {selectedTopic.created_by === user?.id && (
-                                            <TouchableOpacity 
-                                                onPress={() => {
-                                                    setEditingTopic(selectedTopic);
-                                                    setEditTopicTitle(selectedTopic.title);
-                                                    setEditTopicContent(selectedTopic.content);
-                                                }}
-                                                className="px-3 py-1 bg-gray-100 rounded-full"
-                                            >
-                                                <Text className="text-xs text-gray-600">Edit</Text>
-                                            </TouchableOpacity>
-                                        )}
+                                        <View className="flex-row items-center">
+                                            {isAdmin && (
+                                                <TouchableOpacity 
+                                                    onPress={() => togglePinTopic(selectedTopic)}
+                                                    className="px-3 py-1 bg-gray-100 rounded-full flex-row items-center mr-2"
+                                                >
+                                                    <IconSymbol name="pin.fill" size={12} color={selectedTopic.is_pinned ? '#2563EB' : '#6B7280'} style={{ marginRight: 4 }} />
+                                                    <Text className="text-xs text-gray-600">{selectedTopic.is_pinned ? 'Unpin' : 'Pin to top'}</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            {selectedTopic.created_by === user?.id && (
+                                                <TouchableOpacity 
+                                                    onPress={() => {
+                                                        setEditingTopic(selectedTopic);
+                                                        setEditTopicTitle(selectedTopic.title);
+                                                        setEditTopicContent(selectedTopic.content);
+                                                    }}
+                                                    className="px-3 py-1 bg-gray-100 rounded-full"
+                                                >
+                                                    <Text className="text-xs text-gray-600">Edit</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
                                     </View>
                                     <View className="flex-row items-center mb-3">
                                         <TouchableOpacity 
@@ -1816,69 +2086,87 @@ export default function ClubDetailScreen() {
                         // Topics List View
                         <>
                             <FlatList
-                                data={topics}
+                                data={displayedForumTopics}
                                 keyExtractor={item => item.id}
-                        ListHeaderComponent={
-                            <View>
-                                <ClubBanner imagePath={club.image_url} city={club.city} />
-                                <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
-                                    <Text className="font-bold text-gray-500">{topics.length} {topics.length === 1 ? 'Topic' : 'Topics'}</Text>
-                                    <TouchableOpacity 
-                                        onPress={() => setTopicModalVisible(true)}
-                                        className="bg-black px-4 py-2 rounded-full"
-                                    >
-                                        <Text className="text-white text-xs font-bold">New Topic</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        }
+                                ListHeaderComponent={
+                                    <View className="border-b border-gray-100 bg-white">
+                                        <View className="flex-row items-center px-4 py-2 border-b border-gray-100">
+                                            <IconSymbol name="magnifyingglass" size={16} color="#9CA3AF" style={{ marginRight: 8 }} />
+                                            <TextInput
+                                                value={forumTopicSearch}
+                                                onChangeText={setForumTopicSearch}
+                                                placeholder="Search topics or authors..."
+                                                placeholderTextColor="#9CA3AF"
+                                                className="flex-1 py-2 text-base text-ink"
+                                            />
+                                        </View>
+                                        <View className="p-4 flex-row justify-between items-center">
+                                            <Text className="font-bold text-gray-500">{displayedForumTopics.length} {displayedForumTopics.length === 1 ? 'Topic' : 'Topics'}</Text>
+                                            <TouchableOpacity 
+                                                onPress={() => setTopicModalVisible(true)}
+                                                className="bg-black px-4 py-2 rounded-full"
+                                            >
+                                                <Text className="text-white text-xs font-bold">New Topic</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                }
                                 renderItem={({ item }) => (
                                     <TouchableOpacity 
                                         onPress={() => viewTopic(item)}
-                                        className="p-4 bg-white border-b border-gray-50 active:bg-gray-50"
+                                        className="p-4 bg-white border-b border-gray-50 active:bg-gray-50 flex-row items-start"
                                     >
-                                        <View className="flex-row items-start mb-2">
-                                            {item.is_pinned && (
-                                                <IconSymbol name="pin.fill" size={14} color="#2563EB" style={{ marginRight: 4, marginTop: 2 }} />
-                                            )}
-                                            {item.is_locked && (
-                                                <IconSymbol name="lock.fill" size={14} color="#EF4444" style={{ marginRight: 4, marginTop: 2 }} />
-                                            )}
-                                            <Text className="font-bold text-ink flex-1" numberOfLines={2}>{item.title}</Text>
-                                        </View>
-                                        <View className="flex-row items-center justify-between mt-2">
-                                            <TouchableOpacity 
-                                                onPress={() => viewUserProfile(item.created_by)}
-                                                className="flex-row items-center"
-                                            >
-                                                <View className="mr-2">
-                                                    <Avatar url={item.creator.avatar_url} size={24} onUpload={() => {}} editable={false} />
-                                                </View>
-                                                <View className="flex-row items-center">
+                                        <View className="flex-1 min-w-0">
+                                            <View className="flex-row items-start mb-2">
+                                                {item.is_pinned && (
+                                                    <IconSymbol name="pin.fill" size={14} color="#2563EB" style={{ marginRight: 4, marginTop: 2 }} />
+                                                )}
+                                                {item.is_locked && (
+                                                    <IconSymbol name="lock.fill" size={14} color="#EF4444" style={{ marginRight: 4, marginTop: 2 }} />
+                                                )}
+                                                <Text className="font-bold text-ink flex-1" numberOfLines={2}>{item.title}</Text>
+                                            </View>
+                                            <View className="flex-row items-center justify-between mt-2">
+                                                <TouchableOpacity 
+                                                    onPress={(e) => { e.stopPropagation(); viewUserProfile(item.created_by); }}
+                                                    className="flex-row items-center"
+                                                >
+                                                    <View className="mr-2">
+                                                        <Avatar url={item.creator.avatar_url} size={24} onUpload={() => {}} editable={false} />
+                                                    </View>
                                                     <Text className="text-xs text-gray-500">
                                                         {item.creator.full_name || item.creator.username}
                                                     </Text>
-                                                    {/* Verification is not a social badge (no checkmark here). */}
+                                                </TouchableOpacity>
+                                                <View className="flex-row items-center">
+                                                    <IconSymbol name="bubble.left.and.bubble.right" size={14} color="#6B7280" />
+                                                    <Text className="text-xs text-gray-500 ml-1">{item.reply_count}</Text>
+                                                    {item.last_reply_at && (
+                                                        <Text className="text-xs text-gray-400 ml-3">
+                                                            {new Date(item.last_reply_at).toLocaleDateString('en-US', {
+                                                                month: 'short',
+                                                                day: 'numeric'
+                                                            })}
+                                                        </Text>
+                                                    )}
+                                                    {isAdmin && (
+                                                        <TouchableOpacity
+                                                            onPress={(e) => { e.stopPropagation(); togglePinTopic(item); }}
+                                                            className="ml-3 p-1"
+                                                        >
+                                                            <IconSymbol name="pin.fill" size={16} color={item.is_pinned ? '#2563EB' : '#9CA3AF'} />
+                                                        </TouchableOpacity>
+                                                    )}
                                                 </View>
-                                            </TouchableOpacity>
-                                            <View className="flex-row items-center">
-                                                <IconSymbol name="bubble.left.and.bubble.right" size={14} color="#6B7280" />
-                                                <Text className="text-xs text-gray-500 ml-1">{item.reply_count}</Text>
-                                                {item.last_reply_at && (
-                                                    <Text className="text-xs text-gray-400 ml-3">
-                                                        {new Date(item.last_reply_at).toLocaleDateString('en-US', {
-                                                            month: 'short',
-                                                            day: 'numeric'
-                                                        })}
-                                                    </Text>
-                                                )}
                                             </View>
                                         </View>
                                     </TouchableOpacity>
                                 )}
                                 ListEmptyComponent={
                                     <View className="p-8 items-center">
-                                        <Text className="text-gray-400 text-center">No topics yet. Start a discussion!</Text>
+                                        <Text className="text-gray-400 text-center">
+                                            {forumTopicSearch ? 'No topics match your search.' : 'No topics yet. Start a discussion!'}
+                                        </Text>
                                     </View>
                                 }
                                 contentContainerStyle={{ paddingBottom: 24 }}
@@ -1891,9 +2179,7 @@ export default function ClubDetailScreen() {
                             data={events.filter((e) => new Date(e.event_date) >= new Date())}
                             keyExtractor={item => item.id}
                             ListHeaderComponent={
-                                <View>
-                                    <ClubBanner imagePath={club.image_url} city={club.city} />
-                                    <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
+                                <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
                                         <Text className="font-bold text-gray-500">
                                           {events.filter((e) => new Date(e.event_date) >= new Date()).length} Upcoming
                                         </Text>
@@ -1906,7 +2192,6 @@ export default function ClubDetailScreen() {
                                             </TouchableOpacity>
                                         )}
                                     </View>
-                                </View>
                             }
                             renderItem={({ item }) => (
                                 <EventCard
@@ -1918,6 +2203,7 @@ export default function ClubDetailScreen() {
                                     onRSVP={updateRSVP}
                                     onAddToCalendar={addToCalendar}
                                     onViewProfile={viewUserProfile}
+                                    onPressEvent={(ev) => router.push(`/events/${ev.id}`)}
                                 />
                             )}
                             ListFooterComponent={
@@ -1948,6 +2234,7 @@ export default function ClubDetailScreen() {
                                             onRSVP={updateRSVP}
                                             onAddToCalendar={addToCalendar}
                                             onViewProfile={viewUserProfile}
+                                            onPressEvent={(e) => router.push(`/events/${e.id}`)}
                                           />
                                         ))}
                                       </View>
@@ -1971,9 +2258,7 @@ export default function ClubDetailScreen() {
                             data={members}
                             keyExtractor={item => item.id}
                             ListHeaderComponent={
-                                <View>
-                                    <ClubBanner imagePath={club.image_url} city={club.city} />
-                                    <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
+                                <View className="p-4 flex-row justify-between items-center border-b border-gray-100 bg-white">
                                         <Text className="font-bold text-gray-500">{members.length} Members</Text>
                                         <View className="flex-row items-center">
                                             {isAdmin && (
@@ -1994,10 +2279,12 @@ export default function ClubDetailScreen() {
                                             )}
                                         </View>
                                     </View>
-                                </View>
                             }
                             renderItem={({ item }) => (
-                                <View className="flex-row items-center p-4 bg-white border-b border-gray-50">
+                                <TouchableOpacity
+                                    onPress={() => viewUserProfile(item.user_id)}
+                                    className="flex-row items-center p-4 bg-white border-b border-gray-50 active:bg-gray-50"
+                                >
                                     <View className="mr-3">
                                         <Avatar url={item.profile.avatar_url} size={40} onUpload={() => {}} editable={false} />
                                     </View>
@@ -2015,16 +2302,13 @@ export default function ClubDetailScreen() {
                                             item.role === 'owner' ? 'text-purple-700' : item.role === 'admin' ? 'text-blue-700' : 'text-gray-500'
                                         }`}>{item.role}</Text>
                                     </View>
-                                </View>
+                                </TouchableOpacity>
                             )}
                             contentContainerStyle={{ paddingBottom: 24 }}
                         />
                     </View>
                 ) : activeTab === 'settings' ? (
                     <ScrollView className="flex-1 bg-gray-50" contentContainerStyle={{ padding: 16 }}>
-                        <View style={{ marginHorizontal: -16, marginTop: -16, marginBottom: 16 }}>
-                            <ClubBanner imagePath={club.image_url} city={club.city} />
-                        </View>
                         <GlassCard className="mb-4" contentClassName="p-6" tint={isDark ? 'dark' : 'light'} intensity={22}>
                             <Text className="text-2xl font-bold text-ink mb-6" style={textPrimaryStyle}>Club Settings</Text>
                             
@@ -2118,6 +2402,15 @@ export default function ClubDetailScreen() {
                               </View>
                             )}
 
+                            {/* Club interests */}
+                            <View className="mb-6">
+                              <Text className="font-bold text-gray-500 mb-2" style={textSecondaryStyle}>Club interests</Text>
+                              <Text className="text-gray-500 text-xs mb-3" style={textSecondaryStyle}>
+                                Add topics this club is about. These help people discover your club and will boost it for members with shared interests.
+                              </Text>
+                              <InterestSelector interests={settingsInterests} onChange={setSettingsInterests} />
+                            </View>
+
                             {/* Save Button */}
                             <TouchableOpacity
                                 onPress={updateClubSettings}
@@ -2171,6 +2464,74 @@ export default function ClubDetailScreen() {
                         )}
                     </ScrollView>
                 ) : null}
+                </View>
+
+                {/* Bottom icon navigation */}
+                <View
+                  className="border-t border-gray-200 bg-white"
+                  style={{
+                    paddingBottom: insets.bottom,
+                    backgroundColor: isDark ? '#0B1220' : '#FFFFFF',
+                    borderTopColor: isDark ? 'rgba(148,163,184,0.18)' : undefined,
+                  }}
+                >
+                  <View className="flex-row items-center justify-around py-2">
+                    <TouchableOpacity
+                      onPress={() => setActiveTab('about')}
+                      className="items-center justify-center px-3 py-2"
+                      accessibilityRole="button"
+                      accessibilityLabel="About"
+                    >
+                      <IconSymbol name="doc.text" size={22} color={activeTab === 'about' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF')} />
+                      <Text className="text-[10px] mt-1" style={{ color: activeTab === 'about' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF'), fontWeight: '700' }}>About</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        setActiveTab('forum');
+                        backToTopics();
+                      }}
+                      className="items-center justify-center px-3 py-2"
+                      accessibilityRole="button"
+                      accessibilityLabel="Forum"
+                    >
+                      <IconSymbol name="bubble.left.and.bubble.right" size={22} color={activeTab === 'forum' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF')} />
+                      <Text className="text-[10px] mt-1" style={{ color: activeTab === 'forum' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF'), fontWeight: '700' }}>Forum</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setActiveTab('events')}
+                      className="items-center justify-center px-3 py-2"
+                      accessibilityRole="button"
+                      accessibilityLabel="Events"
+                    >
+                      <IconSymbol name="calendar" size={22} color={activeTab === 'events' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF')} />
+                      <Text className="text-[10px] mt-1" style={{ color: activeTab === 'events' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF'), fontWeight: '700' }}>Events</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setActiveTab('members')}
+                      className="items-center justify-center px-3 py-2"
+                      accessibilityRole="button"
+                      accessibilityLabel="Members"
+                    >
+                      <IconSymbol name="person.2.fill" size={22} color={activeTab === 'members' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF')} />
+                      <Text className="text-[10px] mt-1" style={{ color: activeTab === 'members' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF'), fontWeight: '700' }}>Members</Text>
+                    </TouchableOpacity>
+
+                    {isAdmin ? (
+                      <TouchableOpacity
+                        onPress={() => setActiveTab('settings')}
+                        className="items-center justify-center px-3 py-2"
+                        accessibilityRole="button"
+                        accessibilityLabel="Settings"
+                      >
+                        <IconSymbol name="gear" size={22} color={activeTab === 'settings' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF')} />
+                        <Text className="text-[10px] mt-1" style={{ color: activeTab === 'settings' ? (isDark ? '#E5E7EB' : '#111827') : (isDark ? 'rgba(226,232,240,0.55)' : '#9CA3AF'), fontWeight: '700' }}>Settings</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
             </>
         )}
 
@@ -2501,6 +2862,35 @@ export default function ClubDetailScreen() {
                             </TouchableOpacity>
                         </View>
                     </View>
+
+                    <View className="mb-4">
+                        <Text className="font-bold text-gray-500 mb-2">Duration</Text>
+                        <TouchableOpacity
+                            onPress={() => setShowDurationModal(true)}
+                            activeOpacity={0.7}
+                            style={{
+                                backgroundColor: '#F3F4F6',
+                                padding: 16,
+                                borderRadius: 12,
+                                borderWidth: 1,
+                                borderColor: '#E5E7EB',
+                                minHeight: 56,
+                                justifyContent: 'center',
+                            }}
+                        >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <View>
+                                    <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>Duration</Text>
+                                    <Text style={{ fontSize: 16, color: '#111827', fontWeight: 'bold' }}>
+                                        {newEventDurationDays > 0 && `${newEventDurationDays}d `}
+                                        {newEventDurationHours > 0 && `${newEventDurationHours}h `}
+                                        {newEventDurationMinutes > 0 ? `${newEventDurationMinutes}m` : newEventDurationDays === 0 && newEventDurationHours === 0 ? '0m' : ''}
+                                    </Text>
+                                </View>
+                                <IconSymbol name="chevron.right" size={18} color="#9CA3AF" />
+                            </View>
+                        </TouchableOpacity>
+                    </View>
                     
                     {/* Android Date Picker - Shows as native modal */}
                     {Platform.OS === 'android' && showDatePicker && (
@@ -2549,7 +2939,7 @@ export default function ClubDetailScreen() {
                             animationType="slide"
                             onRequestClose={() => setShowDatePicker(false)}
                         >
-                            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                            <View style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'flex-end' }}>
                                 <View style={{ backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: insets.bottom + 20 }}>
                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                                         <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A1A1A' }}>Select Date</Text>
@@ -2587,7 +2977,7 @@ export default function ClubDetailScreen() {
                             animationType="slide"
                             onRequestClose={() => setShowTimePicker(false)}
                         >
-                            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+                            <View style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'flex-end' }}>
                                 <View style={{ backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: insets.bottom + 20 }}>
                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                                         <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1A1A1A' }}>Select Time</Text>
@@ -2615,6 +3005,55 @@ export default function ClubDetailScreen() {
                             </View>
                         </Modal>
                     )}
+
+                    {/* Duration Modal */}
+                    <Modal
+                        visible={showDurationModal}
+                        transparent
+                        animationType="slide"
+                        onShow={() => setDurationWheelKey((k) => k + 1)}
+                        onRequestClose={() => setShowDurationModal(false)}
+                    >
+                        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'transparent' }}>
+                            <View
+                                style={{
+                                    backgroundColor: 'white',
+                                    borderTopLeftRadius: 28,
+                                    borderTopRightRadius: 28,
+                                    padding: 20,
+                                    paddingBottom: insets.bottom + 20,
+                                }}
+                            >
+                                <View style={{ alignItems: 'center', marginBottom: 18 }}>
+                                    <View style={{ width: 44, height: 5, borderRadius: 999, backgroundColor: '#E5E7EB', marginBottom: 12 }} />
+                                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#111827' }}>Set Duration</Text>
+                                </View>
+
+                                <DurationWheelPicker
+                                  days={newEventDurationDays}
+                                  hours={newEventDurationHours}
+                                  minutes={newEventDurationMinutes}
+                                  onDaysChange={setNewEventDurationDays}
+                                  onHoursChange={setNewEventDurationHours}
+                                  onMinutesChange={setNewEventDurationMinutes}
+                                  scrollKey={durationWheelKey}
+                                />
+
+                                <TouchableOpacity
+                                    onPress={() => setShowDurationModal(false)}
+                                    style={{
+                                        backgroundColor: '#111827',
+                                        padding: 16,
+                                        borderRadius: 12,
+                                        alignItems: 'center',
+                                        marginTop: 18,
+                                    }}
+                                >
+                                    <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Done</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </Modal>
 
                     <View className="mb-6">
                         <Text className="font-bold text-gray-500 mb-2">Location</Text>
@@ -2673,8 +3112,7 @@ export default function ClubDetailScreen() {
                 </ScrollView>
             </View>
         </Modal>
-      </KeyboardAvoidingView>
-      
+
       {/* Profile Modal */}
       <ProfileModal
         visible={profileModalVisible}
@@ -2684,6 +3122,94 @@ export default function ClubDetailScreen() {
             // Refresh if needed
         }}
       />
+
+      {/* Share Club -> pick a connection */}
+      <Modal
+        visible={shareModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShareModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShareModalVisible(false)}>
+          <View className="flex-1 bg-black/50 justify-end">
+            <TouchableWithoutFeedback>
+              <View className="bg-white rounded-t-3xl p-6 pb-8">
+                <View className="flex-row items-center mb-4">
+                  <Text className="text-lg font-bold text-ink flex-1">Share club</Text>
+                  <TouchableOpacity
+                    onPress={() => setShareModalVisible(false)}
+                    className="w-10 h-10 rounded-full items-center justify-center bg-gray-100"
+                  >
+                    <IconSymbol name="xmark" size={18} color="#111827" />
+                  </TouchableOpacity>
+                </View>
+
+                <View className="flex-row items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 mb-4">
+                  <IconSymbol name="magnifyingglass" size={16} color="#64748B" />
+                  <TextInput
+                    value={shareSearch}
+                    onChangeText={setShareSearch}
+                    placeholder="Search connections…"
+                    placeholderTextColor="#94A3B8"
+                    className="flex-1 ml-3 text-ink"
+                    returnKeyType="search"
+                    onSubmitEditing={() => Keyboard.dismiss()}
+                  />
+                </View>
+
+                {shareLoading ? (
+                  <View className="py-8 items-center">
+                    <ActivityIndicator />
+                    <Text className="text-gray-400 mt-3">Loading connections…</Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={(shareConnections || []).filter((c: any) => {
+                      const q = (shareSearch || '').toLowerCase().trim();
+                      if (!q) return true;
+                      const label = `${c.full_name ?? ''} ${c.username ?? ''}`.toLowerCase();
+                      return label.includes(q);
+                    })}
+                    keyExtractor={(item: any) => item.id}
+                    keyboardShouldPersistTaps="handled"
+                    style={{ maxHeight: 380 }}
+                    renderItem={({ item }: any) => (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => void sendClubToConnection(item.id)}
+                        className="flex-row items-center py-3"
+                        disabled={shareSendingTo === item.id}
+                      >
+                        <View className="mr-3">
+                          <Avatar url={item.avatar_url} size={40} onUpload={() => {}} editable={false} />
+                        </View>
+                        <View className="flex-1">
+                          <Text className="text-ink font-bold" numberOfLines={1}>
+                            {item.full_name || item.username || 'Connection'}
+                          </Text>
+                          {item.username ? (
+                            <Text className="text-gray-500 text-xs" numberOfLines={1}>@{item.username}</Text>
+                          ) : null}
+                        </View>
+                        {shareSendingTo === item.id ? (
+                          <ActivityIndicator />
+                        ) : (
+                          <IconSymbol name="paperplane.fill" size={16} color="#111827" />
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    ListEmptyComponent={
+                      <View className="py-8 items-center">
+                        <Text className="text-gray-400">No connections found.</Text>
+                      </View>
+                    }
+                  />
+                )}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {/* Event Menu Modal */}
       <Modal
@@ -2720,7 +3246,7 @@ export default function ClubDetailScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-    </KeyboardDismissWrapper>
+    </KeyboardAwareLayout>
   );
 }
 

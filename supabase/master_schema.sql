@@ -123,6 +123,10 @@ begin
     if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'save_crossed_paths') then
         alter table public.profiles add column save_crossed_paths boolean not null default true;
     end if;
+    -- Push token (Expo). Keep in profiles but do NOT allow public reads.
+    if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'expo_push_token') then
+        alter table public.profiles add column expo_push_token text;
+    end if;
 end $$;
 
 -- Age enforcement (13+ required; minors have no intent; romance age prefs never below 18)
@@ -201,6 +205,8 @@ create policy "Users can update own profile."
 -- These are still available to SECURITY DEFINER RPCs (e.g., discovery ranking/distance),
 -- but not selectable by client roles via `.from('profiles').select(...)`.
 revoke select (location, birthdate) on table public.profiles from anon, authenticated;
+-- Never expose Expo push tokens to clients (even though RLS allows profile reads).
+revoke select (expo_push_token) on table public.profiles from anon, authenticated;
 
 -- Account deletion (fallback path; full deletion uses Edge Function `delete-account`).
 -- Deletes the profile row which cascades to related app data via FK deletes.
@@ -245,9 +251,82 @@ create table if not exists public.interests (
   id uuid default uuid_generate_v4() primary key,
   sender_id uuid references public.profiles(id) not null,
   receiver_id uuid references public.profiles(id) not null,
+  -- Optional metadata for intent-specific connections (e.g. Romance/Friendship/Professional)
+  connection_type text,
   status text check (status in ('pending', 'accepted', 'declined')) default 'pending',
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
+
+-- Ensure newer columns/constraints exist (idempotent)
+alter table public.interests add column if not exists connection_type text;
+
+-- Required for client upserts using `onConflict: 'sender_id,receiver_id'`
+-- If legacy data contains duplicates, de-dupe BEFORE creating the unique index.
+-- Strategy:
+-- 1) For each (sender_id, receiver_id) pair, pick the "best" interest to keep
+-- 2) If duplicates have messages, UPDATE messages to point to the kept interest
+-- 3) Then delete the duplicate interests
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where c.relkind = 'i'
+      and c.relname = 'interests_sender_receiver_unique'
+      and n.nspname = 'public'
+  ) then
+    -- Step 1: Identify the "kept" interest per (sender_id, receiver_id)
+    with ranked as (
+      select
+        i.id,
+        i.sender_id,
+        i.receiver_id,
+        row_number() over (
+          partition by i.sender_id, i.receiver_id
+          order by
+            (exists (select 1 from public.messages m where m.conversation_id = i.id)) desc,
+            (case i.status when 'accepted' then 3 when 'pending' then 2 when 'declined' then 1 else 0 end) desc,
+            i.created_at desc,
+            i.id desc
+        ) as rn
+      from public.interests i
+    ),
+    kept as (
+      select id, sender_id, receiver_id
+      from ranked
+      where rn = 1
+    )
+    -- Step 2: Update messages pointing to duplicate interests to point to the kept interest
+    update public.messages m
+    set conversation_id = k.id
+    from ranked r
+    join kept k on k.sender_id = r.sender_id and k.receiver_id = r.receiver_id
+    where m.conversation_id = r.id
+      and r.rn > 1;
+    
+    -- Step 3: Delete duplicate interests (messages now point to kept ones)
+    delete from public.interests i
+    using (
+      select
+        i.id,
+        row_number() over (
+          partition by i.sender_id, i.receiver_id
+          order by
+            (exists (select 1 from public.messages m where m.conversation_id = i.id)) desc,
+            (case i.status when 'accepted' then 3 when 'pending' then 2 when 'declined' then 1 else 0 end) desc,
+            i.created_at desc,
+            i.id desc
+        ) as rn
+      from public.interests i
+    ) ranked
+    where i.id = ranked.id
+      and ranked.rn > 1;
+  end if;
+end $$;
+
+create unique index if not exists interests_sender_receiver_unique
+  on public.interests (sender_id, receiver_id);
 
 -- RLS for interests
 alter table public.interests enable row level security;
@@ -1146,11 +1225,15 @@ CREATE TABLE IF NOT EXISTS public.club_events (
     title TEXT NOT NULL,
     description TEXT,
     event_date TIMESTAMPTZ NOT NULL,
+    duration_minutes INTEGER NOT NULL DEFAULT 120,
     location TEXT,
     created_by UUID NOT NULL REFERENCES public.profiles(id) ON DELETE SET NULL,
     is_public BOOLEAN NOT NULL DEFAULT false,
     detailed_interests jsonb,
     image_url TEXT,
+    -- Stored end time (kept in sync via trigger below).
+    -- NOTE: Some Postgres setups reject generated columns with timestamptz arithmetic (42P17).
+    ends_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     rsvp_count_going INTEGER DEFAULT 0,
     rsvp_count_maybe INTEGER DEFAULT 0,
@@ -1166,6 +1249,64 @@ BEGIN
   ) THEN
     ALTER TABLE public.club_events
       ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+END $$;
+
+-- If the table already existed (older schema), ensure duration_minutes exists.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'duration_minutes'
+  ) THEN
+    ALTER TABLE public.club_events
+      ADD COLUMN duration_minutes INTEGER NOT NULL DEFAULT 120;
+  END IF;
+END $$;
+
+-- If the table already existed (older schema), ensure ends_at exists.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'ends_at'
+  ) THEN
+    ALTER TABLE public.club_events
+      ADD COLUMN ends_at TIMESTAMPTZ;
+
+    -- Backfill existing rows
+    UPDATE public.club_events
+    SET ends_at = event_date + (coalesce(duration_minutes, 120) * INTERVAL '1 minute')
+    WHERE ends_at IS NULL;
+  END IF;
+END $$;
+
+-- Trigger to keep ends_at updated (skip if ends_at is a GENERATED column)
+DO $$
+DECLARE
+  v_is_generated text;
+BEGIN
+  SELECT c.is_generated
+  INTO v_is_generated
+  FROM information_schema.columns c
+  WHERE c.table_schema = 'public'
+    AND c.table_name = 'club_events'
+    AND c.column_name = 'ends_at';
+
+  IF coalesce(v_is_generated, 'NEVER') <> 'ALWAYS' THEN
+    CREATE OR REPLACE FUNCTION public.update_club_event_ends_at()
+    RETURNS TRIGGER AS $fn$
+    BEGIN
+      NEW.ends_at := NEW.event_date + (coalesce(NEW.duration_minutes, 120) * INTERVAL '1 minute');
+      RETURN NEW;
+    END;
+    $fn$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trigger_update_club_event_ends_at ON public.club_events;
+    CREATE TRIGGER trigger_update_club_event_ends_at
+      BEFORE INSERT OR UPDATE OF event_date, duration_minutes ON public.club_events
+      FOR EACH ROW
+      EXECUTE FUNCTION public.update_club_event_ends_at();
   END IF;
 END $$;
 
@@ -1213,6 +1354,9 @@ BEGIN
   END IF;
 END $$;
 
+CREATE INDEX IF NOT EXISTS idx_club_events_ends_at
+  ON public.club_events(ends_at);
+
 ALTER TABLE public.club_events ENABLE ROW LEVEL SECURITY;
 
 drop policy if exists "Events viewable by club members" on public.club_events;
@@ -1234,7 +1378,11 @@ CREATE POLICY "Events viewable by club members"
 -- Public events are visible to all users (for City tab discovery)
 CREATE POLICY "Public events are viewable by everyone"
     ON public.club_events FOR SELECT
-    USING (club_events.is_public = true and club_events.event_date > now());
+    USING (
+      club_events.is_public = true
+      AND coalesce(club_events.is_cancelled, false) = false
+      AND club_events.ends_at > now()
+    );
 
 CREATE POLICY "Admins/Owners can create events"
     ON public.club_events FOR INSERT
@@ -1248,6 +1396,46 @@ CREATE POLICY "Admins/Owners can create events"
             AND cm.status = 'accepted'
         )
     );
+
+-- User-owned events (no club): make club_id nullable and allow INSERT when club_id IS NULL.
+ALTER TABLE public.club_events
+  ALTER COLUMN club_id DROP NOT NULL;
+
+DROP POLICY IF EXISTS "Users can create user events" ON public.club_events;
+CREATE POLICY "Users can create user events"
+  ON public.club_events FOR INSERT
+  WITH CHECK (
+    club_id IS NULL
+    AND created_by = auth.uid()
+    AND (
+      coalesce(is_public, false) = false
+      OR EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.is_verified = true)
+    )
+  );
+
+DROP POLICY IF EXISTS "Creators can view own events" ON public.club_events;
+CREATE POLICY "Creators can view own events"
+  ON public.club_events FOR SELECT
+  USING (created_by = auth.uid());
+
+CREATE OR REPLACE FUNCTION public.create_user_event(
+  p_title text, p_description text, p_event_date timestamptz, p_location text,
+  p_is_public boolean, p_image_url text, p_city text
+)
+RETURNS uuid
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = public
+AS $$
+DECLARE v_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  INSERT INTO public.club_events (created_by, title, description, event_date, location, is_public, image_url, city)
+  VALUES (auth.uid(), nullif(trim(p_title),''), nullif(trim(p_description),''), p_event_date, nullif(trim(p_location),''), coalesce(p_is_public,false), p_image_url, nullif(trim(p_city),''))
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.create_user_event(text, text, timestamptz, text, boolean, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_user_event(text, text, timestamptz, text, boolean, text, text) TO service_role;
 
 -- Event RSVPs
 CREATE TABLE IF NOT EXISTS public.club_event_rsvps (
@@ -2285,6 +2473,8 @@ declare
   my_primary_goal_norm text;
   my_gender text;
   my_romance_pref text;
+  my_city text;
+  my_state text;
 begin
   select p.detailed_interests into my_details 
   from public.profiles p 
@@ -2297,8 +2487,10 @@ begin
     coalesce(p.romance_max_age, 99),
     p.currently_into,
     p.gender,
-    p.romance_preference
-  into my_age_group, my_primary_goal, my_romance_min, my_romance_max, my_currently_into, my_gender, my_romance_pref
+    p.romance_preference,
+    nullif(trim(coalesce(p.city, '')), ''),
+    nullif(trim(coalesce(p.state, '')), '')
+  into my_age_group, my_primary_goal, my_romance_min, my_romance_max, my_currently_into, my_gender, my_romance_pref, my_city, my_state
   from public.profiles p
   where p.id = auth.uid();
 
@@ -2402,10 +2594,23 @@ begin
         and date_part('year', age(p.birthdate))::int between greatest(18, my_romance_min) and greatest(greatest(18, my_romance_min), my_romance_max)
       )
     )
-    and st_dwithin(
-      p.location,
-      st_point(long, lat)::geography,
-      range_meters
+    and (
+      -- Prefer stable city/state matching when available so City tab is truly "in your city"
+      -- (not just within an arbitrary radius).
+      (
+        my_city is not null
+        and nullif(trim(coalesce(p.city, '')), '') = my_city
+        and (my_state is null or nullif(trim(coalesce(p.state, '')), '') = my_state)
+      )
+      -- Fallback: radius match when city isn't known.
+      or (
+        my_city is null
+        and st_dwithin(
+          p.location,
+          st_point(long, lat)::geography,
+          range_meters
+        )
+      )
     )
   order by
     intent_match desc,

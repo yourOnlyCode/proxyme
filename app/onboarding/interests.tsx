@@ -92,7 +92,7 @@ export default function OnboardingInterestsScreen() {
       <View className="mb-6">
         <Text className="text-gray-500 mb-6 text-base leading-5">
             Select up to <Text className="font-bold text-black">3 categories</Text>. 
-            For each, list your top 3 specific favorites.
+            Add specific favorites (you can add/remove anytime).
             {'\n\n'}
             <Text className="italic text-gray-400">
                 Example: For <Text className="font-bold text-gray-500">Coffee</Text>, list your favorite local cafe like “Blue Bottle” or “Joe’s Coffee”.

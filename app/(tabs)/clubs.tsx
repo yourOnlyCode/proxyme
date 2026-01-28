@@ -1,12 +1,13 @@
+import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
 import { CoachMarks } from '@/components/ui/CoachMarks';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { SocialAuthButtons } from '@/components/auth/SocialAuthButtons';
+import { AVAILABLE_INTERESTS } from '@/constants/interests';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Modal, RefreshControl, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Keyboard, Modal, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../lib/auth';
 import { useProxyLocation } from '../../lib/location';
@@ -19,6 +20,7 @@ type Club = {
   name: string;
   description: string | null;
   image_url: string | null;
+  detailed_interests?: Record<string, string[]> | null;
   city: string;
   join_policy?: 'invite_only' | 'request_to_join';
   member_count?: number;
@@ -44,6 +46,9 @@ export default function ClubsScreen() {
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [tab, setTab] = useState<'my' | 'discover'>('my');
   const [myIsVerified, setMyIsVerified] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  const [myInterestIndex, setMyInterestIndex] = useState<Set<string>>(new Set());
 
   // Only show coach marks when this tab is focused (prevents background tabs from popping a tour).
   useFocusEffect(
@@ -72,15 +77,116 @@ export default function ClubsScreen() {
       try {
         const { data } = await supabase
           .from('profiles')
-          .select('is_verified')
+          .select('is_verified, detailed_interests')
           .eq('id', user.id)
           .maybeSingle();
         setMyIsVerified(!!(data as any)?.is_verified);
+        const details = ((data as any)?.detailed_interests ?? null) as Record<string, string[]> | null;
+        setMyInterestIndex(buildInterestIndex(details));
       } catch {
         setMyIsVerified(false);
+        setMyInterestIndex(new Set());
       }
     })();
   }, [user?.id]);
+
+  function normalizeText(s: string) {
+    return (s || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function flattenInterestDetails(details?: Record<string, string[]> | null): string[] {
+    if (!details) return [];
+    const out: string[] = [];
+    for (const [k, arr] of Object.entries(details)) {
+      if (k) out.push(k);
+      for (const v of arr || []) if (v) out.push(v);
+    }
+    // de-dupe case-insensitively
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const v of out) {
+      const key = normalizeText(v);
+      if (!key) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(v);
+    }
+    return deduped;
+  }
+
+  function buildInterestIndex(details?: Record<string, string[]> | null): Set<string> {
+    const tokens = new Set<string>();
+    for (const v of flattenInterestDetails(details)) {
+      for (const t of normalizeText(v).split(' ')) {
+        if (t) tokens.add(t);
+      }
+    }
+    return tokens;
+  }
+
+  function scoreClubForUser(club: Club, q: string, topics: string[]) {
+    const query = normalizeText(q);
+    const clubInterestStrings = flattenInterestDetails(club.detailed_interests);
+    const clubSearchText = normalizeText(`${club.name} ${(club.description ?? '')} ${clubInterestStrings.join(' ')}`);
+
+    let score = 0;
+
+    // Interest overlap boost (personalization)
+    const clubIndex = buildInterestIndex(club.detailed_interests);
+    let overlap = 0;
+    clubIndex.forEach((t) => {
+      if (myInterestIndex.has(t)) overlap += 1;
+    });
+    // Strong boost: shared interests should float clubs to the top.
+    score += Math.min(40, overlap) * 6; // cap so long lists don't dominate
+
+    // Topic filter: if selected, require at least one match and boost matches.
+    if (topics.length > 0) {
+      const normTopics = topics.map(normalizeText);
+      const hit = normTopics.some((t) => t && clubSearchText.includes(t));
+      if (!hit) return { ok: false, score: 0 };
+      score += 25;
+    }
+
+    // Search query scoring
+    if (query) {
+      const parts = query.split(' ').filter(Boolean);
+      const hits = parts.reduce((acc, p) => acc + (clubSearchText.includes(p) ? 1 : 0), 0);
+      // Robust matching: allow partial multi-token queries (e.g., "coffee nyc") to still match.
+      // Require at least one hit, and for multi-token queries require majority hits unless name is a direct hit.
+      const nameNorm = normalizeText(club.name);
+      const nameHit = nameNorm.includes(query) || parts.some((p) => p && nameNorm.includes(p));
+      if (!nameHit) {
+        if (hits === 0) return { ok: false, score: 0 };
+        if (parts.length >= 2 && hits / parts.length < 0.6) return { ok: false, score: 0 };
+      }
+
+      // name match gets extra weight
+      if (nameNorm === query) score += 80;
+      else if (nameNorm.startsWith(query)) score += 60;
+      else score += 20 + hits * 8;
+    }
+
+    // My clubs: keep slight boost so “my” doesn’t feel buried when searching empty.
+    if (club.is_member) score += 5;
+
+    return { ok: true, score };
+  }
+
+  const filteredClubs = (() => {
+    const data = tab === 'my' ? myClubs : cityClubs;
+    const q = searchQuery.trim();
+    const topics = selectedTopics;
+    const scored = data
+      .map((c) => ({ c, ...scoreClubForUser(c, q, topics) }))
+      .filter((x) => x.ok)
+      .sort((a, b) => b.score - a.score || a.c.name.localeCompare(b.c.name));
+    return scored.map((x) => x.c);
+  })();
 
   // If we mounted with empty memory-cache (e.g., app cold start), try local storage hydrate.
   useEffect(() => {
@@ -117,13 +223,13 @@ export default function ClubsScreen() {
             let data: any[] | null = null;
             let error: any = null;
 
-            // join_policy is a newer column; if the DB hasn't been migrated yet we fall back.
+            // join_policy and detailed_interests are newer columns; if the DB hasn't been migrated yet we fall back.
             const primary = await supabase
               .from('club_members')
               .select(`
                   role,
                   club:clubs (
-                      id, name, description, image_url, city, join_policy
+                      id, name, description, image_url, city, join_policy, detailed_interests
                   )
               `)
               .eq('user_id', user.id)
@@ -138,13 +244,28 @@ export default function ClubsScreen() {
                 .select(`
                     role,
                     club:clubs (
-                        id, name, description, image_url, city
+                        id, name, description, image_url, city, detailed_interests
                     )
                 `)
                 .eq('user_id', user.id)
                 .eq('status', 'accepted');
               data = fallback.data as any[] | null;
               error = fallback.error as any;
+            }
+            // Older still: detailed_interests missing
+            if (error?.code === '42703') {
+              const fallback2 = await supabase
+                .from('club_members')
+                .select(`
+                    role,
+                    club:clubs (
+                        id, name, description, image_url, city
+                    )
+                `)
+                .eq('user_id', user.id)
+                .eq('status', 'accepted');
+              data = fallback2.data as any[] | null;
+              error = fallback2.error as any;
             }
             
             if (error) throw error;
@@ -181,7 +302,7 @@ export default function ClubsScreen() {
 
             const primary = await supabase
               .from('clubs')
-              .select('id, name, description, image_url, city, join_policy')
+              .select('id, name, description, image_url, city, join_policy, detailed_interests')
               .eq('city', address.city);
 
             data = primary.data as any[] | null;
@@ -190,10 +311,18 @@ export default function ClubsScreen() {
             if (error?.code === '42703') {
               const fallback = await supabase
                 .from('clubs')
-                .select('id, name, description, image_url, city')
+                .select('id, name, description, image_url, city, detailed_interests')
                 .eq('city', address.city);
               data = fallback.data as any[] | null;
               error = fallback.error as any;
+            }
+            if (error?.code === '42703') {
+              const fallback2 = await supabase
+                .from('clubs')
+                .select('id, name, description, image_url, city')
+                .eq('city', address.city);
+              data = fallback2.data as any[] | null;
+              error = fallback2.error as any;
             }
 
             if (error) throw error;
@@ -468,9 +597,69 @@ export default function ClubsScreen() {
           </GlassCard>
         </View>
 
+        {/* Search + topic filters (applies to both My + Discover) */}
+        <View className="mb-4">
+          <View
+            className="flex-row items-center bg-white/80 border border-gray-200 rounded-2xl px-4 py-3"
+            style={{
+              backgroundColor: isDark ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.92)',
+              borderColor: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)',
+            }}
+          >
+            <IconSymbol name="magnifyingglass" size={18} color={isDark ? 'rgba(226,232,240,0.7)' : '#64748B'} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search clubs or topics…"
+              placeholderTextColor={isDark ? 'rgba(226,232,240,0.5)' : '#94A3B8'}
+              className="flex-1 ml-3 text-ink"
+              style={{ color: isDark ? '#E5E7EB' : undefined }}
+              returnKeyType="search"
+              onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            {(searchQuery.length > 0 || selectedTopics.length > 0) && (
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchQuery('');
+                  setSelectedTopics([]);
+                  Keyboard.dismiss();
+                }}
+                className="ml-2 w-9 h-9 rounded-full items-center justify-center"
+                style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.06)' }}
+              >
+                <IconSymbol name="xmark" size={14} color={isDark ? '#E5E7EB' : '#111827'} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-3" contentContainerStyle={{ paddingRight: 12 }}>
+            {AVAILABLE_INTERESTS.map((topic) => {
+              const selected = selectedTopics.includes(topic);
+              return (
+                <TouchableOpacity
+                  key={topic}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setSelectedTopics((prev) => (prev.includes(topic) ? prev.filter((t) => t !== topic) : [...prev, topic]));
+                  }}
+                  className="mr-2 px-3 py-2 rounded-full border"
+                  style={{
+                    backgroundColor: selected ? (isDark ? 'rgba(59,130,246,0.20)' : 'rgba(59,130,246,0.12)') : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.85)'),
+                    borderColor: selected ? (isDark ? 'rgba(59,130,246,0.45)' : 'rgba(59,130,246,0.35)') : (isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.08)'),
+                  }}
+                >
+                  <Text style={{ color: selected ? (isDark ? '#BFDBFE' : '#1D4ED8') : (isDark ? 'rgba(226,232,240,0.75)' : '#334155'), fontWeight: '700', fontSize: 12 }}>
+                    {topic}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
         <View ref={listRef} collapsable={false} style={{ flex: 1 }}>
           <FlatList
-              data={tab === 'my' ? myClubs : cityClubs}
+              data={filteredClubs}
               renderItem={renderClubItem}
               keyExtractor={item => item.id}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchClubs} />}
@@ -478,7 +667,11 @@ export default function ClubsScreen() {
                   <View className="items-center mt-20 opacity-50">
                       <IconSymbol name="person.3.fill" size={48} color="#CBD5E0" />
                       <Text className="text-gray-500 mt-4 font-medium">
-                          {tab === 'my' ? "You haven't joined any clubs yet." : `No clubs found in ${address?.city || 'your city'}.`}
+                          {searchQuery.trim() || selectedTopics.length > 0
+                            ? 'No clubs match your search.'
+                            : tab === 'my'
+                            ? "You haven't joined any clubs yet."
+                            : `No clubs found in ${address?.city || 'your city'}.`}
                       </Text>
                   </View>
               }

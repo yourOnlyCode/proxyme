@@ -167,6 +167,9 @@ function InitialLayout() {
         />
         <Stack.Screen name="messages" options={{ headerShown: false }} />
         <Stack.Screen name="events/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="events/create" options={{ headerShown: false }} />
+        <Stack.Screen name="events/past" options={{ headerShown: false }} />
+        <Stack.Screen name="notifications" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>

@@ -253,15 +253,17 @@ export default function CityFeedScreen() {
             // Fetch public events for this city and interleave them into the feed.
             let publicEvents: PublicEvent[] = [];
             if (address?.city) {
-              let q = supabase
+              // Prefer filtering by `club_events.city` (supports user-owned events as well).
+              // Backwards compat: if the DB doesn't have the `city` column yet, fall back to `club.city`.
+              let q: any = supabase
                 .from('club_events')
-                .select('id, club_id, created_by, title, description, event_date, location, is_public, detailed_interests, image_url, is_cancelled, club:clubs(id, name, image_url, city, detailed_interests)')
+                .select('id, club_id, created_by, title, description, event_date, location, is_public, detailed_interests, image_url, is_cancelled, city, club:clubs(id, name, image_url, city, detailed_interests)')
                 .eq('is_public', true)
                 .eq('is_cancelled', false as any)
-                .gt('event_date', new Date().toISOString())
-                .eq('club.city', address.city)
-                .order('event_date', { ascending: true })
-                .limit(12);
+                .gt('ends_at', new Date().toISOString());
+
+              // First attempt: city column
+              q = q.eq('city', address.city).order('event_date', { ascending: true }).limit(12);
 
               // Don't show creators their own public events in City feed.
               if (user?.id) {
@@ -272,7 +274,23 @@ export default function CityFeedScreen() {
 
               // If DB hasn't been migrated to include `is_public`, just skip event mixing for now.
               if ((eventsQuery as any)?.error?.code === '42703') {
-                publicEvents = [];
+                // Either `is_public` missing (old DB) OR `city` missing. Try old join-based filter.
+                const fallback = await supabase
+                  .from('club_events')
+                  .select('id, club_id, created_by, title, description, event_date, location, is_public, detailed_interests, image_url, is_cancelled, club:clubs(id, name, image_url, city, detailed_interests)')
+                  .eq('is_public', true)
+                  .eq('is_cancelled', false as any)
+                  .gt('ends_at', new Date().toISOString())
+                  .eq('club.city', address.city)
+                  .order('event_date', { ascending: true })
+                  .limit(12);
+
+                if ((fallback as any)?.error?.code === '42703') {
+                  publicEvents = [];
+                } else {
+                  const raw = (((fallback as any).data || []) as any[]) || [];
+                  publicEvents = (user?.id ? raw.filter((e) => e?.created_by !== user.id) : raw) as any;
+                }
               } else {
                 const raw = (((eventsQuery as any).data || []) as any[]) || [];
                 publicEvents = (user?.id ? raw.filter((e) => e?.created_by !== user.id) : raw) as any;
@@ -407,11 +425,16 @@ export default function CityFeedScreen() {
   const sendInterest = async (targetUserId: string) => {
       const { error } = await supabase
         .from('interests')
-        .insert({
+        .upsert(
+          {
             sender_id: user?.id,
             receiver_id: targetUserId,
-            status: 'pending'
-        });
+            status: 'pending',
+            // Keep in sync with `ProfileActionButtons` (optional column).
+            connection_type: myGoals && myGoals.length > 0 ? myGoals[0] : null,
+          } as any,
+          { onConflict: 'sender_id,receiver_id' },
+        );
       
       if (error) {
           if (error.code === '23505') {

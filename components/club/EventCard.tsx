@@ -15,6 +15,8 @@ interface EventCardProps {
     onRSVP: (eventId: string, status: 'going' | 'maybe' | 'cant') => void;
     onAddToCalendar: (event: ClubEvent) => void;
     onViewProfile: (userId: string) => void;
+    /** When set, tapping the card (title/description/date/location area) navigates to the event page. */
+    onPressEvent?: (event: ClubEvent) => void;
 }
 
 export default function EventCard({
@@ -25,7 +27,8 @@ export default function EventCard({
     onCancel,
     onRSVP,
     onAddToCalendar,
-    onViewProfile
+    onViewProfile,
+    onPressEvent,
 }: EventCardProps) {
     const scheme = useColorScheme() ?? 'light';
     const isDark = scheme === 'dark';
@@ -37,7 +40,11 @@ export default function EventCard({
     });
     const [attendeesModalVisible, setAttendeesModalVisible] = useState(false);
     const eventDate = new Date(event.event_date);
-    const isPast = eventDate < new Date();
+    const duration = (event as any)?.duration_minutes ?? 120;
+    const endsAt = (event as any)?.ends_at ? new Date((event as any).ends_at) : new Date(eventDate.getTime() + duration * 60_000);
+    const now = new Date();
+    const isPast = endsAt < now;
+    const isHappeningNow = eventDate <= now && endsAt >= now && !isPast;
     const MENU_WIDTH = 160;
     const attendees = (event.attendees || []).slice(0, 4);
     const attendeesCount = event.attendees_count ?? (event.attendees?.length ?? 0);
@@ -52,9 +59,8 @@ export default function EventCard({
 
     const closeMenu = () => setMenu((m) => ({ ...m, visible: false }));
 
-    return (
-        <View className={`${isPast ? 'opacity-60' : ''}`}>
-            <GlassCard className="mx-4 mt-3" contentClassName="p-4" tint={isDark ? 'dark' : 'light'} intensity={28}>
+    const InfoBlock = (
+        <>
                 <View className="flex-row justify-between items-start mb-2">
                     <Text className="font-bold text-lg text-ink flex-1" style={{ color: isDark ? '#E5E7EB' : undefined }}>{event.title}</Text>
                     <View className="flex-row items-center gap-2">
@@ -99,6 +105,19 @@ export default function EventCard({
                         <IconSymbol name="location.fill" size={16} color="#6B7280" />
                         <Text className="text-gray-600 text-sm ml-2" style={{ color: isDark ? 'rgba(226,232,240,0.75)' : undefined }}>{event.location}</Text>
                     </View>
+                )}
+        </>
+    );
+
+    return (
+        <View className={`${isPast ? 'opacity-60' : ''}`}>
+            <GlassCard className="mx-4 mt-3" contentClassName="p-4" tint={isDark ? 'dark' : 'light'} intensity={28}>
+                {onPressEvent ? (
+                    <TouchableOpacity onPress={() => onPressEvent(event)} activeOpacity={1}>
+                        {InfoBlock}
+                    </TouchableOpacity>
+                ) : (
+                    InfoBlock
                 )}
                 {!isPast && (
                     <View className="mt-4 pt-3 border-t border-gray-100">
@@ -166,6 +185,11 @@ export default function EventCard({
                     </TouchableOpacity>
 
                     <View className="flex-row items-center">
+                        {isHappeningNow && (
+                          <View className="bg-red-50 px-2 py-1 rounded-full mr-2 border border-red-200">
+                            <Text className="text-[10px] text-red-700 font-bold">HAPPENING NOW</Text>
+                          </View>
+                        )}
                         <TouchableOpacity onPress={() => onViewProfile(event.created_by)} className="flex-row items-center mr-3">
                             <Text className="text-xs text-gray-400">
                                 {event.creator.full_name || event.creator.username}
@@ -185,7 +209,7 @@ export default function EventCard({
             {isAdmin && menu.visible && (
                 <Modal transparent animationType="fade" onRequestClose={closeMenu}>
                     <Pressable style={styles.backdrop} onPress={closeMenu}>
-                        <Pressable
+                        <View
                             style={[
                                 styles.menu,
                                 {
@@ -194,7 +218,8 @@ export default function EventCard({
                                     width: MENU_WIDTH,
                                 },
                             ]}
-                            onPress={() => {}}
+                            // Ensure taps inside the menu don't trigger the backdrop's onPress.
+                            onStartShouldSetResponder={() => true}
                         >
                             <TouchableOpacity
                                 onPress={() => {
@@ -216,7 +241,7 @@ export default function EventCard({
                                 <IconSymbol name="xmark.circle.fill" size={18} color="#DC2626" />
                                 <Text className="text-red-600 font-medium ml-3">Cancel</Text>
                             </TouchableOpacity>
-                        </Pressable>
+                        </View>
                     </Pressable>
                 </Modal>
             )}

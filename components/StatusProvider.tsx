@@ -1,3 +1,4 @@
+import { KeyboardAwareLayout } from '@/components/KeyboardAwareLayout';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useToast } from '@/components/ui/ToastProvider';
 import { useAuth } from '@/lib/auth';
@@ -16,7 +17,6 @@ import {
     Dimensions,
     Image,
     Keyboard,
-    KeyboardAvoidingView,
     Modal,
     PanResponder,
     Platform,
@@ -40,17 +40,25 @@ const getSeenStatusKey = (userId: string) => `${SEEN_STATUS_IDS_KEY}:${userId}`;
 export type StatusItem = {
     id: string;
     content: string | null;
-    type: 'text' | 'image';
+    type: 'text' | 'image' | 'event';
     caption?: string;
     created_at: string;
     expires_at: string;
+    /** Present when type === 'event' */
+    eventId?: string;
+    title?: string;
+    event_date?: string;
 };
+
+export type MyUserEvent = { id: string; title: string; event_date: string; ends_at: string; created_at: string };
 
 type StatusContextType = {
     openModal: () => void;
     openCamera: (fromSwipe?: boolean, source?: 'proxy' | 'status') => void;
     closeModal: () => void;
     activeStatuses: StatusItem[];
+    /** Upcoming user-created events (club_id IS NULL). Used for "new event" badge and story slides. */
+    myUpcomingUserEvents: MyUserEvent[];
     seenStatusIds: string[];
     currentProfile: { avatar_url: string | null; full_name: string; username: string; city: string | null; is_verified: boolean } | null;
     openMyStatusViewer: (startIndex?: number) => void;
@@ -61,6 +69,7 @@ type StatusContextType = {
       allowDelete?: boolean;
     }) => void;
     fetchStatus: () => void;
+    fetchMyUserEvents: () => void;
     deleteStatus: (id: string) => Promise<void>;
 };
 
@@ -96,6 +105,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
   const [statusText, setStatusText] = useState('');
   const [statusImage, setStatusImage] = useState<string | null>(null);
   const [activeStatuses, setActiveStatuses] = useState<StatusItem[]>([]);
+  const [myUpcomingUserEvents, setMyUpcomingUserEvents] = useState<MyUserEvent[]>([]);
   const statusTabScrollRef = useRef<ScrollView | null>(null);
   
   // Clubs Data
@@ -155,9 +165,10 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       const now = new Date().toISOString();
       const { data, error } = await supabase
         .from('club_events')
-        .select('id, club_id, title, description, event_date, location, created_by, created_at')
+        .select('id, club_id, title, description, event_date, ends_at, location, created_by, created_at, is_cancelled')
         .eq('club_id', clubId)
-        .gte('event_date', now)
+        .eq('is_cancelled', false as any)
+        .gt('ends_at', now)
         .order('event_date', { ascending: true })
         .limit(5);
       
@@ -226,10 +237,36 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
       }
   };
 
+  // Upcoming user-owned events (public.user_events) for Circle "new event" badge and story slides
+  const fetchMyUserEvents = async () => {
+      if (!user) return;
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+          .from('user_events')
+          .select('id, title, event_date, ends_at, created_at')
+          .eq('created_by', user.id)
+          .eq('is_cancelled', false as any)
+          .gt('ends_at', now)
+          .order('event_date', { ascending: true })
+          .limit(10);
+      if (!error && data) {
+          setMyUpcomingUserEvents((data as any[]).map((e: any) => ({
+              id: e.id,
+              title: e.title,
+              event_date: e.event_date,
+              ends_at: e.ends_at ?? e.event_date,
+              created_at: e.created_at ?? e.event_date,
+          })));
+      } else {
+          setMyUpcomingUserEvents([]);
+      }
+  };
+
   useEffect(() => {
       if (user) {
           fetchStatus();
           fetchUserProfile();
+          fetchMyUserEvents();
       }
   }, [user]);
 
@@ -497,15 +534,27 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
 
   const openMyStatusViewer = (startIndex: number = 0) => {
       if (!userProfile) return;
-      const sorted = [...activeStatuses].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-      if (sorted.length === 0) {
-          toast.show('No active status yet.', 'info');
+      const sortedStatuses = [...activeStatuses].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const eventSlides: StatusItem[] = myUpcomingUserEvents.map((e) => ({
+          id: `event-${e.id}`,
+          content: null,
+          type: 'event',
+          created_at: e.created_at,
+          // Treat the event as "active" until it actually ends.
+          expires_at: e.ends_at || e.event_date,
+          eventId: e.id,
+          title: e.title,
+          event_date: e.event_date,
+      }));
+      const combined = [...sortedStatuses, ...eventSlides].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      if (combined.length === 0) {
+          toast.show('No active status or events yet.', 'info');
           return;
       }
-      setPreviewStatuses(sorted);
+      setPreviewStatuses(combined);
       setPreviewProfile(userProfile);
-      setPreviewAllowDelete(true);
-      setPreviewStartIndex(Math.max(0, Math.min(startIndex, sorted.length - 1)));
+      setPreviewAllowDelete(true); // only status items are deletable; event slides are not
+      setPreviewStartIndex(Math.max(0, Math.min(startIndex, combined.length - 1)));
       setPreviewModalVisible(true);
   };
 
@@ -1094,11 +1143,13 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
         openCamera,
         closeModal,
         activeStatuses,
+        myUpcomingUserEvents,
         seenStatusIds,
         currentProfile: userProfile,
         openMyStatusViewer,
         openStatusViewer,
         fetchStatus,
+        fetchMyUserEvents,
         deleteStatus,
       }}
     >
@@ -1111,9 +1162,10 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
         animationType="fade"
       >
           <Animated.View style={{ flex: 1, transform: [{ translateY: modalTranslateY }] }}>
-              <KeyboardAvoidingView 
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                className="flex-1 justify-end bg-black/60"
+              <KeyboardAwareLayout 
+                noDismissWrapper 
+                headerOffset={0} 
+                style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}
               >
                       {/* Backdrop: tap to dismiss keyboard without stealing scroll gestures inside the sheet */}
                       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
@@ -1285,7 +1337,7 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
                             </View>
                         </View>
                       </View>
-              </KeyboardAvoidingView>
+              </KeyboardAwareLayout>
           </Animated.View>
       </Modal>
       
@@ -1311,6 +1363,10 @@ export function StatusProvider({ children }: { children: React.ReactNode }) {
         allowDelete={previewAllowDelete}
         onDelete={previewAllowDelete ? deleteStatus : undefined}
         onViewed={(statusId) => markStatusSeen(statusId)}
+        onViewEvent={(eventId) => {
+          closeViewer();
+          router.push(`/events/${eventId}` as any);
+        }}
       />
     </StatusContext.Provider>
   );
@@ -1349,6 +1405,7 @@ function StatusPreviewModal({
     allowDelete = false,
     onDelete,
     onViewed,
+    onViewEvent,
 }: { 
     visible: boolean; 
     statuses: StatusItem[]; 
@@ -1358,6 +1415,7 @@ function StatusPreviewModal({
     allowDelete?: boolean;
     onDelete?: (id: string) => Promise<void>;
     onViewed?: (id: string) => void;
+    onViewEvent?: (eventId: string) => void;
 }) {
     const { width, height } = useWindowDimensions();
     const insets = useSafeAreaInsets();
@@ -1496,11 +1554,37 @@ function StatusPreviewModal({
                     <View style={{ width, height }}>
                         {currentStatus.type === 'image' ? (
                             <PreviewFeedImage path={currentStatus.content || ''} containerHeight={height} containerWidth={width} />
+                        ) : currentStatus.type === 'event' ? (
+                            <View className="w-full h-full items-center justify-center bg-ink p-8">
+                                <View className="bg-white/10 rounded-2xl p-6 border border-white/20 max-w-sm w-full">
+                                    <View className="items-center mb-4">
+                                        <IconSymbol name="calendar.badge.plus" size={48} color="#E5E7EB" />
+                                        <Text className="text-white/90 text-xs font-semibold uppercase tracking-wide mt-2">New event</Text>
+                                    </View>
+                                    <Text className="text-white text-xl font-bold text-center mb-2" numberOfLines={2}>
+                                        {currentStatus.title || 'Event'}
+                                    </Text>
+                                    {currentStatus.event_date && (
+                                        <Text className="text-gray-300 text-sm text-center mb-4">
+                                            {new Date(currentStatus.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                        </Text>
+                                    )}
+                                    {currentStatus.eventId && onViewEvent && (
+                                        <TouchableOpacity
+                                            onPress={(e) => { e.stopPropagation(); onViewEvent(currentStatus.eventId!); }}
+                                            className="bg-white py-3 rounded-xl items-center mt-2"
+                                            activeOpacity={0.9}
+                                        >
+                                            <Text className="text-black font-bold">View event</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            </View>
                         ) : (
                             <View className="w-full h-full items-center justify-center bg-ink p-8">
                                 {currentStatus.content && currentStatus.content.trim() ? (
                                     <Text className="text-white text-2xl font-bold italic text-center leading-9">
-                                        “{currentStatus.content}”
+                                        "{currentStatus.content}"
                                     </Text>
                                 ) : (
                                     <Text className="text-white text-2xl font-bold italic text-center leading-9">
@@ -1559,7 +1643,7 @@ function StatusPreviewModal({
                     ) : null}
                     <View className="flex-row items-center justify-between">
                         <Text className="text-gray-300 text-xs italic">Tap left/right • Swipe down to close</Text>
-                        {allowDelete && onDelete && (
+                        {allowDelete && onDelete && currentStatus.type !== 'event' && (
                             <TouchableOpacity
                                 onPress={async () => {
                                     const deletingIndex = activeIndex;
